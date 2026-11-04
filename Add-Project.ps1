@@ -14,7 +14,14 @@ param(
 
     [switch]$ValidateOnly,
 
-    [string]$Ref
+    [string]$Ref,
+
+    # Real consumer checkout root for the git branch lookup, the gh workflow
+    # dispatch, and the .github/scripts/* validators -- those stay local-only
+    # to each consumer (never published here), so they are not siblings of
+    # this script when it is fetched from a pinned checkout. Defaults to this
+    # script's own location so direct in-repo/local usage is unaffected.
+    [string]$WorkspaceRoot = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,8 +72,8 @@ $null = & $python.Source -c "import sys, tomllib" 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Python 3.11 or later is required to validate the VIPM TOML file."
 }
-$runtimeValidator = Join-Path $PSScriptRoot ".github/scripts/project_runtime.py"
-$registrationValidator = Join-Path $PSScriptRoot ".github/scripts/validate-project-registration.py"
+$runtimeValidator = Join-Path $WorkspaceRoot ".github/scripts/project_runtime.py"
+$registrationValidator = Join-Path $WorkspaceRoot ".github/scripts/validate-project-registration.py"
 $credentialErrors = $pipelineConfig | & $python.Source $registrationValidator --validate-credentials 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Pipeline configuration contains an invalid credential reference: $($credentialErrors -join ' ')"
@@ -94,7 +101,7 @@ if ($ValidateOnly) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Ref)) {
-    $Ref = & git -C $PSScriptRoot branch --show-current
+    $Ref = & git -C $WorkspaceRoot branch --show-current
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Ref)) {
         throw "Could not determine the current Git branch. Specify -Ref explicitly."
     }
@@ -106,7 +113,7 @@ $payload = @{
     vipm_toml       = $vipmToml
 } | ConvertTo-Json -Compress
 
-Push-Location $PSScriptRoot
+Push-Location $WorkspaceRoot
 try {
     $payload | & gh workflow run add-project.yml --ref $Ref --json
     if ($LASTEXITCODE -ne 0) {
