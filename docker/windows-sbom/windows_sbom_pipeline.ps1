@@ -17,6 +17,11 @@
       5. Publish the enriched SBOM to Dependency-Track, export the server-side
          findings, and apply the Critical/High security gate.
 
+    C:\engine, when mounted, is this generic engine's own root
+    (Build-Sbom.ps1, pipeline-config.schema.json, vipm-exit-codes.json);
+    falls back to C:\workspace for a standalone run with no separate
+    engine mount.
+
     Environment variables (paths are relative to C:\workspace, the mounted repo):
       PIPELINE_CONFIG          Pipeline configuration JSON file (or PROJECTS_OVERRIDE).
       PROJECTS_OVERRIDE        Pipeline configuration JSON text; overrides PIPELINE_CONFIG.
@@ -50,7 +55,13 @@
 $ErrorActionPreference = "Stop"
 
 $Workspace = "C:\workspace"
-. ([System.IO.Path]::Combine($Workspace, "Build-Sbom.ps1"))
+# C:\engine is a second, separate mount of the generic engine's own root
+# (see Run-WindowsSbom.ps1 -WorkspaceRoot) -- it holds Build-Sbom.ps1,
+# pipeline-config.schema.json and vipm-exit-codes.json even when $Workspace
+# is a different, real consumer repository. Falls back to $Workspace for a
+# standalone container run with no separate engine mount.
+$EngineRoot = if (Test-Path -LiteralPath "C:\engine") { "C:\engine" } else { $Workspace }
+. ([System.IO.Path]::Combine($EngineRoot, "Build-Sbom.ps1"))
 . (Join-Path $PSScriptRoot "Initialize-VipmContainer.ps1")
 $WorkRoot = "C:\sbom-work"
 # Groups match the vipm.lock "manager" values.
@@ -117,7 +128,7 @@ function Invoke-Native {
 }
 
 $script:VipmExitCodes = @{}
-$vipmExitCodesPath = [System.IO.Path]::Combine($Workspace, "vipm-exit-codes.json")
+$vipmExitCodesPath = [System.IO.Path]::Combine($EngineRoot, "vipm-exit-codes.json")
 if (Test-Path -LiteralPath $vipmExitCodesPath -PathType Leaf) {
     $script:VipmExitCodes = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($vipmExitCodesPath)) -AsHashtable
 }
@@ -725,7 +736,7 @@ function Get-PipelineConfig {
     if ($config -isnot [System.Collections.IDictionary] -or -not $config["projects"]) {
         throw [PipelineError]::new("Configuration must be an object with a non-empty 'projects' array.")
     }
-    $schema = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($Workspace, "pipeline-config.schema.json"))
+    $schema = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($EngineRoot, "pipeline-config.schema.json"))
     if (-not (Test-Json -Json $text -Schema $schema)) {
         throw [PipelineError]::new("Pipeline configuration does not match pipeline-config.schema.json.")
     }

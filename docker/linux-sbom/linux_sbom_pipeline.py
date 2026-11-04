@@ -15,6 +15,9 @@ Run-Pipeline.ps1 for Linux:
   5. Publish the enriched SBOM to Dependency-Track, export the server-side
      findings, and apply the Critical/High security gate.
 
+/engine, when mounted, is this generic engine's own root (vipm-exit-codes.json);
+falls back to /workspace for a standalone run with no separate engine mount.
+
 Environment variables (paths are relative to /workspace, the mounted repo):
   PIPELINE_CONFIG          Pipeline configuration JSON file (or PROJECTS_OVERRIDE).
   PROJECTS_OVERRIDE        Pipeline configuration JSON text; overrides PIPELINE_CONFIG.
@@ -67,6 +70,11 @@ import urllib.request
 import uuid
 
 WORKSPACE = "/workspace"
+# /engine is a second, separate mount of the generic engine's own root (see
+# Run-LinuxSbom.ps1 -WorkspaceRoot) -- it holds vipm-exit-codes.json even
+# when WORKSPACE is a different, real consumer repository. Falls back to
+# WORKSPACE for a standalone container run with no separate engine mount.
+ENGINE_ROOT = "/engine" if os.path.isdir("/engine") else WORKSPACE
 WORK_ROOT = "/tmp/sbom-work"
 # Groups match the vipm.lock "manager" values; NI software installed by apt is "ni-deb".
 NIPM_GROUP = "nipm"
@@ -205,7 +213,7 @@ def run(args, cwd=None, redact=None, capture=False):
 
 
 def load_vipm_exit_codes():
-    path = os.path.join(WORKSPACE, "vipm-exit-codes.json")
+    path = os.path.join(ENGINE_ROOT, "vipm-exit-codes.json")
     try:
         with open(path, encoding="utf-8") as handle:
             return {key: value for key, value in json.load(handle).items() if key.isdigit()}

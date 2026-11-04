@@ -57,12 +57,15 @@ param(
     [switch]$ManifestOnly,
     [switch]$SkipDependencyTrack,
     # Root used to resolve project-specific paths (-ConfigName/-VipmTomlPath/
-    # -EnvFile/-OutputDir, and the container's workspace mount) -- distinct
+    # -EnvFile/-OutputDir, and the container's /workspace mount) -- distinct
     # from $PSScriptRoot, which stays the location of this generic engine
-    # script itself (pipeline-config.schema.json, docker/linux-sbom/).
-    # Defaults to $PSScriptRoot so existing invocations are unaffected; a
-    # consumer invoking this script from a pinned external checkout (see
-    # docs/projectbuddy-consumption.md) must pass the real repo root here.
+    # script itself (pipeline-config.schema.json, docker/linux-sbom/) and is
+    # separately mounted at /engine so the in-container pipeline can read
+    # its own engine-root files even when $WorkspaceRoot is a different,
+    # real consumer repository. Defaults to $PSScriptRoot so existing
+    # invocations are unaffected; a consumer invoking this script from a
+    # pinned external checkout (see docs/projectbuddy-consumption.md) must
+    # pass the real repo root here.
     [string]$WorkspaceRoot = $PSScriptRoot
 )
 
@@ -233,13 +236,16 @@ docker build --no-cache --build-arg "LABVIEW_IMAGE=$labviewImageDigest" -t $Imag
 if ($LASTEXITCODE -ne 0) { throw "docker build failed with exit code $LASTEXITCODE." }
 
 $workspaceArgs = @("-v", "${WorkspaceRoot}:/workspace")
+$engineArgs = @("-v", "${PSScriptRoot}:/engine")
 if ($IsLinux) {
     $workspacePath = $WorkspaceRoot.Replace('"', '""')
     $workspaceArgs = @("--mount", "type=bind,`"source=$workspacePath`",target=/workspace,bind-recursive=disabled")
+    $enginePath = $PSScriptRoot.Replace('"', '""')
+    $engineArgs = @("--mount", "type=bind,`"source=$enginePath`",target=/engine,bind-recursive=disabled")
 }
 $runArgs = @(
     "run", "--rm"
-) + $workspaceArgs + @(
+) + $workspaceArgs + $engineArgs + @(
     "-v", "sandbox-sbom-grype-db:/root/.cache/grype",
     "-e", "OUTPUT_DIR=$outputRelative",
     "-e", "LABVIEW_IMAGE=$LabVIEWImage",

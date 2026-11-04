@@ -63,11 +63,14 @@ param(
     [switch]$ManifestOnly,
     [switch]$SkipDependencyTrack,
     # Root used to resolve project-specific paths (-ConfigName/-VipmTomlPath/
-    # -EnvFile/-OutputDir, and the container's workspace mount) -- distinct
+    # -EnvFile/-OutputDir, and the container's C:\workspace mount) -- distinct
     # from $PSScriptRoot, which stays the location of this generic engine
-    # script itself (pipeline-config.schema.json, docker/windows-sbom/).
-    # Defaults to $PSScriptRoot so existing invocations are unaffected; a
-    # consumer invoking this script from a pinned external checkout (see
+    # script itself (pipeline-config.schema.json, docker/windows-sbom/) and
+    # is separately mounted at C:\engine so the in-container pipeline can
+    # dot-source Build-Sbom.ps1 and read its own engine-root files even when
+    # $WorkspaceRoot is a different, real consumer repository. Defaults to
+    # $PSScriptRoot so existing invocations are unaffected; a consumer
+    # invoking this script from a pinned external checkout (see
     # docs/projectbuddy-consumption.md) must pass the real repo root here.
     [string]$WorkspaceRoot = $PSScriptRoot
 )
@@ -226,6 +229,7 @@ $runArgs = @(
     "run", "--rm"
 ) + $isolationArgs + @(
     "-v", "${WorkspaceRoot}:C:\workspace",
+    "-v", "${PSScriptRoot}:C:\engine",
     "-v", "sandbox-sbom-grype-db-windows:C:\grype-cache",
     "-e", "OUTPUT_DIR=$outputRelative",
     "-e", "LABVIEW_IMAGE=$LabVIEWImage",

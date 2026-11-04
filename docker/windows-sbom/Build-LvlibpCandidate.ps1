@@ -3,6 +3,12 @@ param()
 
 $ErrorActionPreference = "Stop"
 $workspaceRoot = "C:\workspace"
+# C:\engine is a second, separate mount of the generic engine's own root
+# (the same convention windows_sbom_pipeline.ps1 uses) -- it holds
+# Build-Sbom.ps1 even when $workspaceRoot is a different, real consumer
+# repository. Falls back to $workspaceRoot for a standalone container run
+# with no separate engine mount.
+$engineRoot = if (Test-Path -LiteralPath "C:\engine") { "C:\engine" } else { $workspaceRoot }
 $dependenciesRoot = Join-Path $workspaceRoot "dependencies"
 $manifestPath = Join-Path $dependenciesRoot "vipm.toml"
 $projectPath = Join-Path $dependenciesRoot "src\Dependencies.lvproj"
@@ -13,7 +19,7 @@ $sbomPath = Join-Path $outputDirectory "dependencies.lvlibp.cdx.sbom.json"
 $buildLogPath = Join-Path $outputDirectory "dependencies-ppl-build.log"
 $recordPath = Join-Path $outputDirectory "lvlibp-build-record.json"
 $buildSpecName = "lba-plugins-dependencies-ppl"
-. (Join-Path $workspaceRoot "Build-Sbom.ps1")
+. (Join-Path $engineRoot "Build-Sbom.ps1")
 
 function Write-PipelineLog {
     param([Parameter(Mandatory = $true)][string]$Message, [string]$Level = "INFO")
