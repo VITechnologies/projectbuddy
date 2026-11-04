@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.6
+
+`Run-WindowsSbom.ps1`/`Run-LinuxSbom.ps1` now mount their own location
+(`$PSScriptRoot`) as a second, separate `C:\engine`/`/engine` container
+mount, alongside the existing consumer-repository workspace mount.
+`windows_sbom_pipeline.ps1`, `Build-LvlibpCandidate.ps1`, and
+`linux_sbom_pipeline.py` previously resolved `Build-Sbom.ps1`,
+`pipeline-config.schema.json`, and `vipm-exit-codes.json` relative to the
+single workspace mount, which used to also hold the consumer's own copy of
+these files. Once a consumer stops keeping that local copy (consuming this
+repository via a pinned checkout instead, per
+`docs/projectbuddy-consumption.md`), those reads silently failed inside the
+container. The container-side scripts now resolve engine-root files from
+the new engine mount, falling back to the workspace mount when no separate
+engine mount is present. Mirrors the `$PSScriptRoot`/`-WorkspaceRoot` split
+already used by `Run-Pipeline.ps1`, `Add-Project.ps1`, etc. for the native
+(non-container) pipeline.
+
 ## v0.3.5
 
 `Add-Project.ps1` now accepts `-WorkspaceRoot` (defaulting to `$PSScriptRoot`,
