@@ -537,8 +537,8 @@ function Get-VipmDebugLogState {
 
 function Get-VipmFailureDiagnostic {
     param(
-        [Parameter(Mandatory)]
         [string]$DebugLogPath,
+        [string]$Signature = "library_add_package_no_progress_60s",
         [ValidateRange(1, 15)]
         [int]$TimeoutSeconds = 5,
         [scriptblock]$ProcessQuery
@@ -595,7 +595,7 @@ function Get-VipmFailureDiagnostic {
 
     return [ordered]@{
         SchemaVersion = 1
-        Signature = "library_add_package_no_progress_60s"
+        Signature = $Signature
         CapturedAtUtc = [DateTime]::UtcNow.ToString("o")
         ProcessCapture = [ordered]@{
             Status = $processCapture.Status
@@ -603,7 +603,7 @@ function Get-VipmFailureDiagnostic {
             ErrorType = $processCapture.ErrorType
             Processes = $safeProcesses
         }
-        VipmDebugLog = Get-VipmDebugLogState -Path $DebugLogPath
+        VipmDebugLog = if ($DebugLogPath) { Get-VipmDebugLogState -Path $DebugLogPath } else { [ordered]@{ Status = "not-applicable" } }
     }
 }
 
@@ -707,7 +707,24 @@ function Invoke-PackageBuild {
     $lvArgs = @("--labview-version", $LabviewVersion, "--labview-bitness", $LabviewBitness)
     if ($Plan.Count -gt 0) {
         Write-PipelineLog -Message "Installing manifest dependencies before building VI packages..." -Level INFO
-        Invoke-Vipm -Arguments (@("install", "-y") + $lvArgs) -WorkingDirectory $ProjectDir -ShowProgress
+        try {
+            Invoke-Vipm -Arguments (@("install", "-y") + $lvArgs) -WorkingDirectory $ProjectDir -ShowProgress
+        } catch {
+            if ($_.Exception.Message -match '(?is)package_set_install.*made no progress for \d+(?:\.\d+)?s') {
+                # A hung LabVIEW/VIPM Desktop cannot be recovered by retrying here (see
+                # issue #244): capture bounded, redacted evidence for this exact failure
+                # and still fail fast, rather than masking it with a retry.
+                $diagnosticPath = [System.IO.Path]::Combine($archiveDir, "manifest-dependency-failure-diagnostics.json")
+                try {
+                    $diagnostic = Get-VipmFailureDiagnostic -Signature "package_set_install_no_progress"
+                    $diagnostic | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $diagnosticPath -Encoding utf8
+                    Write-PipelineLog -Message "Captured bounded failure diagnostics for the manifest dependency install stall: '$diagnosticPath'." -Level WARN
+                } catch {
+                    Write-PipelineLog -Message "Manifest dependency install stalled, but bounded failure diagnostics could not be captured: $($_.Exception.Message)" -Level WARN
+                }
+            }
+            throw
+        }
         $dependencies = ConvertFrom-Json -InputObject (Invoke-Vipm -Arguments (@("list", "--installed") + $lvArgs) -WorkingDirectory $ProjectDir -Json)
         if ($null -eq $dependencies.dependencies) {
             throw "VIPM returned no dependency inventory after installing manifest dependencies."

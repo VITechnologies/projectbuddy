@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.4
+
+Captures bounded, redacted failure diagnostics (process/window snapshot --
+the same mechanism already proven for the per-package `library_add_package`
+stall) when the manifest dependency install (`vipm install -y`) fails with
+the `package_set_install` stall signature. Written to
+`packages/manifest-dependency-failure-diagnostics.json`, then the original
+error is re-thrown unchanged -- this install is still never retried (v0.3.3
+established that retrying here cannot recover a hung LabVIEW and risks
+masking a different, unrecoverable hang as a transient stall). Diagnostic
+capture is best-effort: a capture failure logs a warning but never masks
+the original stall error. `VITechnologies/SandboxSBOMReporting`'s issue
+#122 (bounded root-cause evidence capture) already covered the per-package
+case; this closes the remaining gap the #240/#244 investigation found --
+diagnosing that stall took a multi-hour interactive investigation because
+this exact path had zero automated evidence.
+
 ## v0.3.3
 
 Reverts v0.3.1/v0.3.2's `Invoke-ManifestDependencyInstall` /
