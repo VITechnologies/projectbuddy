@@ -70,6 +70,15 @@ def get_vbox_log_path(vm_name: str) -> Path:
     return Path(match.group(1)).parent / "Logs" / "VBox.log"
 
 
+def get_vm_state(vm_name: str) -> str:
+    out = subprocess.run(
+        ["VBoxManage", "showvminfo", vm_name, "--machinereadable"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    match = re.search(r'^VMState="(.*)"$', out, re.MULTILINE)
+    return match.group(1) if match else "unknown"
+
+
 def wait_for_marker_count(log_path: Path, marker: str, min_count: int, timeout: float, poll_interval: float = 10.0) -> bool:
     """Block until `marker` appears at least `min_count` times in `log_path`,
     or `timeout` seconds elapse. Returns whether the count was reached."""
@@ -128,6 +137,32 @@ def close_vnc(vm_name: str, script_dir: Path, inventory: "Path | None" = None) -
     if inventory is not None:
         cmd += ["--inventory", str(inventory)]
     subprocess.run(cmd, capture_output=True, text=True)
+
+
+def open_vnc_with_abort_recovery(
+    vm_name: str, script_dir: Path, vnc_port: "int | None", inventory: "Path | None", recovery_settle_seconds: float = 120.0
+) -> tuple[str, int, str]:
+    """Wrap open_vnc() with one bounded recovery attempt for a known,
+    confirmed-live (2026-11-04, issue #226) intermittent VirtualBox VRDE/
+    libvncserver segfault: enabling VRDE can abort the whole VM process
+    outright (VMState=aborted), not just fail the VNC session. If that
+    happens, restart the VM and retry once -- the guest OS itself was
+    otherwise healthy (this isn't a guest-side failure), so a fresh
+    power-on plus a fixed settle buffer is enough to reach a connectable
+    desktop again, without re-running the full OOBE/restart wait."""
+    try:
+        return open_vnc(vm_name, script_dir, vnc_port, inventory)
+    except subprocess.CalledProcessError as exc:
+        state = get_vm_state(vm_name)
+        if state != "aborted":
+            raise RuntimeError(
+                f"vnc-console.sh open failed (rc={exc.returncode}): {exc.stderr.strip() if exc.stderr else exc}"
+            ) from exc
+        log(f"WARNING: {vm_name} aborted while opening the VNC console (known issue #226) -- "
+            f"restarting and retrying once after a {recovery_settle_seconds:.0f}s settle buffer.")
+        subprocess.run(["VBoxManage", "startvm", vm_name, "--type", "headless"], capture_output=True, text=True, check=True)
+        time.sleep(recovery_settle_seconds)
+        return open_vnc(vm_name, script_dir, vnc_port, inventory)
 
 
 def vncdo(host: str, port: int, password: str, *args: str, timeout: float = 30.0) -> str:
@@ -272,7 +307,7 @@ def main() -> int:
     try:
         wait_for_guest_stability(args.vm_name, args.oobe_timeout, args.restart_timeout, args.settle_seconds)
 
-        host, port, password = open_vnc(args.vm_name, script_dir, args.vnc_port, args.inventory)
+        host, port, password = open_vnc_with_abort_recovery(args.vm_name, script_dir, args.vnc_port, args.inventory)
         log(f"VNC console open at {host}:{port}")
         try:
             wake_and_verify_desktop(host, port, password, args.wake_timeout, args.wake_poll_interval)
@@ -287,7 +322,15 @@ def main() -> int:
         print("FAILED: WinRM did not become reachable within the timeout after launching the installer.", file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 -- top-level CLI boundary, want a clean message not a traceback
-        print(f"FAILED: {exc}", file=sys.stderr)
+        if isinstance(exc, subprocess.CalledProcessError):
+            # str(exc) alone is just "Command '...' returned non-zero exit
+            # status N." -- the actually-useful diagnostic is in
+            # stderr/stdout, which would otherwise be silently lost here
+            # (issue #226).
+            detail = (exc.stderr or exc.stdout or "").strip()
+            print(f"FAILED: {exc}" + (f"\n{detail}" if detail else ""), file=sys.stderr)
+        else:
+            print(f"FAILED: {exc}", file=sys.stderr)
         return 1
 
 
