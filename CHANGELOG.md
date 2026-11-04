@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.5
+
+`Add-Project.ps1` now accepts `-WorkspaceRoot` (defaulting to `$PSScriptRoot`,
+so direct in-repo/local usage is unaffected), used to resolve
+`.github/scripts/project_runtime.py`, `.github/scripts/validate-project-registration.py`,
+its `git branch --show-current` lookup, and its `gh workflow run` dispatch
+working directory. Those `.github/scripts/*` validators stay local-only to
+each consumer (never published here), so this silently broke the first time
+`Add-Project.ps1` was actually invoked from a pinned checkout instead of a
+consumer's own repository root. Mirrors the same `-WorkspaceRoot` pattern
+already applied to the other entry scripts in v0.3.0, for the identical
+class of problem.
+
 ## v0.3.4
 
 Captures bounded, redacted failure diagnostics (process/window snapshot --
