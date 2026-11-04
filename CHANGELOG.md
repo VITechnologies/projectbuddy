@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.2
+
+`Invoke-ManifestDependencyInstall`'s `package_set_install` stall retry
+(v0.3.1) now stops the stalled VIPM Desktop process (forcibly, waiting for
+exit) before retrying, mirroring the Docker container pipeline's existing
+`Stop-Process -Force` + `WaitForExit` restart pattern. Live validation of
+v0.3.1 alone showed the retry fired correctly but then hung for 10 minutes
+on VIPM's own "wait for VIPM startup" readiness check: the vipm CLI could
+not initialize a fresh Desktop while the first attempt's already-stalled
+instance was still resident and holding its resources.
+
 ## v0.3.1
 
 `Build-Sbom.ps1`'s manifest dependency install (`vipm install -y`, resolving
