@@ -62,6 +62,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 CONTAINER_WORKSPACE="/workspace"
+# Root used for the host-side output directory and the container's workspace
+# mount -- distinct from SCRIPT_DIR, which stays this generic engine script's
+# own location (where fetch_examples() fetches NI's example VIs by default).
+# Defaults to SCRIPT_DIR so existing invocations are unaffected; a consumer
+# invoking this script from a pinned external checkout (see
+# docs/projectbuddy-consumption.md) must set this to the real repo root, so
+# generated reports land where the calling workflow expects to upload them.
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$SCRIPT_DIR}"
 
 LABVIEW_IMAGE="${LABVIEW_IMAGE:-nationalinstruments/labview:2026q3-linux}"
 LV_YEAR="${LV_YEAR:-2026}"
@@ -166,13 +174,13 @@ run_on_host() {
     [[ -d "${SCRIPT_DIR}/${LABVIEW_TARGET_DIR}" ]] || \
         fail "Target directory '${LABVIEW_TARGET_DIR}' does not exist."
 
-    mkdir -p "${SCRIPT_DIR}/${LABVIEW_OUTPUT_DIR}"
+    mkdir -p "${WORKSPACE_ROOT}/${LABVIEW_OUTPUT_DIR}"
 
     log "INFO" "Pulling ${LABVIEW_IMAGE}..."
     docker pull "$LABVIEW_IMAGE"
 
     docker run --rm \
-        -v "${SCRIPT_DIR}:${CONTAINER_WORKSPACE}" \
+        -v "${WORKSPACE_ROOT}:${CONTAINER_WORKSPACE}" \
         -w "$CONTAINER_WORKSPACE" \
         -e LV_YEAR="$LV_YEAR" \
         -e LABVIEW_PATH="$LABVIEW_PATH" \

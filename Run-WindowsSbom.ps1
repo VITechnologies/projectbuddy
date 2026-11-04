@@ -61,7 +61,15 @@ param(
     [string]$Memory = "8g",
     [switch]$SkipScan,
     [switch]$ManifestOnly,
-    [switch]$SkipDependencyTrack
+    [switch]$SkipDependencyTrack,
+    # Root used to resolve project-specific paths (-ConfigName/-VipmTomlPath/
+    # -EnvFile/-OutputDir, and the container's workspace mount) -- distinct
+    # from $PSScriptRoot, which stays the location of this generic engine
+    # script itself (pipeline-config.schema.json, docker/windows-sbom/).
+    # Defaults to $PSScriptRoot so existing invocations are unaffected; a
+    # consumer invoking this script from a pinned external checkout (see
+    # docs/projectbuddy-consumption.md) must pass the real repo root here.
+    [string]$WorkspaceRoot = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,8 +81,8 @@ function Write-Step {
 
 function ConvertTo-RepoRelativePath {
     param([string]$Path, [string]$Name)
-    $full = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, $Path))
-    $root = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $full = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($WorkspaceRoot, $Path))
+    $root = [System.IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
         throw "$Name must be inside the repository: '$Path'."
     }
@@ -103,7 +111,7 @@ if ([string]::IsNullOrWhiteSpace($configText)) {
         throw "Set the process-level PROJECTS_OVERRIDE variable or pass -ConfigName with a local configuration file."
     }
     $configRelative = ConvertTo-RepoRelativePath -Path $ConfigName -Name "ConfigName"
-    $configText = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($PSScriptRoot, $configRelative))
+    $configText = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($WorkspaceRoot, $configRelative))
     $configArgs += @("-e", "PIPELINE_CONFIG=$configRelative")
 } else {
     $configRelative = "PROJECTS_OVERRIDE"
@@ -117,7 +125,7 @@ if ([string]::IsNullOrWhiteSpace($env:VIPM_TOML_CONFIGS)) {
         throw "Set the process-level VIPM_TOML_CONFIGS variable or pass -VipmTomlPath with a local VIPM manifest file."
     }
     $tomlRelative = ConvertTo-RepoRelativePath -Path $VipmTomlPath -Name "VipmTomlPath"
-    if (-not (Test-Path -LiteralPath ([System.IO.Path]::Combine($PSScriptRoot, $tomlRelative)) -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath ([System.IO.Path]::Combine($WorkspaceRoot, $tomlRelative)) -PathType Leaf)) {
         throw "VIPM manifest '$tomlRelative' does not exist."
     }
     $configArgs += @("-e", "VIPM_TOML=$tomlRelative")
@@ -126,7 +134,7 @@ if ([string]::IsNullOrWhiteSpace($env:VIPM_TOML_CONFIGS)) {
 }
 
 $credentialArgs = @()
-$envFilePath = [System.IO.Path]::Combine($PSScriptRoot, $EnvFile)
+$envFilePath = [System.IO.Path]::Combine($WorkspaceRoot, $EnvFile)
 $envFileNames = @()
 if (Test-Path -LiteralPath $envFilePath -PathType Leaf) {
     Write-Step "Using settings from '$EnvFile'."
@@ -217,7 +225,7 @@ if ($LASTEXITCODE -ne 0) { throw "docker build failed with exit code $LASTEXITCO
 $runArgs = @(
     "run", "--rm"
 ) + $isolationArgs + @(
-    "-v", "${PSScriptRoot}:C:\workspace",
+    "-v", "${WorkspaceRoot}:C:\workspace",
     "-v", "sandbox-sbom-grype-db-windows:C:\grype-cache",
     "-e", "OUTPUT_DIR=$outputRelative",
     "-e", "LABVIEW_IMAGE=$LabVIEWImage",

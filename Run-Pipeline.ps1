@@ -7,7 +7,17 @@
 
 param(
     [string]$ConfigName = "",
-    [switch]$DebugMode
+    [switch]$DebugMode,
+    # Root used to resolve project-specific paths (patches, LVLIBP release
+    # dependency stage paths, the working/output directories) -- distinct
+    # from $PSScriptRoot, which stays the location of this generic engine
+    # script itself (Build-Sbom.ps1/internal/pipeline-config.schema.json).
+    # Defaults to $PSScriptRoot so existing invocations are unaffected;
+    # a consumer invoking this script from a pinned external checkout
+    # (see docs/projectbuddy-consumption.md) must pass the real repo root
+    # here, since project-specific files like config/patches/*.patch only
+    # exist there, never in the generic engine checkout.
+    [string]$WorkspaceRoot = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,7 +96,7 @@ try {
         Write-PipelineLog -Message "Using PROJECTS_OVERRIDE; local '$ConfigName' will not be read." -Level INFO
         $configText = $env:PROJECTS_OVERRIDE
     } elseif (-not [string]::IsNullOrWhiteSpace($ConfigName)) {
-        $configSource = [System.IO.Path]::Combine($PSScriptRoot, $ConfigName)
+        $configSource = [System.IO.Path]::Combine($WorkspaceRoot, $ConfigName)
         Write-PipelineLog -Message "Using local configuration '$configSource'..." -Level INFO
         $configText = [System.IO.File]::ReadAllText($configSource)
     } else {
@@ -214,7 +224,7 @@ if ($failures -gt 0) {
     exit 1
 }
 
-$configDir = [string]$PSScriptRoot
+$configDir = [string]$WorkspaceRoot
 
 function Resolve-Value {
     param([string]$Val)
@@ -655,7 +665,7 @@ foreach ($proj in $config.projects) {
 
         $appliedPatches = @()
         if ($patchPaths.Count -gt 0) {
-            $appliedPatches = @(Invoke-CheckoutPatch -ProjectDir $projectWorkingDir -Vcs $vcsType -PatchPaths $patchPaths -BaseDir $PSScriptRoot)
+            $appliedPatches = @(Invoke-CheckoutPatch -ProjectDir $projectWorkingDir -Vcs $vcsType -PatchPaths $patchPaths -BaseDir $WorkspaceRoot)
         }
         $runRecord.source = [ordered]@{ vcs = $vcsType; url = $repoUrl; revision = $revision }
         $runRecord.patches = @($appliedPatches | ForEach-Object { [ordered]@{ path = $_.Path; sha256 = $_.Sha256 } })
@@ -672,7 +682,7 @@ foreach ($proj in $config.projects) {
         $lvlibpDependencies = @($proj.build.lvlibpDependencies | Where-Object { $null -ne $_ })
         if ($lvlibpDependencies.Count -gt 0) {
             Set-PipelineStage -Record $runRecord -Name "releaseDependencies" -Status running
-            $runRecord.releaseDependencies = @(Invoke-LvlibpReleaseDependencyStage -Dependencies $lvlibpDependencies -WorkspaceRoot $PSScriptRoot)
+            $runRecord.releaseDependencies = @(Invoke-LvlibpReleaseDependencyStage -Dependencies $lvlibpDependencies -WorkspaceRoot $WorkspaceRoot)
             Set-PipelineStage -Record $runRecord -Name "releaseDependencies" -Status completed
         } else {
             Set-PipelineStage -Record $runRecord -Name "releaseDependencies" -Status skipped -Reason "No immutable LVLIBP dependencies are configured."
