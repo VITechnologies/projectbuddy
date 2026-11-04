@@ -1,0 +1,127 @@
+name: VM Fleet Status
+
+# Active verification gate, not a passive status mirror: each matrix job
+# independently re-derives ground truth for one VM (actual GitHub Actions
+# runner registration + actual VirtualBox power state) rather than just
+# echoing runner-inventory.json's own claimed status. This exists because a
+# locally-logged "success" does not guarantee the real-world outcome matches
+# -- confirmed live 2026-11-02 that a register-runner run reported "success"
+# while the runner actually registered under the WRONG name
+# (sergio-ThinkPad-P16-Gen-3 instead of the expected name), a discrepancy
+# only caught by directly querying `gh api .../actions/runners`, not by
+# trusting the workflow's own conclusion.
+#
+# Runs on the self-hosted vm-provisioner runner (not ubuntu-latest): only
+# this host has VirtualBox state to query. The single self-hosted runner
+# serializes these jobs automatically, same as the provisioning workflow;
+# each check is a fast read-only query (seconds), so this does not
+# meaningfully contend with real provisioning work.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - vm/windows-labview/runner-inventory.json
+  schedule:
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-fleet-status
+  cancel-in-progress: false
+
+jobs:
+  generate-matrix:
+    runs-on: ${{ fromJSON('["self-hosted","vm-provisioner","linux"]') }}
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build VM matrix from runner-inventory.json
+        id: set-matrix
+        run: |
+          set -euo pipefail
+          matrix="$(jq -c '{include: [.vms[] | {
+            vmName: .vmName,
+            targetRepo: .targetRepo,
+            runnerName: .runnerName,
+            status: .status,
+            statusChangedAt: (.statusChangedAt // "unknown")
+          }]}' vm/windows-labview/runner-inventory.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  check-vm:
+    needs: generate-matrix
+    runs-on: ${{ fromJSON('["self-hosted","vm-provisioner","linux"]') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.generate-matrix.outputs.matrix) }}
+    steps:
+      - name: Verify ${{ matrix.vmName }}
+        env:
+          VM_NAME: ${{ matrix.vmName }}
+          TARGET_REPO: ${{ matrix.targetRepo }}
+          EXPECTED_RUNNER_NAME: ${{ matrix.runnerName }}
+          CLAIMED_STATUS: ${{ matrix.status }}
+          STATUS_CHANGED_AT: ${{ matrix.statusChangedAt }}
+        run: |
+          set -euo pipefail
+          problems=()
+
+          {
+            echo "### $VM_NAME"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Target repo | $TARGET_REPO |"
+            echo "| Claimed status | $CLAIMED_STATUS |"
+            echo "| Status changed at | $STATUS_CHANGED_AT |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Actual VM power state (ground truth from VirtualBox itself, not
+          # the inventory file's own memory of what it dispatched).
+          vm_state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p' || true)"
+          echo "| Actual VM power state | ${vm_state:-not registered} |" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CLAIMED_STATUS" == "active" || "$CLAIMED_STATUS" == "ready-for-activation" ]] && [[ "$vm_state" != "running" ]]; then
+            problems+=("expected running (status=$CLAIMED_STATUS) but VBoxManage reports '$vm_state'")
+          fi
+
+          # Actual GitHub Actions runner registration (ground truth from the
+          # GitHub API, not the workflow dispatch's own claimed conclusion).
+          if [[ -n "$EXPECTED_RUNNER_NAME" && "$EXPECTED_RUNNER_NAME" != "null" ]]; then
+            runner_json="$(gh api "repos/$TARGET_REPO/actions/runners" --jq '.runners' 2>/dev/null || echo '[]')"
+            matching_name="$(echo "$runner_json" | jq -r --arg n "$EXPECTED_RUNNER_NAME" '[.[] | select(.name == $n)] | length')"
+            any_runner_names="$(echo "$runner_json" | jq -r '[.[].name] | join(", ")')"
+            runner_status="$(echo "$runner_json" | jq -r --arg n "$EXPECTED_RUNNER_NAME" '[.[] | select(.name == $n)][0].status // "absent"')"
+            {
+              echo "| Expected runner name | $EXPECTED_RUNNER_NAME |"
+              echo "| Registered runner names | ${any_runner_names:-none} |"
+              echo "| Expected-name runner status | $runner_status |"
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$CLAIMED_STATUS" == "active" || "$CLAIMED_STATUS" == "ready-for-activation" ]]; then
+              if [[ "$matching_name" == "0" ]]; then
+                problems+=("no runner named '$EXPECTED_RUNNER_NAME' is registered on $TARGET_REPO (found: ${any_runner_names:-none}) -- registered-under-wrong-name regression")
+              elif [[ "$runner_status" != "online" ]]; then
+                problems+=("runner '$EXPECTED_RUNNER_NAME' is registered but status is '$runner_status', not online")
+              fi
+            fi
+          fi
+
+          if [[ "$CLAIMED_STATUS" == "failed" ]]; then
+            problems+=("inventory marks this VM as failed")
+          fi
+
+          if [[ ${#problems[@]} -eq 0 ]]; then
+            { echo ""; echo "✅ No discrepancies found."; echo ""; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          { echo ""; echo "**Problems found:**"; } >> "$GITHUB_STEP_SUMMARY"
+          for p in "${problems[@]}"; do
+            echo "- ❌ $p" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=$VM_NAME::$p"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          exit 1

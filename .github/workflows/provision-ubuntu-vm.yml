@@ -1,0 +1,761 @@
+name: Provision Ubuntu LabVIEW VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Provisioning phase; activation completion is Linux-only after the operator console gate.
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - inspect-public
+          - console-fingerprint
+          - repair-ssh-console
+          - restart-public
+          - repair-public
+          - resume-public
+          - provision-public
+          - complete-activation
+          - package-build
+      runner_os:
+        description: Operating system of the self-hosted VirtualBox provisioner.
+        required: true
+        type: choice
+        default: linux
+        options:
+          - linux
+          - windows
+      vm_name:
+        description: Stable VirtualBox appliance identity used for concurrency and receipts.
+        required: true
+        type: string
+        default: example-ubuntu2404-labview2026-myproject
+      vm_uuid:
+        description: Expected registered VM UUID; required for inspection, recovery, activation, and package-build.
+        required: false
+        type: string
+        default: ''
+      snapshot_uuid:
+        description: Expected activated-ready snapshot UUID; required for package-build.
+        required: false
+        type: string
+        default: ''
+      ssh_host_fingerprint:
+        description: Console-verified guest ED25519 SHA-256 fingerprint; required for repair phases.
+        required: false
+        type: string
+        default: ''
+      storage_root:
+        description: Absolute internal-NVMe path for durable VM and evidence state.
+        required: true
+        type: string
+      iso_path:
+        description: Absolute path to the pinned Ubuntu 24.04.4 ISO; required for public provisioning.
+        required: false
+        type: string
+        default: ''
+      ssh_host_port:
+        description: Loopback host port forwarded to guest SSH port 22.
+        required: true
+        type: string
+        default: '2222'
+      guest_full_name:
+        description: Full display name for the guest's local account (the build-virtualbox.sh/.ps1 engine scripts require this explicitly -- no built-in default).
+        required: true
+        type: string
+        default: 'VM Builder'
+      guest_hostname:
+        description: Guest OS hostname (the build-virtualbox.sh/.ps1 engine scripts require this explicitly -- no built-in default).
+        required: true
+        type: string
+        default: 'vm-builder'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-ubuntu-vm-${{ inputs.vm_name }}
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: ${{ inputs.phase }} (${{ inputs.runner_os }})
+    runs-on: ${{ fromJSON(format('["self-hosted","vm-provisioner","{0}"]', inputs.runner_os)) }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate Dispatch Contract
+        shell: pwsh
+        env:
+          INPUT_PHASE: ${{ inputs.phase }}
+          INPUT_RUNNER_OS: ${{ inputs.runner_os }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SNAPSHOT_UUID: ${{ inputs.snapshot_uuid }}
+          INPUT_SSH_HOST_FINGERPRINT: ${{ inputs.ssh_host_fingerprint }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_ISO_PATH: ${{ inputs.iso_path }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $python = if ($IsWindows) { 'python' } else { 'python3' }
+          & $python ./.github/scripts/validate-vm-provisioning-dispatch.py dispatch
+          if ($LASTEXITCODE -ne 0) { throw "Dispatch validation exited $LASTEXITCODE" }
+
+      - name: Validate Linux Adapter Plan
+        if: runner.os == 'Linux' && (inputs.phase == 'validate' || inputs.phase == 'provision-public')
+        shell: bash
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          BASEFOLDER: ${{ inputs.storage_root }}
+          SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+          GUEST_FULLNAME: ${{ inputs.guest_full_name }}
+          GUEST_HOSTNAME: ${{ inputs.guest_hostname }}
+        run: ./vm/ubuntu-labview/build-virtualbox.sh --dry-run --no-start
+
+      - name: Validate Windows Adapter Plan
+        if: runner.os == 'Windows' && (inputs.phase == 'validate' || inputs.phase == 'provision-public')
+        shell: pwsh
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          BASEFOLDER: ${{ inputs.storage_root }}
+          SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+          GUEST_FULLNAME: ${{ inputs.guest_full_name }}
+          GUEST_HOSTNAME: ${{ inputs.guest_hostname }}
+        run: >-
+          ./vm/ubuntu-labview/build-virtualbox.ps1
+          -VmName $env:VM_NAME
+          -BaseFolder $env:BASEFOLDER
+          -SshHostPort $env:SSH_HOST_PORT
+          -GuestFullName $env:GUEST_FULLNAME
+          -GuestHostname $env:GUEST_HOSTNAME
+          -StartMode None
+
+      - name: Validate Public Adapter Plan
+        if: inputs.phase == 'validate' || inputs.phase == 'provision-public'
+        shell: pwsh
+        env:
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $python = if ($IsWindows) { 'python' } else { 'python3' }
+          & $python ./.github/scripts/validate-vm-provisioning-dispatch.py public-plan
+          if ($LASTEXITCODE -ne 0) { throw "Public adapter plan exited $LASTEXITCODE" }
+
+      - name: Inspect Existing Public VM on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'inspect-public'
+        shell: pwsh
+        env:
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $vboxCommand = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
+          $vboxPath = if ($vboxCommand) { $vboxCommand.Source } else { '' }
+          if (-not $vboxPath) {
+              $candidate = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
+              if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                  $vboxPath = $candidate
+              }
+          }
+          if (-not $vboxPath) { throw 'VBoxManage.exe is missing.' }
+
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'sandbox-public-inspection'
+          New-Item -ItemType Directory -Path $diagnostics -Force | Out-Null
+          $vmInfo = & $vboxPath showvminfo $env:INPUT_VM_NAME --machinereadable
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read the requested VM.' }
+          $uuidLine = $vmInfo | Where-Object { $_ -match '^UUID="([0-9A-Fa-f-]+)"$' } | Select-Object -First 1
+          $actualUuid = [regex]::Match($uuidLine, '^UUID="([0-9A-Fa-f-]+)"$').Groups[1].Value
+          if ($actualUuid -ne $env:INPUT_VM_UUID) { throw 'Registered VM UUID does not match the expected identity.' }
+          $stateLine = $vmInfo | Where-Object { $_ -match '^VMState="(.+)"$' } | Select-Object -First 1
+          $vmState = [regex]::Match($stateLine, '^VMState="(.+)"$').Groups[1].Value
+
+          $safeInfo = $vmInfo | Where-Object {
+              $_ -match '^(UUID|VMState|VMStateChangeTime|CfgFile|SnapFldr|CurrentSnapshotName|CurrentSnapshotUUID|GuestOSType|GuestAdditionsVersion|GuestAdditionsRunLevel)='
+          }
+          $sandboxProperties = & $vboxPath guestproperty enumerate $env:INPUT_VM_NAME --patterns '/SandboxSBOMReporting/*'
+          $osProperties = & $vboxPath guestproperty enumerate $env:INPUT_VM_NAME --patterns '/VirtualBox/GuestInfo/OS/*'
+          $snapshots = & $vboxPath snapshot $env:INPUT_VM_NAME list --machinereadable 2>&1
+            if ($LASTEXITCODE -ne 0 -and ($snapshots -join "`n").Trim() -ne 'This machine does not have any snapshots') {
+              throw 'Cannot inspect the VM snapshot inventory.'
+            }
+            $global:LASTEXITCODE = 0
+              $sshKeyscan = Get-Command ssh-keyscan.exe -ErrorAction SilentlyContinue
+              $sshClient = Get-Command ssh.exe -ErrorAction SilentlyContinue
+              $keyscanOutput = @()
+              $keyscanExitCode = -1
+              if ($sshKeyscan) {
+                $keyscanOutput = & $sshKeyscan.Source -T 10 -p ([int]$env:INPUT_SSH_HOST_PORT) -t ed25519 127.0.0.1 2>&1
+                $keyscanExitCode = $LASTEXITCODE
+              }
+              $sshVersion = if ($sshClient) { & $sshClient.Source -V 2>&1 } else { 'ssh.exe unavailable' }
+              $sshKeyscanInventory = @(Get-Command ssh-keyscan.exe -All -ErrorAction SilentlyContinue | ForEach-Object {
+                $version = & $_.Source -V 2>&1
+                "$($_.Source) | $version"
+              })
+              $gitKeyscan = Join-Path $env:ProgramFiles 'Git\usr\bin\ssh-keyscan.exe'
+              if ((Test-Path -LiteralPath $gitKeyscan -PathType Leaf) -and $gitKeyscan -notin $sshKeyscanInventory) {
+                $gitVersion = & $gitKeyscan -V 2>&1
+                $sshKeyscanInventory += "$gitKeyscan | $gitVersion"
+              }
+              $gitKeyscanOutput = @()
+              $gitKeyscanExitCode = -1
+              if (Test-Path -LiteralPath $gitKeyscan -PathType Leaf) {
+                $gitKeyscanOutput = & $gitKeyscan -T 10 -p ([int]$env:INPUT_SSH_HOST_PORT) -t ed25519 127.0.0.1 2>&1
+                $gitKeyscanExitCode = $LASTEXITCODE
+              }
+              $global:LASTEXITCODE = 0
+          @(
+              '=== VM info ==='
+              $safeInfo
+              '=== Sandbox guest properties ==='
+              $sandboxProperties
+              '=== Guest OS properties ==='
+              $osProperties
+              '=== Snapshot inventory ==='
+              $snapshots
+                '=== Loopback SSH ==='
+                "host=127.0.0.1"
+                "port=$env:INPUT_SSH_HOST_PORT"
+                "tcp_reachable=$((Test-NetConnection -ComputerName 127.0.0.1 -Port ([int]$env:INPUT_SSH_HOST_PORT) -InformationLevel Quiet))"
+                  "ssh_keyscan_path=$($sshKeyscan.Source)"
+                  "ssh_keyscan_exit_code=$keyscanExitCode"
+                  "ssh_version=$sshVersion"
+                  '=== SSH keyscan inventory ==='
+                  $sshKeyscanInventory
+                  "git_ssh_keyscan_exit_code=$gitKeyscanExitCode"
+                  '=== Git SSH keyscan output (public) ==='
+                  $gitKeyscanOutput
+                  '=== SSH keyscan output (public) ==='
+                  $keyscanOutput
+          ) | Set-Content -LiteralPath (Join-Path $diagnostics 'virtualbox-diagnostics.txt')
+
+          $cfgLine = $vmInfo | Where-Object { $_ -match '^CfgFile="(.+)"$' } | Select-Object -First 1
+          $cfgPath = [regex]::Match($cfgLine, '^CfgFile="(.+)"$').Groups[1].Value.Replace('\\', '\')
+          $vboxLog = Join-Path (Split-Path -Parent $cfgPath) 'Logs\VBox.log'
+          if (Test-Path -LiteralPath $vboxLog -PathType Leaf) {
+              Get-Content -LiteralPath $vboxLog -Tail 1000 |
+                  Select-String -Pattern 'Machine state|Changing the VM state|Guest Log|VMMDev|ERROR|FATAL|ASSERT|Unattended|post-install|ACPI|power|shutdown|terminated' |
+                  Select-Object -Last 300 |
+                  Set-Content -LiteralPath (Join-Path $diagnostics 'VBox-filtered.log')
+          }
+
+          if ($vmState -in @('running', 'paused')) {
+              $screenshot = Join-Path $diagnostics 'console.png'
+              & $vboxPath controlvm $env:INPUT_VM_NAME screenshotpng $screenshot
+              if ($LASTEXITCODE -ne 0) { throw 'Cannot capture the running VM console.' }
+          } else {
+              "Console screenshot skipped for VM state: $vmState" |
+                  Set-Content -LiteralPath (Join-Path $diagnostics 'console-unavailable.txt')
+          }
+
+      - name: Inspect Existing Public Guest on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'inspect-public'
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+        run: |
+          $vboxDirectory = Join-Path $env:ProgramFiles 'Oracle\VirtualBox'
+          $env:PATH = "$vboxDirectory;$env:PATH"
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-inspect-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'sandbox-public-inspection'
+          try {
+              & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+              $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+              if ([string]::IsNullOrWhiteSpace($password)) { throw 'Guest password secret is missing.' }
+              [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+              & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+              & ./vm/ubuntu-labview/Get-PublicGuestDiagnostics.ps1 `
+                  -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+                  -GuestCredentialFile $passwordFile `
+                  -OutputPath (Join-Path $diagnostics 'guest-diagnostics.txt')
+              if ($LASTEXITCODE -ne 0) { throw "Guest diagnostics exited $LASTEXITCODE" }
+          } finally {
+              Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $privateRoot) { Remove-Item -LiteralPath $privateRoot -Recurse -Force }
+          }
+
+      - name: Capture SSH Fingerprint from Windows VM Console
+        if: runner.os == 'Windows' && (inputs.phase == 'console-fingerprint' || inputs.phase == 'repair-ssh-console')
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_PHASE: ${{ inputs.phase }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_FINGERPRINT: ${{ inputs.ssh_host_fingerprint }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $vboxDirectory = Join-Path $env:ProgramFiles 'Oracle\VirtualBox'
+          $env:PATH = "$vboxDirectory;$env:PATH"
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-console-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'sandbox-public-inspection'
+          try {
+              & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+              $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+              if ([string]::IsNullOrWhiteSpace($password)) { throw 'Guest password secret is missing.' }
+              [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+              & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+              & ./vm/ubuntu-labview/Capture-SshFingerprintConsole.ps1 `
+                  -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+                  -GuestCredentialFile $passwordFile `
+                  -ScreenshotPath (Join-Path $diagnostics 'fingerprint-console.png') `
+                  -RepairSsh:($env:INPUT_PHASE -eq 'repair-ssh-console')
+              if ($LASTEXITCODE -ne 0) { throw "Console fingerprint capture exited $LASTEXITCODE" }
+                if ($env:INPUT_PHASE -eq 'repair-ssh-console') {
+                  $knownHosts = Join-Path $privateRoot 'known-hosts'
+                  & ./vm/ubuntu-labview/Enroll-SshHostKey.ps1 `
+                    -ExpectedFingerprint $env:INPUT_SSH_HOST_FINGERPRINT `
+                    -KnownHostsPath $knownHosts -SshPort ([int]$env:INPUT_SSH_HOST_PORT)
+                  if ($LASTEXITCODE -ne 0) { throw 'Repaired SSH service did not present the console-verified host key.' }
+                }
+          } finally {
+              Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $privateRoot) { Remove-Item -LiteralPath $privateRoot -Recurse -Force }
+          }
+
+      - name: Upload Public VM Inspection
+        if: runner.os == 'Windows' && (inputs.phase == 'inspect-public' || inputs.phase == 'console-fingerprint' || inputs.phase == 'repair-ssh-console') && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.vm_name }}-inspection
+          path: ${{ runner.temp }}\sandbox-public-inspection
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Resume Public Appliance on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'resume-public'
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $vboxDirectory = Join-Path $env:ProgramFiles 'Oracle\VirtualBox'
+          if (-not (Test-Path -LiteralPath (Join-Path $vboxDirectory 'VBoxManage.exe') -PathType Leaf)) {
+              throw 'VBoxManage.exe is missing from the standard Oracle VirtualBox installation directory.'
+          }
+          $env:PATH = "$vboxDirectory;$env:PATH"
+
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-resume-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $knownHosts = Join-Path $privateRoot 'known-hosts'
+          try {
+            & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+            $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+            if ([string]::IsNullOrWhiteSpace($password)) { throw 'Guest password secret is missing.' }
+            [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+            & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+            $evidenceDirectory = Join-Path (Join-Path $env:INPUT_STORAGE_ROOT 'evidence') $env:INPUT_VM_NAME
+            & ./vm/ubuntu-labview/Resume-PublicProvisioning.ps1 `
+              -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+              -GuestCredentialFile $passwordFile -EvidenceDirectory $evidenceDirectory `
+              -KnownHosts $knownHosts -SshHostPort ([int]$env:INPUT_SSH_HOST_PORT)
+            if ($LASTEXITCODE -ne 0) { throw "Public provisioning resume exited $LASTEXITCODE" }
+          } finally {
+            Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $privateRoot) { Remove-Item -LiteralPath $privateRoot -Recurse -Force }
+          }
+
+      - name: Repair and Resume Public Appliance on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'repair-public'
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_FINGERPRINT: ${{ inputs.ssh_host_fingerprint }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $vboxDirectory = Join-Path $env:ProgramFiles 'Oracle\VirtualBox'
+          $env:PATH = "$vboxDirectory;$env:PATH"
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-repair-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $knownHosts = Join-Path $privateRoot 'known-hosts'
+          try {
+              & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+              $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+              if ([string]::IsNullOrWhiteSpace($password)) { throw 'Guest password secret is missing.' }
+              [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+              & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+              & ./vm/ubuntu-labview/Repair-PublicBootstrap.ps1 `
+                  -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+                  -ExpectedSshFingerprint $env:INPUT_SSH_HOST_FINGERPRINT `
+                  -GuestCredentialFile $passwordFile -KnownHosts $knownHosts `
+                  -SshHostPort ([int]$env:INPUT_SSH_HOST_PORT)
+              if ($LASTEXITCODE -ne 0) { throw "Bootstrap repair exited $LASTEXITCODE" }
+
+              Remove-Item -LiteralPath $knownHosts -Force
+              $evidenceDirectory = Join-Path (Join-Path $env:INPUT_STORAGE_ROOT 'evidence') $env:INPUT_VM_NAME
+              & ./vm/ubuntu-labview/Resume-PublicProvisioning.ps1 `
+                  -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+                  -GuestCredentialFile $passwordFile -EvidenceDirectory $evidenceDirectory `
+                  -KnownHosts $knownHosts -SshHostPort ([int]$env:INPUT_SSH_HOST_PORT)
+              if ($LASTEXITCODE -ne 0) { throw "Public provisioning resume exited $LASTEXITCODE" }
+          } finally {
+              Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $privateRoot) { Remove-Item -LiteralPath $privateRoot -Recurse -Force }
+          }
+
+      - name: Restart Public Guest on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'restart-public'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_FINGERPRINT: ${{ inputs.ssh_host_fingerprint }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          $vboxDirectory = Join-Path $env:ProgramFiles 'Oracle\VirtualBox'
+          $env:PATH = "$vboxDirectory;$env:PATH"
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-restart-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $knownHosts = Join-Path $privateRoot 'known-hosts'
+          try {
+              & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+              $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+              if ([string]::IsNullOrWhiteSpace($password)) { throw 'Guest password secret is missing.' }
+              [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+              & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+              & ./vm/ubuntu-labview/Restart-PublicGuest.ps1 `
+                  -VmName $env:INPUT_VM_NAME -VmUuid $env:INPUT_VM_UUID `
+                  -ExpectedSshFingerprint $env:INPUT_SSH_HOST_FINGERPRINT `
+                  -GuestCredentialFile $passwordFile -KnownHosts $knownHosts `
+                  -SshHostPort ([int]$env:INPUT_SSH_HOST_PORT)
+              if ($LASTEXITCODE -ne 0) { throw "Guest restart exited $LASTEXITCODE" }
+          } finally {
+              Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $privateRoot) { Remove-Item -LiteralPath $privateRoot -Recurse -Force }
+          }
+
+      - name: Provision Public Appliance on Linux
+        if: runner.os == 'Linux' && inputs.phase == 'provision-public'
+        shell: bash
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_ISO_PATH: ${{ inputs.iso_path }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+          INPUT_GUEST_FULLNAME: ${{ inputs.guest_full_name }}
+          INPUT_GUEST_HOSTNAME: ${{ inputs.guest_hostname }}
+        run: |
+          set -euo pipefail
+          private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-provision.XXXXXX")"
+          password_file="$private_root/guest-password"
+          known_hosts="$private_root/known-hosts"
+          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/evidence/$INPUT_VM_NAME"
+          artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-public-receipts"
+          cleanup() {
+            unset GUEST_PASSWORD
+            rm -rf "$private_root"
+          }
+          trap cleanup EXIT
+
+          umask 077
+          printf '%s' "$GUEST_PASSWORD" > "$password_file"
+          [[ -s "$password_file" ]] || { echo 'Guest password secret is missing.' >&2; exit 2; }
+          chmod 600 "$password_file"
+
+          ISO="$INPUT_ISO_PATH" GUEST_PASSWORD_FILE="$password_file" \
+          VM_NAME="$INPUT_VM_NAME" BASEFOLDER="$INPUT_STORAGE_ROOT" \
+          SSH_HOST_PORT="$INPUT_SSH_HOST_PORT" \
+          GUEST_FULLNAME="$INPUT_GUEST_FULLNAME" GUEST_HOSTNAME="$INPUT_GUEST_HOSTNAME" \
+            ./vm/ubuntu-labview/build-virtualbox.sh --run --headless
+
+          vm_uuid="$(VBoxManage showvminfo "$INPUT_VM_NAME" --machinereadable | sed -n 's/^UUID="\(.*\)"$/\1/p')"
+          [[ -n "$vm_uuid" ]] || { echo 'Created VM UUID is missing.' >&2; exit 1; }
+          ./vm/ubuntu-labview/complete-public-provisioning.py \
+            --vm-name "$INPUT_VM_NAME" --vm-uuid "$vm_uuid" \
+            --guest-password-file "$password_file" --evidence-dir "$evidence_directory" \
+            --known-hosts "$known_hosts" --ssh-port "$INPUT_SSH_HOST_PORT" --wait-seconds 3600 --run
+
+          install -d -m 700 "$artifact_directory"
+          for name in base-bootstrap-receipt.json public-provisioning-receipt.json \
+            public-appliance-receipt.json public-appliance-receipt.json.sha256; do
+            install -m 600 "$evidence_directory/$name" "$artifact_directory/$name"
+          done
+          receipt_hash="$(sha256sum "$evidence_directory/public-appliance-receipt.json" | awk '{print $1}')"
+          snapshot_uuid="$(VBoxManage showvminfo "$INPUT_VM_NAME" --machinereadable | sed -n 's/^CurrentSnapshotUUID="\(.*\)"$/\1/p')"
+          {
+            echo '### Linux public provisioning proof'
+            echo "- Runner: $RUNNER_NAME"
+            echo "- VM UUID: $vm_uuid"
+            echo "- Snapshot UUID: $snapshot_uuid"
+            echo "- Receipt SHA-256: $receipt_hash"
+            echo '- Outcome: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Linux Redacted Public Receipts
+        if: runner.os == 'Linux' && inputs.phase == 'provision-public' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.vm_name }}-public-receipts
+          path: ${{ runner.temp }}/${{ inputs.vm_name }}-public-receipts
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Complete Activated Appliance on Linux
+        if: runner.os == 'Linux' && inputs.phase == 'complete-activation'
+        timeout-minutes: 60
+        shell: bash
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          VIPM_SERIAL_NUMBER: ${{ secrets.VIPM_SERIAL_NUMBER }}
+          VIPM_FULL_NAME: ${{ secrets.VIPM_FULL_NAME }}
+          VIPM_EMAIL: ${{ secrets.VIPM_EMAIL }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          set -euo pipefail
+          private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-activation.XXXXXX")"
+          password_file="$private_root/guest-password"
+          vipm_env_file="$private_root/vipm.env"
+          known_hosts="$private_root/known-hosts"
+          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/evidence/$INPUT_VM_NAME"
+          artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-activation-receipt"
+          cleanup() {
+            unset GUEST_PASSWORD VIPM_SERIAL_NUMBER VIPM_FULL_NAME VIPM_EMAIL
+            rm -rf "$private_root"
+          }
+          trap cleanup EXIT
+
+          umask 077
+          for name in GUEST_PASSWORD VIPM_SERIAL_NUMBER VIPM_FULL_NAME VIPM_EMAIL; do
+            value="${!name}"
+            [[ -n "$value" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || {
+              echo "$name secret is missing or contains a line break." >&2
+              exit 2
+            }
+          done
+          printf '%s' "$GUEST_PASSWORD" > "$password_file"
+          printf 'VIPM_SERIAL_NUMBER=%s\nVIPM_FULL_NAME=%s\nVIPM_EMAIL=%s\n' \
+            "$VIPM_SERIAL_NUMBER" "$VIPM_FULL_NAME" "$VIPM_EMAIL" > "$vipm_env_file"
+          chmod 600 "$password_file" "$vipm_env_file"
+
+          ./vm/ubuntu-labview/enroll-vm-ssh-host-key.py \
+            --vm-name "$INPUT_VM_NAME" --vm-uuid "$INPUT_VM_UUID" \
+            --port "$INPUT_SSH_HOST_PORT" --out "$known_hosts"
+          EXPECTED_VM_UUID="$INPUT_VM_UUID" VM_NAME="$INPUT_VM_NAME" \
+          VIPM_ENV_FILE="$vipm_env_file" GUEST_PASSWORD_FILE="$password_file" \
+          SSH_KNOWN_HOSTS="$known_hosts" SSH_PORT="$INPUT_SSH_HOST_PORT" \
+          EVIDENCE_DIR="$evidence_directory" \
+            ./vm/ubuntu-labview/complete-activation.sh
+
+          install -d -m 700 "$artifact_directory"
+          install -m 600 "$evidence_directory/activation-receipt.json" \
+            "$artifact_directory/activation-receipt.json"
+          install -m 600 "$evidence_directory/activation-receipt.json.sha256" \
+            "$artifact_directory/activation-receipt.json.sha256"
+          receipt_hash="$(sha256sum "$evidence_directory/activation-receipt.json" | awk '{print $1}')"
+          snapshot_uuid="$(VBoxManage showvminfo "$INPUT_VM_NAME" --machinereadable | sed -n 's/^CurrentSnapshotUUID="\(.*\)"$/\1/p')"
+          {
+            echo '### Linux activated appliance proof'
+            echo "- Runner: $RUNNER_NAME"
+            echo "- VM UUID: $INPUT_VM_UUID"
+            echo "- Snapshot UUID: $snapshot_uuid"
+            echo "- Receipt SHA-256: $receipt_hash"
+            echo '- Outcome: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Redacted Activation Receipt
+        if: runner.os == 'Linux' && inputs.phase == 'complete-activation' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.vm_name }}-activation-receipt
+          path: ${{ runner.temp }}/${{ inputs.vm_name }}-activation-receipt
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Build Verified VIP on Linux Appliance
+        if: runner.os == 'Linux' && inputs.phase == 'package-build'
+        timeout-minutes: 45
+        shell: bash
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SNAPSHOT_UUID: ${{ inputs.snapshot_uuid }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+        run: |
+          set -euo pipefail
+          private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-package.XXXXXX")"
+          password_file="$private_root/guest-password"
+          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/package-runs/$INPUT_VM_NAME-$GITHUB_RUN_ID"
+          artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-package-proof"
+          cleanup() {
+            unset GUEST_PASSWORD
+            rm -rf "$private_root"
+          }
+          trap cleanup EXIT
+
+          umask 077
+          [[ -n "$GUEST_PASSWORD" && "$GUEST_PASSWORD" != *$'\n'* && "$GUEST_PASSWORD" != *$'\r'* ]] || {
+            echo 'Guest password secret is missing or contains a line break.' >&2
+            exit 2
+          }
+          printf '%s' "$GUEST_PASSWORD" > "$password_file"
+          chmod 600 "$password_file"
+          EXPECTED_VM_UUID="$INPUT_VM_UUID" EXPECTED_SNAPSHOT_UUID="$INPUT_SNAPSHOT_UUID" \
+          VM_NAME="$INPUT_VM_NAME" GUEST_PASSWORD_FILE="$password_file" \
+          EVIDENCE_DIR="$evidence_directory" SSH_PORT="$INPUT_SSH_HOST_PORT" \
+            ./vm/ubuntu-labview/build-vip-package.sh --run
+
+          install -d -m 700 "$artifact_directory"
+          install -m 600 "$evidence_directory/vi_technologies_lib_super_network_streams-2.0.0.21.vip" \
+            "$artifact_directory/vi_technologies_lib_super_network_streams-2.0.0.21.vip"
+          install -m 600 "$evidence_directory/package-build-report.json" \
+            "$artifact_directory/package-build-report.json"
+          package_hash="$(sha256sum "$artifact_directory/vi_technologies_lib_super_network_streams-2.0.0.21.vip" | awk '{print $1}')"
+          {
+            echo '### Linux VM package-build proof'
+            echo "- Runner: $RUNNER_NAME"
+            echo "- VM UUID: $INPUT_VM_UUID"
+            echo "- Base snapshot UUID: $INPUT_SNAPSHOT_UUID"
+            echo '- Package: vi_technologies_lib_super_network_streams 2.0.0.21'
+            echo "- Package SHA-256: $package_hash"
+            echo '- Installation: verified-installed'
+            echo '- Outcome: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Verified Linux VIP Proof
+        if: runner.os == 'Linux' && inputs.phase == 'package-build' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.vm_name }}-package-proof
+          path: ${{ runner.temp }}/${{ inputs.vm_name }}-package-proof
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Provision Public Appliance on Windows
+        if: runner.os == 'Windows' && inputs.phase == 'provision-public'
+        shell: pwsh
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_STORAGE_ROOT: ${{ inputs.storage_root }}
+          INPUT_ISO_PATH: ${{ inputs.iso_path }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+          INPUT_GUEST_FULLNAME: ${{ inputs.guest_full_name }}
+          INPUT_GUEST_HOSTNAME: ${{ inputs.guest_hostname }}
+        run: |
+          $vboxManage = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
+          if (-not $vboxManage) {
+              $candidate = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
+              if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                  $vboxDirectory = Split-Path -Parent $candidate
+                  $env:PATH = "$vboxDirectory;$env:PATH"
+                  $vboxDirectory | Add-Content -LiteralPath $env:GITHUB_PATH
+                  $vboxManage = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
+              }
+          }
+          if (-not $vboxManage) {
+              throw 'VBoxManage.exe is missing from PATH and the standard Oracle VirtualBox installation directory.'
+          }
+          & $vboxManage.Source --version
+          if ($LASTEXITCODE -ne 0) { throw 'VBoxManage.exe version check failed.' }
+
+            $manifest = Get-Content -LiteralPath ./vm/ubuntu-labview/provisioning-manifest.json -Raw | ConvertFrom-Json
+            $isoPath = [IO.Path]::GetFullPath($env:INPUT_ISO_PATH)
+            if ([IO.Path]::GetFileName($isoPath) -ne $manifest.os.iso.filename) {
+              throw 'The requested ISO path basename does not match the pinned manifest.'
+            }
+            if (-not (Test-Path -LiteralPath $isoPath -PathType Leaf)) {
+              $isoDirectory = Split-Path -Parent $isoPath
+              $isoVolume = Get-Volume -FilePath ([IO.Path]::GetPathRoot($isoPath))
+              if ($isoVolume.SizeRemaining -lt 40GB) {
+                throw 'The ISO volume must have at least 40 GB free before public provisioning.'
+              }
+              New-Item -ItemType Directory -Path $isoDirectory -Force | Out-Null
+              $partialIso = "$isoPath.$([guid]::NewGuid()).partial"
+              try {
+                Invoke-WebRequest -Uri $manifest.os.iso.url -OutFile $partialIso
+                $downloadHash = (Get-FileHash -LiteralPath $partialIso -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($downloadHash -ne $manifest.os.iso.sha256) {
+                  throw 'Downloaded Ubuntu ISO SHA-256 mismatch.'
+                }
+                Move-Item -LiteralPath $partialIso -Destination $isoPath
+              } finally {
+                Remove-Item -LiteralPath $partialIso -Force -ErrorAction SilentlyContinue
+              }
+            }
+
+          $privateRoot = Join-Path $env:RUNNER_TEMP ("sandbox-sbom-provision-" + [guid]::NewGuid())
+          $passwordFile = Join-Path $privateRoot 'guest-password'
+          $knownHosts = Join-Path $privateRoot 'known-hosts'
+          try {
+              & ./vm/ubuntu-labview/Initialize-PrivateDirectory.ps1 -Path $privateRoot | Out-Null
+              $password = $env:GUEST_PASSWORD.TrimEnd("`r", "`n")
+              if ([string]::IsNullOrWhiteSpace($password)) {
+                  throw 'Set the UBUNTU_VM_GUEST_PASSWORD repository secret before public provisioning.'
+              }
+              [IO.File]::WriteAllText($passwordFile, $password, [Text.UTF8Encoding]::new($false))
+              & ./vm/ubuntu-labview/Initialize-PrivateFile.ps1 -Path $passwordFile | Out-Null
+
+              & ./vm/ubuntu-labview/build-virtualbox.ps1 -Run -StartMode Headless `
+                  -VmName $env:INPUT_VM_NAME -BaseFolder $env:INPUT_STORAGE_ROOT `
+                  -Iso $env:INPUT_ISO_PATH -GuestCredentialFile $passwordFile `
+                  -GuestFullName $env:INPUT_GUEST_FULLNAME -GuestHostname $env:INPUT_GUEST_HOSTNAME `
+                  -SshHostPort ([int]$env:INPUT_SSH_HOST_PORT)
+              if ($LASTEXITCODE -ne 0) { throw "Windows VM builder exited $LASTEXITCODE" }
+
+              $vmInfo = & VBoxManage.exe showvminfo $env:INPUT_VM_NAME --machinereadable
+              if ($LASTEXITCODE -ne 0) { throw 'Cannot read the created VM identity.' }
+              $uuidLine = $vmInfo | Where-Object { $_ -match '^UUID="([0-9A-Fa-f-]+)"$' } | Select-Object -First 1
+              if (-not $uuidLine) { throw 'Created VM UUID is missing.' }
+              $vmUuid = [regex]::Match($uuidLine, '^UUID="([0-9A-Fa-f-]+)"$').Groups[1].Value
+              $evidenceDirectory = Join-Path (Join-Path $env:INPUT_STORAGE_ROOT 'evidence') $env:INPUT_VM_NAME
+
+              python ./vm/ubuntu-labview/complete-public-provisioning.py `
+                  --vm-name $env:INPUT_VM_NAME --vm-uuid $vmUuid `
+                  --guest-password-file $passwordFile --evidence-dir $evidenceDirectory `
+                  --known-hosts $knownHosts --ssh-port $env:INPUT_SSH_HOST_PORT --run
+              if ($LASTEXITCODE -ne 0) { throw "Public provisioning adapter exited $LASTEXITCODE" }
+
+              $checkpoint = Get-Content -LiteralPath (Join-Path $evidenceDirectory 'public-appliance-receipt.json') -Raw | ConvertFrom-Json
+              $receiptHash = (Get-FileHash -LiteralPath (Join-Path $evidenceDirectory 'public-appliance-receipt.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+              @(
+                  '### Windows public provisioning proof'
+                  "- Runner: $env:RUNNER_NAME"
+                  "- VM UUID: $($checkpoint.vm.uuid)"
+                  "- Snapshot UUID: $($checkpoint.snapshot.uuid)"
+                  "- Receipt SHA-256: $receiptHash"
+                  "- Outcome: $($checkpoint.outcome)"
+              ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          } finally {
+              Remove-Item Env:GUEST_PASSWORD -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $privateRoot) {
+                  Remove-Item -LiteralPath $privateRoot -Recurse -Force
+              }
+          }
+
+      - name: Upload Redacted Public Receipts
+        if: runner.os == 'Windows' && (inputs.phase == 'provision-public' || inputs.phase == 'resume-public' || inputs.phase == 'repair-public') && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.vm_name }}-public-receipts
+          path: |
+            ${{ inputs.storage_root }}\evidence\${{ inputs.vm_name }}\base-bootstrap-receipt.json
+            ${{ inputs.storage_root }}\evidence\${{ inputs.vm_name }}\public-provisioning-receipt.json
+            ${{ inputs.storage_root }}\evidence\${{ inputs.vm_name }}\public-appliance-receipt.json
+            ${{ inputs.storage_root }}\evidence\${{ inputs.vm_name }}\public-appliance-receipt.json.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Reject Unimplemented Mutation Phase
+        if: ((inputs.phase == 'complete-activation' || inputs.phase == 'package-build') && runner.os != 'Linux') || ((inputs.phase == 'console-fingerprint' || inputs.phase == 'repair-ssh-console' || inputs.phase == 'restart-public' || inputs.phase == 'repair-public') && runner.os != 'Windows')
+        shell: pwsh
+        run: throw "The selected mutation phase is unavailable on this runner OS."

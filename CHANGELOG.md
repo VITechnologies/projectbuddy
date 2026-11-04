@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.2.0
+
+First real engine release: the VM-provisioning pipeline
+(`vm/windows-labview/`, `vm/ubuntu-labview/`) and the native SBOM reporting
+pipeline (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`),
+generalized out of `VITechnologies/SandboxSBOMReporting` (that repository's
+epic #207, issues #210/#211). Every VM/project identity value is a
+required input with no built-in default; Dependency-Track reporting
+requires an explicit `DEPENDENCY_TRACK_URL` with no default pointing at any
+particular organization's server. See [README.md](README.md)'s "What's in
+this engine" section for the full content breakdown.
+
 ## v0.1.1
 
 Fixes `toolchain-smoke-test.yml`: a reusable (`workflow_call`) workflow's
@@ -22,3 +34,4 @@ checked out the caller's repository instead.
 Initial public release: establishes the reusable-workflow/script consumption
 mechanism (see [README.md](README.md)) with a minimal, side-effect-free
 toolchain smoke-test workflow and script as a proof of the mechanism.
+

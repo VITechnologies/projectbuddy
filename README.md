@@ -34,3 +34,58 @@ configuration ever flow into this repository.
   automatically and never by tracking a floating branch or `latest`.
 
 See [CHANGELOG.md](CHANGELOG.md) for released versions.
+
+## What's in this engine
+
+### VM provisioning (`vm/windows-labview/`, `vm/ubuntu-labview/`)
+
+Dry-run-first VirtualBox builders that create self-hosted build/test VMs
+(Windows 11 + LabVIEW/VIPM, or Ubuntu 24.04 + LabVIEW/VIPM), register them
+as GitHub Actions self-hosted runners, and track them in a fork-local
+`runner-inventory.json` (copy [`vm/windows-labview/runner-inventory.example.json`](vm/windows-labview/runner-inventory.example.json)
+to get started — it is the committed schema/template; your own real
+instance is fork-local and never committed here).
+
+Every VM identity value (`VM_NAME`, `BASEFOLDER`, `GUEST_FULLNAME`,
+`GUEST_HOSTNAME`, ISO paths, …) is a required input with no built-in
+default — these scripts never assume any fork's own naming or
+infrastructure. `vm/windows-labview/` additionally includes an NSIS/VNC
+WinRM-bootstrap mechanism (`winrm-setup-installer.nsi`,
+`build-nsis-bootstrap-iso.sh`, `vnc-bootstrap.py`) that configures WinRM on
+a freshly-installed Windows guest without depending on `FirstLogonCommands`
+surviving an in-guest restart — see the `.nsi` file's own header comment
+for the full rationale.
+
+`.github/workflows/provision-windows-labview-vm.yml`,
+`provision-ubuntu-vm.yml`, and `vm-fleet-status.yml` are the corresponding
+GitHub Actions entry points, each requiring every real identity value as an
+explicit `workflow_dispatch` input.
+
+### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
+
+`Run-Pipeline.ps1`/`Run-Pipeline.sh` run the native Windows/Linux LabVIEW
+build-and-report pipeline directly on a self-hosted runner;
+`Run-WindowsSbom.ps1`/`Run-LinuxSbom.ps1` run the equivalent containerized
+(Docker) pipelines. All four read project configuration from either the
+`PROJECTS_OVERRIDE` environment variable (the documented CI mechanism) or
+an explicit `-ConfigName`/`-VipmTomlPath` local file — neither has a
+built-in default pointing at any specific project; supply your own.
+
+Dependency-Track reporting (`full` mode) requires an explicit
+`DEPENDENCY_TRACK_URL` — there is no built-in default pointing at any
+particular organization's server; a fork without one configured fails
+closed with a clear error rather than silently trying to reach someone
+else's private instance.
+
+`docker/linux-sbom/` and `docker/windows-sbom/` are the container images'
+own Dockerfiles and in-container pipeline scripts.
+
+### Runner/registration helpers (root-level)
+
+`Register-WindowsRunner.ps1` and `Register-WslRunnerKeepAlive.ps1` plan or
+install a self-hosted Windows Actions runner as a service (optionally under
+a dedicated local account) and keep a WSL-hosted runner's distribution
+running, respectively. `Add-Project.ps1` validates and dispatches a
+project-registration workflow call (`add-project.yml`-equivalent) against
+the schema in `pipeline-config.schema.json`.
+

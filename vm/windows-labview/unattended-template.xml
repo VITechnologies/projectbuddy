@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    VENDORED COPY of VirtualBox 7.2.6's own
+    /usr/share/virtualbox/UnattendedTemplates/win_nt6_unattended.xml, with ONE
+    additive change: four new RunAsynchronousCommand entries (Order 6-9) in
+    the "specialize" pass's existing Microsoft-Windows-Deployment
+    RunAsynchronous block, disabling Windows Update-related services BEFORE
+    OOBE/FirstLogonCommands run (see below). Diff against upstream before
+    passing the script-template option with a newer/older VirtualBox version;
+    this file is not kept in sync automatically.
+
+    WHY: confirmed live 2026-11-02 that a Windows-Update-triggered restart
+    (event log reason "Operating System: Upgrade (Planned)") raced this
+    pipeline's first-boot window and interrupted VBoxManage's own
+    win_postinstall.cmd template BEFORE it ever reached our
+    the post-install-command option (Enable-WinRmAutomation.ps1) at all; confirmed
+    via C:\vboxpostinstall.log never reaching its "Running custom user
+    command" line. Enable-WinRmAutomation.ps1 ALSO disables wuauserv (defense
+    in depth), but that runs in the oobeSystem pass's FirstLogonCommands,
+    which is LATE: Windows Setup's own NetworkLocation/network bring-up
+    happens earlier (oobeSystem, before FirstLogonCommands) and an update was
+    evidently already staged (download+commit, independent of wuauserv's
+    running state) well before Enable-WinRmAutomation.ps1 got a chance to
+    disable it; confirmed live: manually disabling wuauserv on an
+    already-stuck VM did NOT stop an already-staged update from applying.
+    Disabling the update-related services in the EARLIER specialize pass
+    (this file) instead closes most of that timing gap.
+
+    BUG FIXED 2026-11-02: an earlier revision of this file mistakenly placed
+    those 4 commands in the windowsPE pass's RunAsynchronous block instead of
+    the specialize pass's own block (both passes happen to have a same-named
+    Microsoft-Windows-Deployment component with its own RunAsynchronous list,
+    which is easy to conflate when editing). wuauserv/UsoSvc are not real
+    services inside WinPE, so sc.exe failed there and Windows Setup itself
+    aborted with "Windows installation encountered an unexpected error. Error
+    code: 0x80070002 - 0x40030", confirmed live via VBoxManage screenshotpng
+    against a stuck VM. The 4 commands now live ONLY in the specialize pass's
+    block (Order 6-9, after its own pre-existing Order 1-5); don't move them
+    back to the windowsPE pass.
+
+    Original VirtualBox copyright notice follows unmodified below.
+-->
+<!--
+    Copyright (C) 2016-2025 Oracle and/or its affiliates.
+
+    This file is part of VirtualBox base platform packages, as
+    available from https://www.virtualbox.org.
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation, in version 3 of the
+    License.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see <https://www.gnu.org/licenses>.
+
+    SPDX-License-Identifier: GPL-3.0-only
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+    xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE"
+            processorArchitecture="@@VBOX_INSERT_OS_ARCH_ATTRIB_DQ@@"
+            publicKeyToken="31bf3856ad364e35" language="neutral"
+            versionScope="nonSxS">
+            <InputLocale>en-US</InputLocale>
+            <SystemLocale>@@VBOX_INSERT_DASH_LOCALE@@</SystemLocale>
+            <UserLocale>@@VBOX_INSERT_DASH_LOCALE@@</UserLocale>
+            <!-- UILanguage must match the installation media language.  Stuff like de-CH does not work for
+                 example de_windows_7_enterprise_with_sp1_x64_dvd_u_677649.iso.  However, stupidly we cannot
+                 omit this element (kudos to brilliant minds at MS).  -->
+            <UILanguage>@@VBOX_INSERT_LANGUAGE@@</UILanguage>
+        </component>
+
+        <component name="Microsoft-Windows-Setup"
+            processorArchitecture="@@VBOX_INSERT_OS_ARCH_ATTRIB_DQ@@"
+            publicKeyToken="31bf3856ad364e35" language="neutral"
+            versionScope="nonSxS">
+
+            <DiskConfiguration>
+                <WillShowUI>OnError</WillShowUI>
+                <Disk>
+                    <DiskID>0</DiskID>
+                    <WillWipeDisk>true</WillWipeDisk>
+@@VBOX_COND_IS_NOT_FIRMWARE_UEFI@@
+                    <CreatePartitions>
+                        <!-- TODO: Use the standard partitioning scheme at starting with Windows 8 maybe, using 2 partitions as described by Microsoft? -->
+                        <CreatePartition>
+                            <Order>1</Order>
+                            <Type>Primary</Type>
+                            <Extend>true</Extend>
+                        </CreatePartition>
+                    </CreatePartitions>
+@@VBOX_COND_END@@
+@@VBOX_COND_IS_FIRMWARE_UEFI@@
+                    <CreatePartitions>
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Type>Primary</Type>
+                            <Size>300</Size>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Type>EFI</Type>
+                            <Size>100</Size>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>3</Order>
+                            <Type>MSR</Type>
+                            <Size>128</Size>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>4</Order>
+                            <Type>Primary</Type>
+                            <Extend>true</Extend>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                            <Label>WINRE</Label>
+                            <Format>NTFS</Format>
+                            <TypeID>de94bba4-06d1-4d40-a16a-bfd50179d6ac</TypeID>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>2</Order>
+                            <PartitionID>2</PartitionID>
+                            <Label>EFI</Label>
+                            <Format>FAT32</Format>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>3</Order>
+                            <PartitionID>3</PartitionID>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>4</Order>
+                            <PartitionID>4</PartitionID>
+                            <Label>Windows</Label>
+                            <Letter>C</Letter>
+                            <Format>NTFS</Format>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+@@VBOX_COND_END@@
+                </Disk>
+            </DiskConfiguration>
+
+            <UserData>
+                <ProductKey>
+                    <Key>@@VBOX_INSERT_PRODUCT_KEY_ELEMENT@@</Key>
+                    <WillShowUI>OnError</WillShowUI>
+                </ProductKey>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+
+            <ImageInstall>
+                <OSImage>
+                    <InstallFrom>
+                        <!-- TODO: This stuff doesn't work for en_windows_vista_enterprise_sp1_x64_and_x86.iso ... -->
+                        <MetaData wcm:action="add">
+                            <Key>/IMAGE/INDEX</Key>
+                            <Value>@@VBOX_INSERT_IMAGE_INDEX_ELEMENT@@</Value>
+                        </MetaData>
+                        <!-- <Path>d:\sources\install.wim</Path> - the w7 tests doesn't specify this -->
+                    </InstallFrom>
+                    <InstallTo>
+                        <DiskID>0</DiskID>
+@@VBOX_COND_IS_NOT_FIRMWARE_UEFI@@
+                        <PartitionID>1</PartitionID>
+@@VBOX_COND_END@@
+@@VBOX_COND_IS_FIRMWARE_UEFI@@
+                        <PartitionID>4</PartitionID>
+@@VBOX_COND_END@@
+                    </InstallTo>
+                    <WillShowUI>OnError</WillShowUI>
+                    <InstallToAvailablePartition>false</InstallToAvailablePartition>
+                </OSImage>
+            </ImageInstall>
+
+            <ComplianceCheck>
+                <DisplayReport>OnError</DisplayReport>
+            </ComplianceCheck>
+
+            <!-- Apply registry tweaks to Windows PE, skipping the checks in the Windows 11 setup program. This will not make it to the final install, and should do no harm with older Windows versions. -->
+            <RunAsynchronous>
+                <RunAsynchronousCommand>
+                    <Order>1</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable CPU check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>2</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable RAM check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>3</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable Secure Boot check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>4</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable Storage check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>5</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable TPM check</Description>
+                </RunAsynchronousCommand>
+            </RunAsynchronous>
+
+        </component>
+    </settings>
+
+    <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup"
+            processorArchitecture="@@VBOX_INSERT_OS_ARCH_ATTRIB_DQ@@"
+            publicKeyToken="31bf3856ad364e35" language="neutral"
+            versionScope="nonSxS">
+            <ComputerName>@@VBOX_INSERT_HOSTNAME_WITHOUT_DOMAIN_MAX_15@@</ComputerName>
+        </component>
+
+        <component name="Microsoft-Windows-Deployment"
+            processorArchitecture="@@VBOX_INSERT_OS_ARCH_ATTRIB_DQ@@"
+            publicKeyToken="31bf3856ad364e35" language="neutral"
+            versionScope="nonSxS">
+
+            <!-- Apply registry tweaks in the final Windows install, skipping the checks in the Windows 11 setup program. This means upgrades started in this install will work without compatibility complaints. -->
+            <RunAsynchronous>
+                <RunAsynchronousCommand>
+                    <Order>1</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable CPU check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>2</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable RAM check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>3</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable Secure Boot check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>4</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable Storage check</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>5</Order>
+                    <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Windows 11 disable TPM check</Description>
+                </RunAsynchronousCommand>
+                <!-- Added for SandboxSBOMReporting (see this file's header comment):
+                     disable Windows-Update-related services as early as possible in
+                     the specialize pass (the FIRST pass where the real installed OS
+                     and its services actually exist; the windowsPE pass above runs
+                     inside WinPE itself, where wuauserv/UsoSvc are not real services;
+                     a prior revision of this file mistakenly added these commands to
+                     the windowsPE pass's RunAsynchronous block instead, which made
+                     sc.exe fail to find the service and aborted Setup outright with
+                     "Windows installation encountered an unexpected error. Error
+                     code: 0x80070002 - 0x40030"; confirmed live 2026-11-02 via
+                     VBoxManage screenshotpng against a stuck VM. Don't move these
+                     back to the windowsPE pass.), well before oobeSystem/
+                     FirstLogonCommands, to close the timing gap that let an
+                     already-staged update race/interrupt first-boot provisioning.
+                     "start= disabled" needs the space after "=": that is sc.exe's
+                     own argument parsing quirk, not a typo. -->
+                <RunAsynchronousCommand>
+                    <Order>6</Order>
+                    <Path>sc.exe stop wuauserv</Path>
+                    <Description>SandboxSBOMReporting: stop Windows Update service</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>7</Order>
+                    <Path>sc.exe config wuauserv start= disabled</Path>
+                    <Description>SandboxSBOMReporting: disable Windows Update service</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>8</Order>
+                    <Path>sc.exe stop UsoSvc</Path>
+                    <Description>SandboxSBOMReporting: stop Update Orchestrator service</Description>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand>
+                    <Order>9</Order>
+                    <Path>sc.exe config UsoSvc start= disabled</Path>
+                    <Description>SandboxSBOMReporting: disable Update Orchestrator service</Description>
+                </RunAsynchronousCommand>
+            </RunAsynchronous>
+        </component>
+    </settings>
+
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup"
+            processorArchitecture="@@VBOX_INSERT_OS_ARCH_ATTRIB_DQ@@"
+            publicKeyToken="31bf3856ad364e35" language="neutral"
+            versionScope="nonSxS">
+            <AutoLogon>
+                <Password>
+                    <Value>@@VBOX_INSERT_USER_PASSWORD_ELEMENT@@</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Enabled>true</Enabled>
+                <Username>@@VBOX_INSERT_USER_LOGIN_ELEMENT@@</Username>
+            </AutoLogon>
+
+            <UserAccounts>
+@@VBOX_COND_IS_USER_LOGIN_NOT_ADMINISTRATOR@@
+                <AdministratorPassword>
+                    <Value>@@VBOX_INSERT_ROOT_PASSWORD_ELEMENT@@</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Name>@@VBOX_INSERT_USER_LOGIN_ELEMENT@@</Name>
+                        <DisplayName>@@VBOX_INSERT_USER_FULL_NAME_ELEMENT@@</DisplayName>
+                        <Group>administrators;users</Group>
+                        <Password>
+                            <Value>@@VBOX_INSERT_USER_PASSWORD_ELEMENT@@</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                    </LocalAccount>
+                </LocalAccounts>
+@@VBOX_COND_END@@
+@@VBOX_COND_IS_USER_LOGIN_ADMINISTRATOR@@
+                <AdministratorPassword>
+                    <Value>@@VBOX_INSERT_USER_PASSWORD_ELEMENT@@</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+@@VBOX_COND_END@@
+            </UserAccounts>
+
+            <VisualEffects>
+                <FontSmoothing>ClearType</FontSmoothing>
+            </VisualEffects>
+
+            <OOBE>
+                <ProtectYourPC>3</ProtectYourPC>
+                <HideEULAPage>true</HideEULAPage>
+                <SkipUserOOBE>true</SkipUserOOBE>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <!-- Make this (NetworkLocation) default to public and make it configurable -->
+                <NetworkLocation>Home</NetworkLocation>
+            </OOBE>
+
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <!-- For which OS versions do we need to do this? -->
+                    <Order>1</Order>
+                    <Description>Turn Off Network Selection pop-up</Description>
+                    <CommandLine>reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff"</CommandLine>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Description>VirtualBox post guest install steps </Description>
+                    <CommandLine>cmd.exe /c @@VBOX_INSERT_AUXILIARY_INSTALL_DIR@@VBOXPOST.CMD --vista-or-newer</CommandLine>
+                </SynchronousCommand>
+            </FirstLogonCommands>
+
+            <TimeZone>@@VBOX_INSERT_TIME_ZONE_WIN_NAME@@</TimeZone>
+        </component>
+
+    </settings>
+</unattend>
+

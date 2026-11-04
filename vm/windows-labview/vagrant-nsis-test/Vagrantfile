@@ -1,0 +1,75 @@
+# Fast-iteration test harness for the NSIS WinRM-setup installer prototype
+# (vm/windows-labview/winrm-setup-installer.nsi, issue #192, epic #190).
+#
+# This is NOT part of the production provisioning pipeline
+# (build-virtualbox.sh / unattended-template.xml) and does not attempt to
+# reproduce or fix the #188 reboot race -- see issue #191's closing comment
+# for why that race appears to be at the OS/logon level, not something any
+# in-guest command can out-schedule. The point of this harness is purely to
+# iterate on the INSTALLER ITSELF (does it run its steps correctly, does
+# its log capture useful diagnostics) quickly, against an already-working
+# Windows box, instead of a ~20-30 minute from-scratch Windows Setup cycle
+# for every change.
+#
+# Uses the labview-benchmark-actor project's existing golden box
+# `actor/win11-labview2026` (Windows 11 + LabVIEW 2026 + WinRM already
+# configured and working) -- a private, maintainer-held box, NOT published
+# publicly (see that project's own Vagrantfiles for the same note). If this
+# box isn't registered on a given host, override VIHS_NSIS_TEST_BOX to
+# point at any Windows box with WinRM already reachable, or build one per
+# that project's docs.
+#
+# Usage:
+#   cd vm/windows-labview/vagrant-nsis-test
+#   vagrant up
+#   vagrant provision --provision-with run-installer
+#   vagrant winrm -c 'Get-Content C:\vm-provisioning\winrm-setup-install.log' -e
+#   vagrant destroy -f
+
+Vagrant.configure("2") do |config|
+  config.vm.box = ENV.fetch("VIHS_NSIS_TEST_BOX", "actor/win11-labview2026")
+  config.vm.hostname = "nsis-test"
+  config.vm.communicator = "winrm"
+
+  # Matches the labview-benchmark-actor reviewer-workstation Vagrantfile's
+  # documented credentials for this exact box (disposable, local-only VM;
+  # not a secret). Leaving unset falls back to Vagrant's built-in
+  # vagrant/vagrant, which does NOT match this box and can lock the guest
+  # account after repeated failed WinRM logons.
+  config.winrm.username = ENV.fetch("VIHS_NSIS_TEST_WINRM_USER", "vagrant")
+  config.winrm.password = ENV.fetch("VIHS_NSIS_TEST_WINRM_PASSWORD", "Vagrant1234!")
+  config.winrm.timeout = 1800
+
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false
+    vb.memory = ENV.fetch("VIHS_NSIS_TEST_MEM", "4096")
+    vb.cpus = ENV.fetch("VIHS_NSIS_TEST_CPUS", "2")
+    vb.name = "vm-nsis-installer-test"
+  end
+
+  # Upload the freshly-compiled installer every "vagrant up"/"vagrant
+  # provision" so re-running after an .nsi edit + recompile always tests
+  # the latest build, not a stale copy from a previous iteration.
+  config.vm.provision "upload-installer", type: "file",
+    source: "../winrm-setup-installer.exe",
+    destination: "C:/Windows/Temp/winrm-setup-installer.exe"
+
+  # Separate, on-demand step (not auto-run) so "vagrant up" alone doesn't
+  # also execute the installer -- lets you upload+inspect without running
+  # it, or re-run it repeatedly without a full "vagrant up" each time via
+  #   vagrant provision --provision-with run-installer
+  config.vm.provision "run-installer", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Continue'
+    Write-Host "Running winrm-setup-installer.exe ..."
+    & "C:\Windows\Temp\winrm-setup-installer.exe" /S
+    Write-Host "Exit code: $LASTEXITCODE"
+    Write-Host "---- C:\vm-provisioning\winrm-setup-install.log ----"
+    if (Test-Path 'C:\vm-provisioning\winrm-setup-install.log') {
+      Get-Content 'C:\vm-provisioning\winrm-setup-install.log'
+    } else {
+      Write-Host "LOG FILE NOT FOUND -- installer did not reach FileOpen, or CreateDirectory/FileOpen itself failed."
+    }
+  PS1
+end

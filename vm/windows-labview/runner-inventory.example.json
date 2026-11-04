@@ -1,0 +1,30 @@
+{
+  "schema": "vm-provisioning/windows-labview-runner-inventory@3",
+  "note": "GENERIC TEMPLATE -- this file is the committed shape/schema a fork copies to create its own real runner-inventory.json (fork-local, holding real repo names/runner names/service accounts -- see this repo's README.md for the recommended fork-local-file convention). It contains exactly one clearly-fake, annotated example entry and no real infrastructure data. Tracks every Windows LabVIEW runner VM built on this host by vm/windows-labview/provision-windows-labview-vm.yml and Register-WindowsRunner.ps1, so vm_name/winrm_host_port/runner names never collide as more repos are onboarded. Add a new VM to the batch queue by appending an entry with \"status\": \"queued\" (including a real runnerName/runnerLabels/dedicatedServiceAccount -- register-runner needs them, see below) and running vm/windows-labview/batch-provision.sh, which updates this file automatically as it progresses (queued -> provisioning -> ready-for-activation or failed). Only the human-gated activation step (status -> active) and brand-new queued entries are edited by hand -- see the 'Batch-build runner VMs for multiple repos' runbook section in README.md. 'vncPort' (optional, schema@3+) pins the loopback VNC port vnc-console.sh uses for this VM's activation console; if omitted it's derived from winrmHostPort.",
+  "statusValues": {
+    "queued": "Not yet started; batch-provision.sh will pick this up on its next run.",
+    "provisioning": "batch-provision.sh is actively running create-vm/install-vipm/install-labview/register-runner for this VM.",
+    "ready-for-activation": "VIPM + LabVIEW installed and the GitHub Actions runner is already registered and online; waiting on a human to activate LabVIEW/VIPM (interactive, cannot be automated -- the one remaining gate).",
+    "failed": "A phase failed; see the notes field for which phase and the workflow run conclusion. Safe to re-queue after investigating.",
+    "active": "Activated by the human operator after the 'Activate LabVIEW + VIPM' runbook step; runner was already registered automatically."
+  },
+  "hostCapacity": {
+    "cpuCores": 0,
+    "totalMemoryGiB": 0,
+    "notes": "PLACEHOLDER -- fill in your own host's real CPU core count and total memory before provisioning, and periodically re-verify real available headroom with `free -h`/`df -h` rather than trusting a stale figure here. Each Windows guest in provisioning-manifest.json's default profile needs 8GB RAM/4 CPUs; running multiple concurrently can exhaust host RAM/disk well before this count's naive sum would suggest -- budget conservatively and prefer serial builds (batch-provision.sh's default behavior) over manually parallelizing them."
+  },
+  "vms": [
+    {
+      "vmName": "example-windows11-labview2026-myproject",
+      "winrmHostPort": 15985,
+      "vncPort": 3390,
+      "targetRepo": "my-org/my-repo",
+      "runnerName": "example-win-labview2026-myproject",
+      "runnerLabels": "windows-labview2026-myproject",
+      "dedicatedServiceAccount": "ghrunnerMYPROJECT",
+      "status": "queued",
+      "activatedAt": null,
+      "notes": "EXAMPLE ENTRY -- replace vmName/winrmHostPort/vncPort/targetRepo/runnerName/runnerLabels/dedicatedServiceAccount with your own real values before setting status to \"queued\" for real. Keep winrmHostPort/vncPort unique per VM on the same host to avoid port collisions."
+    }
+  ]
+}

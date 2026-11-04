@@ -1,0 +1,343 @@
+name: Provision Windows LabVIEW VM
+
+# v1: covers validate, create-vm, install-vipm, and install-labview. All four
+# phases are live-dispatch proven (2026-11-02; see runs 41423338530,
+# 41426452635, 41428297144) against the operator-built, activated
+# sandbox-sbom-windows11-labview2026-q3-pro VM -- including the full
+# attach-media + power-cycle + WinRM-reinstall path with a real reboot.
+# v2: adds register-runner, automating the previously-manual, WinRM-driven
+# (no interactive session required) GitHub Actions runner registration
+# procedure proven for the same VM (gh auth login --with-token +
+# Register-WindowsRunner.ps1 -UseDedicatedServiceAccount). LabVIEW/VIPM
+# activation remains an operator-driven interactive step and is
+# intentionally NOT a phase here -- it is the one step that must stay human.
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Provisioning phase.
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - create-vm
+          - install-vipm
+          - install-labview
+          - register-runner
+      vm_name:
+        description: Stable VirtualBox appliance identity used for concurrency.
+        required: true
+        type: string
+        default: example-windows11-labview2026-myproject
+      storage_root:
+        description: Absolute internal-NVMe path for durable VM state.
+        required: true
+        type: string
+      iso_path:
+        description: Absolute path to the pinned Windows 11 ISO; required for create-vm.
+        required: false
+        type: string
+        default: ''
+      vipm_installer_path:
+        description: Absolute path to the pinned VIPM Professional installer .exe (wrapped into a small ISO at run time); required for install-vipm.
+        required: false
+        type: string
+        default: ''
+      labview_iso_path:
+        description: Absolute path to the operator-supplied LabVIEW Professional installer ISO; required for install-labview.
+        required: false
+        type: string
+        default: ''
+      winrm_host_port:
+        description: Loopback host port forwarded to guest WinRM port 5985.
+        required: true
+        type: string
+        default: '15985'
+      guest_full_name:
+        description: Full display name for the guest's local account (the build-virtualbox.sh engine script requires this explicitly -- no built-in default); required for create-vm.
+        required: false
+        type: string
+        default: 'VM Builder'
+      guest_hostname:
+        description: Guest OS hostname (the build-virtualbox.sh engine script requires this explicitly -- no built-in default); required for create-vm.
+        required: false
+        type: string
+        default: 'vm-builder.local'
+      target_repo:
+        description: Repository to register the runner against, e.g. my-org/my-repo; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      runner_name:
+        description: Distinct runner identity name; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      runner_labels:
+        description: Comma-separated custom labels, e.g. windows-labview2026-testcoord; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      dedicated_service_account_name:
+        description: Dedicated local Windows service account name for the runner service; required for register-runner.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-windows-labview-vm-${{ inputs.vm_name }}
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: ${{ inputs.phase }}
+    runs-on: ${{ fromJSON('["self-hosted","vm-provisioner","linux"]') }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate Or Create VM Shell
+        if: inputs.phase == 'validate' || inputs.phase == 'create-vm'
+        shell: bash
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          BASEFOLDER: ${{ inputs.storage_root }}
+          ISO: ${{ inputs.iso_path }}
+          GUEST_PASSWORD_FILE: ${{ runner.temp }}/windows-labview-guest-password
+          GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
+          WINRM_HOST_PORT: ${{ inputs.winrm_host_port }}
+          GUEST_FULLNAME: ${{ inputs.guest_full_name }}
+          GUEST_HOSTNAME: ${{ inputs.guest_hostname }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.phase }}" == create-vm ]]; then
+            [[ -n "${GUEST_PASSWORD:-}" ]] || { echo "WINDOWS_LABVIEW_VM_GUEST_PASSWORD secret is required for create-vm" >&2; exit 2; }
+            install -m 0600 /dev/null "$GUEST_PASSWORD_FILE"
+            printf '%s' "$GUEST_PASSWORD" > "$GUEST_PASSWORD_FILE"
+            ./vm/windows-labview/build-virtualbox.sh --run --headless
+          else
+            ./vm/windows-labview/build-virtualbox.sh --dry-run --headless
+          fi
+
+      - name: Bootstrap WinRM Over VNC
+        # Only for a real create-vm (not validate's dry-run, which has no
+        # real VM to bootstrap). This makes create-vm a complete,
+        # self-sufficient phase: by the time this step succeeds, the VM is
+        # built AND WinRM is configured, same as how install-vipm/
+        # install-labview/register-runner are already complete phases --
+        # not something a separate orchestrator (batch-provision.sh) has to
+        # remember to finish afterward. See issue #203/epic #198: this
+        # replaces the old --post-install-command/FirstLogonCommands
+        # mechanism, retired because a winlogon.exe-initiated restart
+        # unconditionally interrupted it (issue #188).
+        if: inputs.phase == 'create-vm'
+        shell: bash
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          WINRM_HOST_PORT: ${{ inputs.winrm_host_port }}
+        run: |
+          set -euo pipefail
+          python3 -m venv "${{ runner.temp }}/vnc-bootstrap-venv"
+          "${{ runner.temp }}/vnc-bootstrap-venv/bin/pip" install --quiet -r vm/windows-labview/vnc-bootstrap-requirements.txt
+          # vnc-bootstrap.py shells out to the vncdotool CLI (not its Python
+          # API) -- the venv's bin/ must be on PATH, not just its python3
+          # invoked directly.
+          PATH="${{ runner.temp }}/vnc-bootstrap-venv/bin:$PATH" \
+            python3 vm/windows-labview/vnc-bootstrap.py \
+            --vm-name "$VM_NAME" --winrm-host-port "$WINRM_HOST_PORT"
+
+      - name: Build VIPM Installer ISO
+        if: inputs.phase == 'install-vipm'
+        shell: bash
+        env:
+          VIPM_INSTALLER_PATH: ${{ inputs.vipm_installer_path }}
+        run: |
+          set -euo pipefail
+          [[ -n "$VIPM_INSTALLER_PATH" && -f "$VIPM_INSTALLER_PATH" ]] || { echo "VIPM installer not found: $VIPM_INSTALLER_PATH" >&2; exit 2; }
+          expected_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['vipm']['installerSha256'])")"
+          actual_sha256="$(sha256sum "$VIPM_INSTALLER_PATH" | cut -d' ' -f1)"
+          [[ "$actual_sha256" == "$expected_sha256" ]] || { echo "VIPM installer SHA-256 mismatch: expected $expected_sha256, got $actual_sha256" >&2; exit 2; }
+          xorriso -as mkisofs -o "${{ runner.temp }}/vipm-installer.iso" -V VIPMSETUP -J -r "$VIPM_INSTALLER_PATH"
+
+      - name: Attach Installer Media And Restart
+        if: inputs.phase == 'install-vipm' || inputs.phase == 'install-labview'
+        shell: bash
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          MEDIA_PATH: ${{ inputs.phase == 'install-vipm' && format('{0}/vipm-installer.iso', runner.temp) || inputs.labview_iso_path }}
+          DEVICE_PORT: ${{ inputs.phase == 'install-vipm' && '1' || '1' }}
+          DEVICE_SLOT: ${{ inputs.phase == 'install-vipm' && '1' || '0' }}
+          OTHER_DEVICE_SLOT: ${{ inputs.phase == 'install-vipm' && '0' || '1' }}
+          WINRM_PASSWORD_FILE: ${{ runner.temp }}/windows-labview-guest-password
+          GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
+          WINRM_PORT: ${{ inputs.winrm_host_port }}
+        run: |
+          set -euo pipefail
+          [[ -n "$MEDIA_PATH" && -f "$MEDIA_PATH" ]] || { echo "Installer ISO not found: $MEDIA_PATH" >&2; exit 2; }
+          # Needed unconditionally -- the post-restart wait-ready loop below uses it
+          # regardless of whether the VM was already running (and thus needing a
+          # shutdown first) when this step started. Confirmed live: a VM that was
+          # already poweroff at step start (e.g. retried after an earlier failure)
+          # skipped the shutdown branch entirely, so this file was never created,
+          # and wait-ready failed with FileNotFoundError instead of a WinRM error.
+          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
+          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+          if [[ "$state" == running ]]; then
+            # acpipowerbutton has proven unreliable against this guest (WinRM stays
+            # responsive but the OS never actually reaches poweroff). Prefer an
+            # explicit WinRM-driven shutdown -- this pipeline's one consistently
+            # reliable channel -- then fall back to ACPI, then a hard poweroff, so
+            # this step never hangs indefinitely.
+            python3 -m venv "${{ runner.temp }}/winrm-venv-shutdown"
+            "${{ runner.temp }}/winrm-venv-shutdown/bin/pip" install --quiet pywinrm
+            "${{ runner.temp }}/winrm-venv-shutdown/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
+              --port "$WINRM_PORT" --password-file "$WINRM_PASSWORD_FILE" shutdown-guest || true
+            for _ in $(seq 1 60); do
+              state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+              [[ "$state" == poweroff ]] && break
+              sleep 5
+            done
+            if [[ "$state" != poweroff ]]; then
+              echo "WinRM-driven shutdown did not complete in time; falling back to ACPI." >&2
+              VBoxManage controlvm "$VM_NAME" acpipowerbutton
+              for _ in $(seq 1 24); do
+                state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+                [[ "$state" == poweroff ]] && break
+                sleep 5
+              done
+            fi
+            if [[ "$state" != poweroff ]]; then
+              echo "ACPI shutdown did not complete in time; falling back to a hard poweroff." >&2
+              VBoxManage controlvm "$VM_NAME" poweroff
+              sleep 5
+              state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+            fi
+            [[ "$state" == poweroff ]] || { echo "VM did not power off" >&2; exit 3; }
+          fi
+          # The *other* phase's install ISO (e.g. install-vipm's ISO wrapper, built
+          # fresh under this run's ephemeral runner.temp) can still be attached to
+          # the other device slot from an earlier run on the same VM -- but that
+          # file is long gone once its run ends, and VirtualBox fails to even power
+          # the VM back on if a still-attached device's backing file is missing
+          # (confirmed live: "VD: error VERR_FILE_NOT_FOUND" on a later
+          # install-labview run after an earlier install-vipm run). Unconditionally
+          # eject it first; harmless if nothing was attached there.
+          VBoxManage storageattach "$VM_NAME" --storagectl IDE --port 1 --device "$OTHER_DEVICE_SLOT" --type dvddrive --medium none 2>/dev/null || true
+          VBoxManage storageattach "$VM_NAME" --storagectl IDE --port "$DEVICE_PORT" --device "$DEVICE_SLOT" --type dvddrive --medium "$MEDIA_PATH"
+          VBoxManage startvm "$VM_NAME" --type headless
+          for _ in $(seq 1 60); do
+            timeout 5 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${{ inputs.winrm_host_port }}" 2>/dev/null && break
+            sleep 5
+          done
+          # The WinRM TCP listener can accept connections before the SOAP/PowerShell
+          # remoting service is actually ready to handle requests (confirmed live:
+          # ReadTimeoutError on open_shell() right after boot despite the port being
+          # open) -- poll an actual WinRM round-trip, not just the TCP port.
+          python3 -m venv "${{ runner.temp }}/winrm-venv-shutdown" 2>/dev/null || true
+          "${{ runner.temp }}/winrm-venv-shutdown/bin/pip" install --quiet pywinrm 2>/dev/null || true
+          winrm_ready=0
+          for _ in $(seq 1 24); do
+            "${{ runner.temp }}/winrm-venv-shutdown/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
+              --port "$WINRM_PORT" --password-file "$WINRM_PASSWORD_FILE" wait-ready && { winrm_ready=1; break; }
+            sleep 10
+          done
+          # Without this check the loop above silently exhausts all retries and the
+          # step still reports success (bash doesn't fail on a loop that never
+          # breaks) -- confirmed live: this let a later step fail far more
+          # confusingly ("installer not found") instead of surfacing the real
+          # WinRM-never-came-back-up problem here, at the actual point of failure.
+          [[ "$winrm_ready" == "1" ]] || { echo "WinRM did not become ready after reboot within the retry budget." >&2; exit 4; }
+
+      - name: Install VIPM Professional Over WinRM
+        if: inputs.phase == 'install-vipm'
+        shell: bash
+        env:
+          WINRM_PASSWORD_FILE: ${{ runner.temp }}/windows-labview-guest-password
+          GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
+          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          python3 -m venv "${{ runner.temp }}/winrm-venv"
+          "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
+          "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
+            --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-vipm
+
+      - name: Install LabVIEW Professional Over WinRM
+        if: inputs.phase == 'install-labview'
+        shell: bash
+        env:
+          WINRM_PASSWORD_FILE: ${{ runner.temp }}/windows-labview-guest-password
+          GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
+          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          python3 -m venv "${{ runner.temp }}/winrm-venv"
+          "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
+          "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
+            --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-labview
+
+      - name: Register GitHub Actions Runner Over WinRM
+        if: inputs.phase == 'register-runner'
+        shell: bash
+        env:
+          WINRM_PASSWORD_FILE: ${{ runner.temp }}/windows-labview-guest-password
+          GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
+          PAT_FILE: ${{ runner.temp }}/runner-registration-pat
+          RUNNER_REGISTRATION_PAT: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          # NOTE: deliberately NOT named RUNNER_NAME -- that's a GitHub
+          # Actions *reserved* default environment variable (the RUNNER_*
+          # family), set to the name of the self-hosted runner executing
+          # THIS job. A step-level env: of the same name is silently
+          # ignored (confirmed live 2026-11-03: config.cmd's own diag log
+          # showed --name receiving the host's own runner name,
+          # "sergio-ThinkPad-P16-Gen-3", on every VM registered so far --
+          # see https://docs.github.com/actions/reference/workflows-and-actions/variables
+          # -- "You can't overwrite the value of the default environment
+          # variables named GITHUB_* and RUNNER_*.").
+          TARGET_RUNNER_NAME: ${{ inputs.runner_name }}
+          RUNNER_LABELS: ${{ inputs.runner_labels }}
+          SERVICE_ACCOUNT: ${{ inputs.dedicated_service_account_name }}
+        run: |
+          set -euo pipefail
+          [[ -n "${RUNNER_REGISTRATION_PAT:-}" ]] || { echo "RUNNER_REGISTRATION_PAT secret is required for register-runner" >&2; exit 2; }
+          [[ -n "$TARGET_REPO" && -n "$TARGET_RUNNER_NAME" && -n "$RUNNER_LABELS" && -n "$SERVICE_ACCOUNT" ]] || {
+            echo "target_repo, runner_name, runner_labels, and dedicated_service_account_name are all required for register-runner" >&2
+            exit 2
+          }
+          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
+          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          install -m 0600 /dev/null "$PAT_FILE"
+          printf '%s' "$RUNNER_REGISTRATION_PAT" > "$PAT_FILE"
+          runner_filename="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Filename'])")"
+          runner_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Sha256'])")"
+          runner_url="$(python3 -c "import json; m = json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']; print(m['downloadUrlTemplate'].format(version=m['version'], winX64Filename=m['winX64Filename']))")"
+          pwsh_msi_filename="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['powershell7']['winX64MsiFilename'])")"
+          pwsh_msi_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['powershell7']['winX64MsiSha256'])")"
+          pwsh_msi_url="$(python3 -c "import json; m = json.load(open('vm/windows-labview/provisioning-manifest.json'))['powershell7']; print(m['downloadUrlTemplate'].format(version=m['version'], winX64MsiFilename=m['winX64MsiFilename']))")"
+          python3 -m venv "${{ runner.temp }}/winrm-venv"
+          "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
+          "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
+            --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" register-runner \
+            --repo "$TARGET_REPO" \
+            --runner-name "$TARGET_RUNNER_NAME" \
+            --labels "$RUNNER_LABELS" \
+            --service-account "$SERVICE_ACCOUNT" \
+            --pat-file "$PAT_FILE" \
+            --register-script ./Register-WindowsRunner.ps1 \
+            --runner-url "$runner_url" \
+            --runner-filename "$runner_filename" \
+            --runner-sha256 "$runner_sha256" \
+            --pwsh-msi-url "$pwsh_msi_url" \
+            --pwsh-msi-filename "$pwsh_msi_filename" \
+            --pwsh-msi-sha256 "$pwsh_msi_sha256"
+          shred -u "$PAT_FILE" 2>/dev/null || rm -f "$PAT_FILE"
+

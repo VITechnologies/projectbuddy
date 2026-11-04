@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pipeline configuration",
+  "type": "object",
+  "required": ["projects", "supportedRuntimes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "baseUrls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "svn": { "$ref": "#/definitions/nonBlankString" },
+        "git": { "$ref": "#/definitions/nonBlankString" }
+      }
+    },
+    "workingDirectoryBase": { "$ref": "#/definitions/nonBlankString" },
+    "username": { "type": "string" },
+    "password": { "type": "string" },
+    "token": { "type": "string" },
+    "cleanOutputsBeforeRun": { "type": "boolean" },
+    "supportedRuntimes": {
+      "description": "Runtime routes verified for this registered project. Feature compatibility is checked during registration and matrix generation.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["native-windows", "linux-analysis", "linux-sbom-container", "windows-sbom-container"]
+      }
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "#/definitions/nonBlankString" },
+          "displayName": { "$ref": "#/definitions/nonBlankString" },
+          "enabled": { "type": "boolean" },
+          "vcs": { "type": "string", "enum": ["git", "svn"] },
+          "revision": { "$ref": "#/definitions/nonBlankString" },
+          "repoUrl": { "$ref": "#/definitions/nonBlankString" },
+          "username": { "type": "string" },
+          "password": { "type": "string" },
+          "token": { "type": "string" },
+          "vipcPath": {
+            "description": "One checkout-relative VI Package Configuration (.vipc), installed with vipm install before vipm lock.",
+            "$ref": "#/definitions/nonBlankString"
+          },
+          "sparsePaths": {
+            "description": "SVN only: check out the repository root with --depth empty and fetch only these checkout-relative directories (parents become empty directories).",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^(?![\\\\/])(?![A-Za-z]:)(?!.*(^|[\\\\/])\\.\\.([\\\\/]|$))\\S.*$" }
+          },
+          "patches": {
+            "description": "Native and container Windows pipelines: unified diffs (paths relative to the checkout root, e.g. from `svn diff`) applied to the fresh checkout before any VIPM step, with `svn patch` or `git apply`. Relative patch paths resolve against the pipeline repository root. A patch that does not apply cleanly fails the project, and each applied patch is recorded as a checkout:patch SBOM property. The Linux container rejects this setting.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "sourceCheckouts": {
+            "description": "Native Windows only: Git repositories required by the project, checked out under its fresh working directory before VIPM commands.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repository", "revision", "checkoutPath"],
+              "properties": {
+                "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+                "revision": {
+                  "allOf": [
+                    { "$ref": "#/definitions/nonBlankString" },
+                    { "pattern": "^(?!-)" }
+                  ]
+                },
+                "checkoutPath": {
+                  "description": "Safe relative path inside the primary project checkout.",
+                  "type": "string",
+                  "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.([\\\\/]|$))\\S.*$"
+                }
+              }
+            }
+          },
+          "windowsContainerNipmFeeds": {
+            "description": "Windows container only: explicitly provision these NI feed aliases/URLs before installing manifest NI build prerequisites. Native runners ignore this field and retain separately provisioned feeds.",
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": { "pattern": "^[A-Za-z0-9_.-]+$" },
+            "additionalProperties": { "type": "string", "pattern": "^https://\\S+$" }
+          },
+          "build": {
+            "description": "Opt in to building with VIPM. packages = true builds every type = \"vipb\" [build.<name>] target of vipm.toml in depends-on order, installs each .vip before its dependents and vipm lock, and reports it as a pkg:vipm component. sbomPath with artifactPath runs vipm build --all and includes its generated SBOM and Authenticode-verified artifact. The Linux container skips builds with a warning.",
+            "type": "object",
+            "additionalProperties": false,
+            "anyOf": [
+              { "required": ["packages"], "properties": { "packages": { "const": true } } },
+              { "required": ["sbomPath", "artifactPath"] }
+            ],
+            "dependencies": { "sbomPath": ["artifactPath"], "artifactPath": ["sbomPath"] },
+            "properties": {
+              "packages": { "type": "boolean" },
+              "lvlibpDependencies": {
+                "description": "Published immutable GitHub LVLIBP releases verified by signed release attestation and staged relative to the SandboxSBOMReporting checkout root before any VIPM command.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "version", "repository", "releaseTag", "assetFileName", "stagePath"],
+                  "properties": {
+                    "name": { "$ref": "#/definitions/nonBlankString" },
+                    "version": { "$ref": "#/definitions/nonBlankString" },
+                    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+                    "releaseTag": { "$ref": "#/definitions/nonBlankString" },
+                    "assetFileName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*\\.lvlibp$" },
+                    "stagePath": {
+                      "description": "Safe relative path from the SandboxSBOMReporting checkout root, not the module checkout.",
+                      "type": "string",
+                      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*\\.\\.)(?:[A-Za-z0-9._+-]+[\\\\/])*[A-Za-z0-9._+-]+\\.lvlibp$"
+                    }
+                  }
+                }
+              },
+              "sbomPath": { "$ref": "#/definitions/nonBlankString" },
+              "artifactPath": { "$ref": "#/definitions/nonBlankString" }
+            }
+          },
+          "labviewVersion": {
+            "description": "LabVIEW year that every vipm command uses for this project, written to `.vipm/config.toml` next to vipm.toml before the first vipm call. Overrides the manifest's labview-version (for example, build 2024 code with LabVIEW 2026).",
+            "type": "string",
+            "pattern": "^[0-9]{4}$"
+          },
+          "labviewBitness": {
+            "description": "LabVIEW bitness written to `.vipm/config.toml` with labviewVersion (default: the manifest's labview-bitness, else 64).",
+            "type": "string",
+            "enum": ["32", "64"]
+          }
+        },
+        "anyOf": [
+          { "required": ["vcs"] },
+          {
+            "properties": { "enabled": { "enum": [false] } },
+            "required": ["enabled"]
+          }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "nonBlankString": { "type": "string", "pattern": "\\S" }
+  }
+}

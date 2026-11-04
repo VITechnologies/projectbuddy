@@ -1,0 +1,158 @@
+name: Add Project to Repository Variables
+
+on:
+  workflow_dispatch:
+    inputs:
+      pipeline_config:
+        description: Complete pipeline configuration JSON (must contain exactly one project).
+        required: true
+        type: string
+      labels:
+        description: Comma-separated self-hosted runner labels
+        required: false
+        type: string
+        default: self-hosted,windows
+      vipm_toml:
+        description: Complete VIPM manifest TOML. Paste it with its original line breaks.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-variables
+  cancel-in-progress: false
+
+jobs:
+  add-project:
+    name: Add Project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Upsert Project in Repository Variables
+        shell: python
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_VARIABLES_TOKEN }}
+          INPUT_PIPELINE_CONFIG: ${{ inputs.pipeline_config }}
+          INPUT_LABELS: ${{ inputs.labels }}
+          INPUT_VIPM_TOML: ${{ inputs.vipm_toml }}
+        run: |
+          import json
+          import os
+          import subprocess
+          import sys
+          import tomllib
+
+          DOCS = (f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/blob/{os.environ['GITHUB_SHA']}"
+                  "/docs/configuration-schema.md#adding-projects-with-the-manual-workflow")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8")
+
+          def fail(message):
+              print(f"::error::{message} See {DOCS}")
+              summary.write(f"## ❌ Project not added\n\n{message}\n")
+              sys.exit(1)
+
+          if not os.environ.get("GH_TOKEN", "").strip():
+              fail("Configure the ACTIONS_VARIABLES_TOKEN Actions secret with repository Variables read and write permission.")
+
+          def variable_command(*arguments, value=None):
+              try:
+                  return subprocess.run(
+                      ["gh", "variable", *arguments, "--repo", repo],
+                      input=value, check=True, capture_output=True, text=True)
+              except subprocess.CalledProcessError:
+                  fail(f"Unable to {arguments[0]} repository variables. Check that ACTIONS_VARIABLES_TOKEN is valid, "
+                       "has access to this repository, and has Variables read and write permission.")
+
+          try:
+              config = json.loads(os.environ.get("INPUT_PIPELINE_CONFIG", ""))
+          except ValueError:
+              fail("pipeline_config must be valid JSON.")
+          if not isinstance(config, dict):
+              fail("pipeline_config must be a JSON object.")
+          selected_projects = config.get("projects")
+          if not isinstance(selected_projects, list) or len(selected_projects) != 1:
+              fail("pipeline_config.projects must contain exactly one project.")
+          selected = selected_projects[0]
+          if not isinstance(selected, dict):
+              fail("pipeline_config.projects[0] must be an object.")
+          name = selected.get("name")
+          if not isinstance(name, str) or not name.strip():
+              fail("pipeline_config.projects[0].name must be a non-blank string.")
+
+          credential_validation = subprocess.run(
+              [sys.executable, ".github/scripts/validate-project-registration.py", "--validate-credentials"],
+              input=json.dumps(config), capture_output=True, text=True)
+          if credential_validation.returncode:
+              fail(credential_validation.stderr.strip() or "Pipeline configuration contains an invalid credential reference.")
+          validation = subprocess.run(
+              ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+               "try { if (-not (Test-Json -Json ([Console]::In.ReadToEnd()) "
+               "-SchemaFile pipeline-config.schema.json -ErrorAction Stop)) { exit 1 }; "
+               "exit 0 } catch { exit 1 }"],
+              input=json.dumps(config), capture_output=True, text=True)
+          if validation.returncode:
+              fail("Effective pipeline configuration must satisfy pipeline-config.schema.json; check field names, types, and required values.")
+          runtime_validation = subprocess.run(
+              [sys.executable, ".github/scripts/project_runtime.py", "--validate"],
+              input=json.dumps(config), capture_output=True, text=True)
+          if runtime_validation.returncode:
+              fail(f"Project runtime support is invalid: {runtime_validation.stderr.strip()}")
+
+          labels = [label.strip() for label in os.environ.get("INPUT_LABELS", "").split(",") if label.strip()]
+          if not labels:
+              fail("labels must contain at least one non-blank label.")
+
+          manifest = os.environ.get("INPUT_VIPM_TOML", "")
+          if not manifest.strip():
+              fail("vipm_toml must not be blank.")
+          try:
+              tomllib.loads(manifest)
+          except tomllib.TOMLDecodeError as error:
+              fail(f"vipm_toml is not valid TOML: {error}")
+
+          result = variable_command("list", "--json", "name,value")
+          current = {item["name"]: item["value"] for item in json.loads(result.stdout)}
+
+          def load(key, default, expected_type):
+              raw = current.get(key, "")
+              if not raw.strip():
+                  return default
+              try:
+                  value = json.loads(raw)
+              except ValueError:
+                  value = None
+              if not isinstance(value, expected_type):
+                  json_type = "array" if expected_type is list else "object"
+                  fail(f"Existing {key} must be a JSON {json_type}; fix it before adding projects.")
+              return value
+
+          projects = load("PROJECTS_OVERRIDE", [], list)
+          vipm_configs = load("VIPM_TOML_CONFIGS", {}, dict)
+
+          entry = {"name": name, "labels": labels, "pipelineConfig": config}
+          index = next((i for i, p in enumerate(projects) if isinstance(p, dict) and p.get("name") == name), None)
+          action = "Added" if index is None else "Updated"
+          if index is None:
+              projects.append(entry)
+          else:
+              projects[index] = entry
+
+          vipm_status = "updated" if name in vipm_configs else "added"
+          vipm_configs[name] = manifest
+
+          for key, value in (("PROJECTS_OVERRIDE", projects), ("VIPM_TOML_CONFIGS", vipm_configs)):
+              variable_command("set", key, value=json.dumps(value, indent=2))
+
+          summary.write(
+              f"## ✅ {action} project `{name}`\n\n"
+              f"| Setting | Value |\n|---|---|\n"
+              f"| `name` | `{name}` |\n"
+              f"| `vcs` | `{selected.get('vcs', 'not required for disabled project')}` |\n"
+              f"| `labels` | `{', '.join(labels)}` |\n| VIPM manifest | {vipm_status} |\n\n"
+              f"<details><summary>PROJECTS_OVERRIDE</summary>\n\n```json\n{json.dumps(projects, indent=2)}\n```\n</details>\n")
+          print(f"{action} '{name}' in PROJECTS_OVERRIDE.")

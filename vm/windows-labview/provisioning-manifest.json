@@ -1,0 +1,68 @@
+{
+  "schema": "sandbox-sbom-reporting/windows-labview-provisioning@1",
+  "os": {
+    "distribution": "windows",
+    "edition": "Pro",
+    "version": "11",
+    "release": "25H2",
+    "virtualBoxOsType": "Windows11_64",
+    "virtualBoxImageIndex": 6,
+    "iso": {
+      "filename": "Win11_25H2_English_x64_v2.iso",
+      "sha256": "768984706b909479417b2368438909440f2967ff05c6a9195ed2667254e465e3",
+      "provenance": "Operator-supplied Windows 11 25H2 x64 English media (not fetched or redistributed by automation). No public download URL is pinned; the builder only verifies the SHA-256 of a pre-staged local file."
+    }
+  },
+  "virtualBox": {
+    "diskGb": 120,
+    "memoryMb": 8192,
+    "cpus": 4,
+    "vramMb": 128,
+    "firmware": "efi64",
+    "chipset": "ich9",
+    "tpmType": "2.0",
+    "secureBoot": true,
+    "nestedPaging": true
+  },
+  "labview": {
+    "edition": "Professional",
+    "year": "2026",
+    "version": "26.5.0.49248-0+f96",
+    "installer": {
+      "filename": "ni-labview-2026_26.5.0.49248-0+f96_offline.iso",
+      "sha256": "211473386a502b566d066f03f2894c7777fd76aa9ba08dc7c8381b591f33e847",
+      "sizeBytes": 35854405632,
+      "provenance": "Operator-supplied, downloaded from the operator's NI account (ni.com); not fetched or redistributed by automation.",
+      "note": "Version 26.5.0 is the overall ISO bundle version, not the LabVIEW application version: the actual LabVIEW package (ni-labview-2026-core-en) is version 26.3.0 / DisplayVersion '2026 Q3', matching the 26.3.x pins used elsewhere in this repo (e.g. vm/ubuntu-labview/provisioning-manifest.json's labview.packageVersion 26.3.1.49165-0+f13). Confirmed 2026-11-02 via `nipkg info ni-labview-2026-core-en` against the mounted ISO's offline feed."
+    },
+    "package": {
+      "feedPath": "feeds/ni-labview-2026",
+      "topLevelPackage": "ni-labview-2026-core-en",
+      "provides": ["ni-labview", "ni-labview-2026", "ni-labview-x64"],
+      "note": "The ISO is a Debian-style nipkg repository (feeds/<product>/Packages + pool/*.nipkg), not a setup.exe wizard. 'Professional' edition is a licensing distinction applied after this same install (via ni-labview-2026-license), not a different top-level package; there is no separate '-pro' meta-package. Install with: nipkg feed-add --system --name=<name> <driveletter>:\\feeds\\ni-labview-2026 && nipkg update <name> && nipkg install --accept-eulas --yes --include-recommended ni-labview-2026-core-en."
+    }
+  },
+  "vipm": {
+    "version": "26.3.2",
+    "buildNumber": "4056",
+    "edition": "Professional",
+    "installerUrl": "https://traffic.libsyn.com/secure/jkinc/vipm-26.3.4056-windows-setup.exe",
+    "installerSha256": "fa7b03b4fd6a0bbe955ea6b4e4fbb312a5bce9b4f9b799cc4beb43ab62658cdb",
+    "publisherSigner": "James Kring, Inc.",
+    "verification": "This installer build is pinned by SHA-256 as a point-in-time value verified locally on 2026-11-01; JKI publishes new installer builds periodically so the authoritative gate is the Authenticode signer identity, not this hash. Verify with Get-AuthenticodeSignature reporting Status=Valid and SimpleName='James Kring, Inc.', matching docker/windows-sbom/VipmInstallerSignature.ps1."
+  },
+  "actionsRunner": {
+    "version": "2.338.0",
+    "winX64Filename": "actions-runner-win-x64-2.338.0.zip",
+    "winX64Sha256": "f48e0750a21812bca5f82de5f7f5aeae71abee647fab5a582f1742d07eba455f",
+    "downloadUrlTemplate": "https://github.com/actions/runner/releases/download/v{version}/{winX64Filename}",
+    "verification": "SHA-256 independently computed locally on 2026-11-02 from the downloaded asset (not scraped from the release page's rendered checksum list); GitHub publishes a new runner version periodically, so re-pin both fields together when bumping. Used by provision-windows-guest.py's register-runner subcommand to download and verify the runner package inside the guest before Register-WindowsRunner.ps1 configures it."
+  },
+  "powershell7": {
+    "version": "7.6.9",
+    "winX64MsiFilename": "PowerShell-7.6.9-win-x64.msi",
+    "winX64MsiSha256": "50d33c7494aaf82b987cfd4de3f232d04f91fdd4c0deeca8a669cced3e7cf8f9",
+    "downloadUrlTemplate": "https://github.com/PowerShell/PowerShell/releases/download/v{version}/{winX64MsiFilename}",
+    "verification": "SHA-256 independently computed locally on 2026-11-02 from the downloaded asset. Register-Runner.ps1 (#requires -Version 7.0) needs the real machine-wide MSI, NOT winget's Microsoft.PowerShell package -- that resolves to a broken per-user MSIX stub invisible to the dedicated runner service account (confirmed live during the q3-pro functional proof). provision-windows-guest.py's register-runner subcommand installs this MSI if pwsh isn't already present."
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "schema": "sandbox-sbom-reporting/ubuntu-labview-provisioning@1",
+  "os": {
+    "distribution": "ubuntu",
+    "version": "24.04",
+    "codename": "noble",
+    "virtualBoxOsType": "Ubuntu24_LTS_64",
+    "iso": {
+      "filename": "ubuntu-24.04.4-desktop-amd64.iso",
+      "url": "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-desktop-amd64.iso",
+      "sha256": "3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e"
+    }
+  },
+  "virtualBox": {
+    "diskGb": 80,
+    "memoryMb": 12288,
+    "cpus": 6,
+    "vramMb": 128
+  },
+  "labview": {
+    "edition": "pro",
+    "year": "2026",
+    "quarter": "Q3",
+    "repository": "https://download.ni.com/ni-linux-desktop/LabVIEW/2026/Q3/f1/pro/deb/ni-labview-2026/noble",
+    "repositoryDistribution": "noble",
+    "repositoryComponent": "ni-labview-2026",
+    "repositoryKey": "ni-signing-authority.asc",
+    "repositoryKeyFingerprint": "D1DD926720DF53BD5C442FABA83F33D0666E7520",
+    "package": "ni-labview-2026-pro",
+    "packageVersion": "26.3.1.49165-0+f13",
+    "installPath": "/usr/local/natinst/LabVIEW-2026-64",
+    "executableBasenames": [
+      "labview",
+      "labviewprofull"
+    ],
+    "viServerPort": 3363
+  },
+  "vipm": {
+    "version": "26.3.2-4056",
+    "url": "https://traffic.libsyn.com/secure/jkinc/vipm_26.3.2-4056_amd64.deb",
+    "sha256": "89f50b8dc7ac023224f1b8f822ff99ac221ad31c67bae06951c8d1e09e7eef6c"
+  }
+}

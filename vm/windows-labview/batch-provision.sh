@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+# Serially provision one or more Windows LabVIEW runner VMs from
+# runner-inventory.json, stopping automation at "ready for the operator to
+# activate LabVIEW/VIPM" -- activation is the ONE remaining manual,
+# interactive, human-gated step (see README.md's operator runbook).
+# create-vm, install-vipm, install-labview, AND runner registration
+# (register-runner, over WinRM, no interactive session) are all automated: a
+# VM that reaches "ready-for-activation" is already a registered, online
+# GitHub Actions runner for its target repo -- just not yet licensed.
+#
+# Processes every entry with "status": "queued" in order, one VM at a time
+# (concurrent create-vm/install-vipm/install-labview runs contend heavily for
+# host CPU/disk during first-boot Windows Update/Defender housekeeping --
+# confirmed live 2026-11-02, see README's "known operational constraint"
+# note). A human can activate any VM that reaches "ready-for-activation"
+# while this script keeps building the next one. The moment a VM reaches
+# "ready-for-activation" this script calls vnc-console.sh to automatically
+# pop open a VNC console for it (see issue #176) -- no manual VRDE/remmina
+# setup needed before activating LabVIEW/VIPM.
+#
+# A transient per-VM failure (of any kind) is retried up to MAX_ATTEMPTS
+# times (default 3; see issue #204), tearing the VM down and rebuilding it
+# from scratch between attempts -- create-vm refuses to proceed if a VM by
+# that name already exists.
+#
+# Usage:
+#   ./batch-provision.sh [--inventory PATH] [--dry-run]
+#
+# Add VMs to build by editing runner-inventory.json directly: add an entry
+# with "status": "queued" and the vmName/winrmHostPort/targetRepo/runnerName/
+# runnerLabels/dedicatedServiceAccount you want (see the "Adding a VM to the
+# batch queue" section of README.md). register-runner requires a
+# RUNNER_REGISTRATION_PAT repo secret -- see README for scope/setup.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+INVENTORY="$SCRIPT_DIR/runner-inventory.json"
+DRY_RUN=0
+# GH_REPO, STORAGE_ROOT, WIN_ISO, VIPM_INSTALLER, and LABVIEW_ISO have no
+# default -- this script is a generic engine shared by any fork; set them
+# as environment variables before running (see README.md's "SandboxSBOMReporting's
+# own configuration" section for this repo's real values). STORAGE_ROOT
+# additionally has operational history worth knowing before overriding:
+# /run/media/sergio/Data (the original storage_root) filled to 0 bytes free
+# on 2026-11-02 while building the core/launcher VMs -- see runner-inventory.json's
+# hostCapacity.notes. An external cold-storage-only drive exists for
+# relocating powered-off/failed VM disks, never as a live VM storage_root.
+# Check real headroom with `df -h` before provisioning.
+GH_REPO="${GH_REPO:-}"
+STORAGE_ROOT="${STORAGE_ROOT:-}"
+WIN_ISO="${WIN_ISO:-}"
+VIPM_INSTALLER="${VIPM_INSTALLER:-}"
+LABVIEW_ISO="${LABVIEW_ISO:-}"
+
+# How long to wait for the FIRST boot's unattended Windows Setup + WinRM
+# self-enable to finish, polling every POLL_INTERVAL seconds. install-vipm
+# and install-labview each handle their own internal power-cycle/wait-ready
+# polling inside the workflow, so this is the one wait this script owns.
+FIRST_BOOT_TIMEOUT_SEC="${FIRST_BOOT_TIMEOUT_SEC:-3600}"
+POLL_INTERVAL="${POLL_INTERVAL:-20}"
+
+# Bounded auto-retry for transient per-VM failures (issue #204): a fresh
+# VirtualBox/host-side hiccup, a dropped WinRM connection, etc. shouldn't
+# require a full manual re-dispatch. 3 total attempts (2 retries) by
+# default -- bounded, not infinite, and configurable. Each failed attempt's
+# VM is fully torn down (powered off + unregistered + disk deleted) before
+# the next attempt, since create-vm refuses to proceed if a VM by that name
+# already exists.
+MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --inventory) INVENTORY="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+log() { printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >&2; }
+
+run() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf '[dry-run] %s\n' "$*"
+  else
+    "$@"
+  fi
+}
+
+set_status() {
+  local vm_name="$1" status="$2" note="${3:-}"
+  [[ "$DRY_RUN" == "1" ]] && { log "[dry-run] would set $vm_name status=$status note=$note"; return 0; }
+  local tmp; tmp="$(mktemp)"
+  jq --arg vm "$vm_name" --arg status "$status" --arg note "$note" \
+    '(.vms[] | select(.vmName == $vm)) |= (.status = $status | if $note != "" then .notes = $note else . end)' \
+    "$INVENTORY" > "$tmp"
+  mv "$tmp" "$INVENTORY"
+}
+
+# Dispatch a workflow_dispatch run and block until it completes, printing its
+# conclusion. Returns the run's conclusion on stdout ("success"/"failure"/...).
+dispatch_and_wait() {
+  local phase="$1"; shift
+  log "Dispatching phase=$phase with: $*"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "success"
+    return 0
+  fi
+  local before_run_id
+  before_run_id="$(gh run list --repo "$GH_REPO" --workflow=provision-windows-labview-vm.yml --limit 1 --json databaseId -q '.[0].databaseId // 0')"
+  # Redirect gh's own confirmation text (it prints the new run's URL to stdout)
+  # to stderr -- this function's stdout is captured by the caller as the
+  # eventual conclusion, and must contain nothing else.
+  gh workflow run provision-windows-labview-vm.yml --repo "$GH_REPO" --ref main -f "phase=$phase" "$@" >&2
+  local run_id=""
+  for _ in $(seq 1 12); do
+    sleep 5
+    run_id="$(gh run list --repo "$GH_REPO" --workflow=provision-windows-labview-vm.yml --limit 1 --json databaseId -q '.[0].databaseId // 0')"
+    [[ "$run_id" != "$before_run_id" && "$run_id" != "0" ]] && break
+  done
+  [[ -n "$run_id" && "$run_id" != "0" ]] || { log "ERROR: could not find the new workflow run"; echo "failure"; return 0; }
+  log "Watching run $run_id ..."
+  while true; do
+    local status conclusion
+    status="$(gh run view "$run_id" --repo "$GH_REPO" --json status -q '.status')"
+    [[ "$status" == "completed" ]] && break
+    sleep 15
+  done
+  conclusion="$(gh run view "$run_id" --repo "$GH_REPO" --json conclusion -q '.conclusion')"
+  log "Run $run_id concluded: $conclusion"
+  echo "$conclusion"
+}
+
+wait_for_first_boot_winrm() {
+  local port="$1" vm_name="$2"
+  log "Waiting up to ${FIRST_BOOT_TIMEOUT_SEC}s for $vm_name's first-boot WinRM to respond on port $port ..."
+  [[ "$DRY_RUN" == "1" ]] && { log "[dry-run] would wait for WinRM"; return 0; }
+  # Track REAL wall-clock elapsed time (not an incremented counter): a failed
+  # wait-ready attempt can itself block for up to its own ~55-60s read
+  # timeout when TCP is open but WinRM's HTTP layer never responds, so
+  # incrementing by just $POLL_INTERVAL per loop undercounted real elapsed
+  # time by roughly 4x in practice (confirmed live 2026-11-02 -- a VM stuck
+  # in that exact state took ~4 real hours to hit a "3600s" timeout).
+  local start_epoch; start_epoch="$(date +%s)"
+  local next_heartbeat=300
+  local venv="/tmp/batch-provision-winrm-venv"
+  if [[ ! -x "$venv/bin/python3" ]]; then
+    python3 -m venv "$venv"
+    "$venv/bin/pip" install --quiet pywinrm
+  fi
+  while true; do
+    local elapsed=$(( $(date +%s) - start_epoch ))
+    (( elapsed >= FIRST_BOOT_TIMEOUT_SEC )) && break
+    # Fail fast if the VM itself has died rather than waiting out the full
+    # timeout polling a corpse -- confirmed live 2026-11-03: a VirtualBox
+    # internal bug (XPCOM "AddRef: illegal refcnt" assertion in
+    # ipcDConnectService.cpp, VBoxSVC crashing shortly after) powered off
+    # four VMs within 15-46s of "successfully started", but this loop still
+    # waited the full 3600s each on pure WinRM silence before reporting
+    # failure. A clean retry after VBoxSVC's next auto-respawn ran fine, so
+    # this is a transient host-side fault, not a guest/Windows Setup issue --
+    # surface it immediately so an operator can retry sooner.
+    local vm_state; vm_state="$(VBoxManage showvminfo "$vm_name" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+    if [[ "$vm_state" != "running" ]]; then
+      log "ERROR: $vm_name is no longer running (VMState=$vm_state) after ${elapsed}s -- likely a VirtualBox-side crash, not a WinRM delay. Check VBox.log and VBoxSVC health before retrying."
+      return 1
+    fi
+    if timeout 3 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+      if "$venv/bin/python3" "$REPO_ROOT/vm/windows-labview/provision-windows-guest.py" \
+          --port "$port" --password-file "$WINRM_PASSWORD_FILE" wait-ready >/dev/null 2>&1; then
+        log "$vm_name WinRM is ready after ${elapsed}s."
+        return 0
+      fi
+    fi
+    elapsed=$(( $(date +%s) - start_epoch ))
+    # Progress heartbeat every ~5 min of REAL time so a human or future agent
+    # tailing the log can tell this is still polling, not stuck silently.
+    if (( elapsed >= next_heartbeat )); then
+      log "$vm_name: still waiting for WinRM (${elapsed}s elapsed, timeout ${FIRST_BOOT_TIMEOUT_SEC}s) ..."
+      next_heartbeat=$(( next_heartbeat + 300 ))
+    fi
+    sleep "$POLL_INTERVAL"
+  done
+  log "ERROR: $vm_name WinRM did not become ready within ${FIRST_BOOT_TIMEOUT_SEC}s."
+  return 1
+}
+
+# Tear down whatever a failed attempt left behind so the next retry's
+# create-vm (which refuses to proceed if a VM by that name already exists)
+# starts clean. Safe to call even if the VM was never created (e.g. a
+# create-vm dispatch itself failed) -- each step no-ops harmlessly then.
+cleanup_vm_for_retry() {
+  local vm_name="$1"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "[dry-run] would power off/unregister $vm_name before retrying"
+    return 0
+  fi
+  if VBoxManage list vms 2>/dev/null | grep -Fq "\"$vm_name\""; then
+    local state; state="$(VBoxManage showvminfo "$vm_name" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+    if [[ "$state" != "poweroff" && -n "$state" ]]; then
+      log "$vm_name: powering off before retry (was: $state)"
+      VBoxManage controlvm "$vm_name" poweroff >/dev/null 2>&1 || true
+      sleep 2
+    fi
+    log "$vm_name: unregistering and deleting before retry"
+    VBoxManage unregistervm "$vm_name" --delete >/dev/null 2>&1 || true
+  fi
+}
+
+[[ -f "$INVENTORY" ]] || { echo "Inventory file not found: $INVENTORY (copy runner-inventory.example.json to runner-inventory.json and fill in your own real VM entries to get started)" >&2; exit 2; }
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+for required_var in GH_REPO STORAGE_ROOT WIN_ISO VIPM_INSTALLER LABVIEW_ISO; do
+  [[ -n "${!required_var}" ]] || { echo "$required_var is required (no default -- set it as an environment variable)" >&2; exit 2; }
+done
+WINRM_PASSWORD_FILE="${WINRM_PASSWORD_FILE:-/run/user/$(id -u)/win-vm-password}"
+[[ -f "$WINRM_PASSWORD_FILE" ]] || { echo "WINRM_PASSWORD_FILE not found: $WINRM_PASSWORD_FILE (set the env var to override)" >&2; exit 2; }
+
+mapfile -t QUEUED < <(jq -r '.vms[] | select(.status == "queued") | .vmName' "$INVENTORY")
+if [[ ${#QUEUED[@]} -eq 0 ]]; then
+  log "No queued VMs found in $INVENTORY. Add an entry with \"status\": \"queued\" to build one."
+  exit 0
+fi
+log "Queued VMs to build serially: ${QUEUED[*]}"
+
+# Runs ONE attempt at fully provisioning $vm_name through register-runner.
+# Returns 0 on success, 1 on any phase failure -- sets FAILURE_REASON (a
+# plain global, not local, so the caller can read it after the return)
+# describing which phase failed, for status-note/log purposes. Does NOT
+# call set_status itself on failure -- that's the retry wrapper's job,
+# once all attempts are exhausted, so a transient failure that a retry
+# fixes never gets recorded as "failed" in the inventory at all.
+provision_vm_once() {
+  local vm_name="$1" port="$2" repo="$3" runner_name="$4" runner_labels="$5" service_account="$6"
+  local conclusion
+
+  conclusion="$(dispatch_and_wait create-vm \
+    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "iso_path=$WIN_ISO" -f "winrm_host_port=$port")"
+  if [[ "$conclusion" != "success" ]]; then
+    FAILURE_REASON="create-vm: $conclusion"; return 1
+  fi
+
+  if ! wait_for_first_boot_winrm "$port" "$vm_name"; then
+    FAILURE_REASON="first-boot WinRM never became ready"; return 1
+  fi
+
+  conclusion="$(dispatch_and_wait install-vipm \
+    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "vipm_installer_path=$VIPM_INSTALLER" -f "winrm_host_port=$port")"
+  if [[ "$conclusion" != "success" ]]; then
+    FAILURE_REASON="install-vipm: $conclusion"; return 1
+  fi
+
+  conclusion="$(dispatch_and_wait install-labview \
+    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "labview_iso_path=$LABVIEW_ISO" -f "winrm_host_port=$port")"
+  if [[ "$conclusion" != "success" ]]; then
+    FAILURE_REASON="install-labview: $conclusion"; return 1
+  fi
+
+  conclusion="$(dispatch_and_wait register-runner \
+    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "winrm_host_port=$port" \
+    -f "target_repo=$repo" -f "runner_name=$runner_name" -f "runner_labels=$runner_labels" \
+    -f "dedicated_service_account_name=$service_account")"
+  if [[ "$conclusion" != "success" ]]; then
+    FAILURE_REASON="register-runner: $conclusion"; return 1
+  fi
+
+  return 0
+}
+
+FAILURES=()
+READY=()
+for vm_name in "${QUEUED[@]}"; do
+  port="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .winrmHostPort' "$INVENTORY")"
+  repo="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .targetRepo' "$INVENTORY")"
+  runner_name="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .runnerName // ""' "$INVENTORY")"
+  runner_labels="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .runnerLabels // ""' "$INVENTORY")"
+  service_account="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .dedicatedServiceAccount // ""' "$INVENTORY")"
+  if [[ -z "$runner_name" || -z "$runner_labels" || -z "$service_account" ]]; then
+    log "FAILED: $vm_name is missing runnerName/runnerLabels/dedicatedServiceAccount -- fill these in before queueing (register-runner needs them)."
+    set_status "$vm_name" "failed" "queued without runnerName/runnerLabels/dedicatedServiceAccount"
+    FAILURES+=("$vm_name")
+    continue
+  fi
+  set_status "$vm_name" "provisioning"
+
+  succeeded=0
+  FAILURE_REASON=""
+  for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+    log "=== Building $vm_name (attempt $attempt of $MAX_ATTEMPTS; target repo: $repo, WinRM port: $port) ==="
+    if provision_vm_once "$vm_name" "$port" "$repo" "$runner_name" "$runner_labels" "$service_account"; then
+      succeeded=1
+      break
+    fi
+    log "$vm_name attempt $attempt of $MAX_ATTEMPTS FAILED ($FAILURE_REASON)"
+    if (( attempt < MAX_ATTEMPTS )); then
+      cleanup_vm_for_retry "$vm_name"
+    fi
+  done
+
+  if [[ "$succeeded" != "1" ]]; then
+    log "FAILED: $vm_name exhausted all $MAX_ATTEMPTS attempts (last failure: $FAILURE_REASON)"
+    set_status "$vm_name" "failed" "exhausted $MAX_ATTEMPTS attempts; last failure: $FAILURE_REASON"
+    FAILURES+=("$vm_name")
+    continue
+  fi
+
+  set_status "$vm_name" "ready-for-activation" "VIPM + LabVIEW installed and runner '$runner_name' registered $(date -u '+%Y-%m-%d'); awaiting operator activation only."
+  READY+=("$vm_name")
+  log "=== $vm_name is READY FOR ACTIVATION (port $port, repo $repo, runner $runner_name already registered) -- see README's 'Activate LabVIEW + VIPM' step. ==="
+  if [[ "$DRY_RUN" != "1" ]]; then
+    "$SCRIPT_DIR/vnc-console.sh" open "$vm_name" || log "WARNING: $vm_name: vnc-console.sh open failed -- open it manually (see README's 'Activate LabVIEW + VIPM' step)."
+  fi
+done
+
+log "Batch complete. Ready for activation: ${READY[*]:-none}. Failed: ${FAILURES[*]:-none}."
+[[ ${#FAILURES[@]} -eq 0 ]]
+
