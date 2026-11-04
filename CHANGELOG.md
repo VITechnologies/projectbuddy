@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.1
+
+`Build-Sbom.ps1`'s manifest dependency install (`vipm install -y`, resolving
+and installing a project's `vipm.toml` `[dependencies]` before any package
+build) now retries once with `VIPM_DEBUG=1` when VIPM reports its
+`package_set_install` command made no progress -- the same recovery already
+proven for the per-package `library_add_package` stall. Found live-debugging
+`VITechnologies/SandboxSBOMReporting`'s issue #240: a real dependency-set
+install stalled with true zero progress for minutes on end, with no retry
+path at all, unlike the sibling per-package install which already recovers
+from the equivalent stall automatically.
+
 ## v0.2.1
 
 `vm/windows-labview/vnc-bootstrap.py` now accepts an explicit `--inventory`
