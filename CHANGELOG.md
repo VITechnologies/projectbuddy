@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.3
+
+Reverts v0.3.1/v0.3.2's `Invoke-ManifestDependencyInstall` /
+`Stop-StalledVipmDesktop` retry-and-kill-restart logic for the
+`package_set_install` manifest dependency stall. A live native end-to-end
+re-test of this exact mechanism on `VITechnologies/SandboxSBOMReporting`'s
+issue #240 showed the kill-and-retry correctly stopped and restarted the
+stalled VIPM Desktop, reconnected cleanly, and still hit the identical
+stall on the same package -- proving the stall was never a frozen process.
+Interactive host investigation (issue #244) then found the real cause:
+LabVIEW's UI thread hanging at startup under a dedicated runner service
+account because of the Viewpoint TSVN Toolkit project provider, so VI
+Server reset every VIPM connection. That is fixed on the host, not in
+pipeline code, and a hung LabVIEW cannot be recovered by retrying or
+restarting VIPM Desktop around it -- a retry just re-triggers the same
+hang and risks masking a future, different, genuinely-unrecoverable LabVIEW
+hang as a transient stall instead of failing fast. Manifest dependency
+install is therefore a bare `vipm install -y` call again, matching the
+consumer's own reviewed and accepted behavior. v0.3.1/v0.3.2 remain
+published (GitHub immutable releases) but are superseded; do not pin to
+them.
+
 ## v0.3.2
 
 `Invoke-ManifestDependencyInstall`'s `package_set_install` stall retry

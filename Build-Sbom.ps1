@@ -677,97 +677,6 @@ function Invoke-PackageVipmInstall {
     }
 }
 
-function Stop-StalledVipmDesktop {
-    <#
-    Forcibly stops any running VI Package Manager Desktop process, waiting
-    for it to fully exit. A VIPM install retry must start a genuinely fresh
-    Desktop instance instead of trying to reuse one already wedged
-    mid-operation: a live retry without this step hung for 10 minutes on
-    "wait for VIPM startup" instead of recovering, because the vipm CLI
-    could not initialize a fresh Desktop while the stalled one still held
-    its resources (see issue #240).
-    #>
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Justification = "Recovers a stalled retry; never user-invoked interactively.")]
-    param(
-        [ValidateRange(1, 300)]
-        [int]$TimeoutSeconds = 60
-    )
-    foreach ($process in @(Get-Process -Name "VI Package Manager" -ErrorAction SilentlyContinue)) {
-        Stop-Process -Id $process.Id -Force -ErrorAction Stop
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            throw "VIPM Desktop PID $($process.Id) did not exit within $TimeoutSeconds seconds after being stopped."
-        }
-    }
-}
-
-function Invoke-ManifestDependencyInstall {
-    <#
-    Installs a project's declared vipm.toml dependencies with `vipm install`
-    (no file argument). Retries once with VIPM_DEBUG=1 if VIPM reports its
-    'package_set_install' command made no progress, the same recovery
-    already proven for Invoke-PackageVipmInstall's 'library_add_package'
-    stalls (see issue #240): a live reproduction showed VIPM Desktop can
-    stall resolving a dependency set with true zero progress for minutes,
-    and retrying with debug tracing enabled is the established mitigation
-    for the equivalent single-package stall. Unlike that sibling, the
-    stalled Desktop process must be stopped before retrying: a live retry
-    that left it running hung for 10 minutes on VIPM's own
-    "wait for VIPM startup" readiness check instead of recovering.
-    #>
-    param(
-        [string[]]$Arguments,
-        [string]$WorkingDirectory,
-        [string]$DebugLogPath,
-        [scriptblock]$StopStalledDesktop = { Stop-StalledVipmDesktop }
-    )
-    try {
-        Invoke-Vipm -Arguments $Arguments -WorkingDirectory $WorkingDirectory -ShowProgress
-        return $null
-    } catch {
-        $initialFailure = $_.Exception.Message
-        if ($initialFailure -notmatch '(?is)package_set_install.*made no progress for \d+(?:\.\d+)?s') {
-            throw
-        }
-    }
-
-    Write-PipelineLog -Message "VIPM install stalled in package_set_install; stopping the stalled Desktop and retrying once with VIPM_DEBUG=1. Trace: '$DebugLogPath'." -Level WARN
-    $previousDebug = [Environment]::GetEnvironmentVariable("VIPM_DEBUG", "Process")
-    $previousLogPath = [Environment]::GetEnvironmentVariable("VIPM_DEBUG_LOG", "Process")
-    try {
-        try {
-            [System.IO.File]::WriteAllText(
-                $DebugLogPath,
-                "Initial failure: $initialFailure$([Environment]::NewLine)",
-                [System.Text.UTF8Encoding]::new($false)
-            )
-        } catch {
-            throw "Initial VIPM install failure: $initialFailure The diagnostic retry was not attempted because trace file '$DebugLogPath' could not be created: $($_.Exception.Message)"
-        }
-        try {
-            & $StopStalledDesktop
-        } catch {
-            throw "Initial VIPM install failure: $initialFailure The diagnostic retry was not attempted because the stalled VIPM Desktop process could not be stopped: $($_.Exception.Message)"
-        }
-        $env:VIPM_DEBUG = "1"
-        $env:VIPM_DEBUG_LOG = $DebugLogPath
-        try {
-            Invoke-Vipm -Arguments $Arguments -WorkingDirectory $WorkingDirectory -ShowProgress
-        } catch {
-            throw "Initial VIPM install failure: $initialFailure Retry with VIPM_DEBUG=1 failed: $($_.Exception.Message) VIPM_DEBUG trace: '$DebugLogPath'."
-        }
-        try {
-            Remove-Item -LiteralPath $DebugLogPath -Force -ErrorAction Stop
-            return $null
-        } catch {
-            Write-PipelineLog -Message "VIPM manifest dependency install succeeded after retry, but its debug trace '$DebugLogPath' could not be removed and will be retained." -Level WARN
-            return $DebugLogPath
-        }
-    } finally {
-        [Environment]::SetEnvironmentVariable("VIPM_DEBUG", $previousDebug, "Process")
-        [Environment]::SetEnvironmentVariable("VIPM_DEBUG_LOG", $previousLogPath, "Process")
-    }
-}
-
 function Invoke-PackageBuild {
     <#
     Builds each planned VIPB target with `vipm build <target>`, installs the
@@ -798,12 +707,7 @@ function Invoke-PackageBuild {
     $lvArgs = @("--labview-version", $LabviewVersion, "--labview-bitness", $LabviewBitness)
     if ($Plan.Count -gt 0) {
         Write-PipelineLog -Message "Installing manifest dependencies before building VI packages..." -Level INFO
-        $manifestDebugLogPath = [System.IO.Path]::Combine($archiveDir, "manifest-dependencies-vipm-debug.log")
-        if (Test-Path -LiteralPath $manifestDebugLogPath) {
-            $timestamp = (Get-Date).ToString("yyyyMMdd-HHmmss-fff")
-            $manifestDebugLogPath = [System.IO.Path]::Combine($archiveDir, "manifest-dependencies-vipm-debug-$timestamp.log")
-        }
-        $null = Invoke-ManifestDependencyInstall -Arguments (@("install", "-y") + $lvArgs) -WorkingDirectory $ProjectDir -DebugLogPath $manifestDebugLogPath
+        Invoke-Vipm -Arguments (@("install", "-y") + $lvArgs) -WorkingDirectory $ProjectDir -ShowProgress
         $dependencies = ConvertFrom-Json -InputObject (Invoke-Vipm -Arguments (@("list", "--installed") + $lvArgs) -WorkingDirectory $ProjectDir -Json)
         if ($null -eq $dependencies.dependencies) {
             throw "VIPM returned no dependency inventory after installing manifest dependencies."
