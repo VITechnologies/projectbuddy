@@ -1,0 +1,50 @@
+name: Toolchain Smoke Test
+
+# Minimal, project-agnostic reusable workflow -- proves the
+# VITechnologies/projectbuddy reusable-workflow consumption mechanism
+# end-to-end (see README.md "Consumption model"). It has no side effects:
+# it only reports tool presence/versions and fails if any requested tool
+# is missing. Callers invoke this via:
+#
+#   uses: VITechnologies/projectbuddy/.github/workflows/toolchain-smoke-test.yml@<tag>
+#
+# pinned to a release tag whose commit SHA the caller independently
+# documents and verifies, matching this repository's documented
+# consumption contract.
+
+on:
+  workflow_call:
+    inputs:
+      tool-names:
+        description: "Comma-separated list of command names to check for on PATH (e.g. 'git,pwsh')."
+        required: true
+        type: string
+      runs-on-json:
+        description: "Runner label selector, JSON-encoded (e.g. '\"ubuntu-latest\"' or '[\"self-hosted\",\"windows\"]')."
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ${{ fromJSON(inputs.runs-on-json) }}
+    steps:
+      - name: Checkout ProjectBuddy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install PowerShell (if absent)
+        shell: bash
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh not found; this reusable workflow requires a runner with PowerShell 7 available." >&2
+            exit 1
+          fi
+
+      - name: Run Toolchain Presence Check
+        shell: pwsh
+        run: |
+          $toolNames = '${{ inputs.tool-names }}' -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          ./scripts/Test-ToolchainPresence.ps1 -ToolNames $toolNames
