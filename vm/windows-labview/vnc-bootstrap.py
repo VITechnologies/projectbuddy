@@ -14,8 +14,9 @@ own nsExec-captured logging, not here.
 
 The exact sequence below (wake the display, Win+R -> cmd -> Ctrl+Shift+Enter
 -> UAC Yes -> run the installer from the auxiliary drive) was live-validated
-manually against a real post-restart VM on 2026-11-03 before being automated
-here.
+manually against a real post-restart VM on 2026-11-03 -- see
+https://github.com/VITechnologies/SandboxSBOMReporting/issues/199#issuecomment-6602003786
+for the full evidence trail this script automates.
 
 Requires `vncdotool` (not a tracked project dependency -- set up a venv):
     python3 -m venv .venv && .venv/bin/pip install -r vnc-bootstrap-requirements.txt
@@ -106,10 +107,12 @@ def wait_for_guest_stability(vm_name: str, oobe_timeout: float, restart_timeout:
             "(this guest may not have hit the #188 restart, or it simply needs more time)")
 
 
-def open_vnc(vm_name: str, script_dir: Path, vnc_port: "int | None") -> tuple[str, int, str]:
+def open_vnc(vm_name: str, script_dir: Path, vnc_port: "int | None", inventory: "Path | None" = None) -> tuple[str, int, str]:
     cmd = [str(script_dir / "vnc-console.sh"), "open", vm_name, "--no-launch"]
     if vnc_port is not None:
         cmd += ["--port", str(vnc_port)]
+    if inventory is not None:
+        cmd += ["--inventory", str(inventory)]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     output = result.stderr
     address_match = re.search(r"^Address:\s+(\S+)", output, re.MULTILINE)
@@ -120,8 +123,11 @@ def open_vnc(vm_name: str, script_dir: Path, vnc_port: "int | None") -> tuple[st
     return host, int(port_str), password_match.group(1)
 
 
-def close_vnc(vm_name: str, script_dir: Path) -> None:
-    subprocess.run([str(script_dir / "vnc-console.sh"), "close", vm_name], capture_output=True, text=True)
+def close_vnc(vm_name: str, script_dir: Path, inventory: "Path | None" = None) -> None:
+    cmd = [str(script_dir / "vnc-console.sh"), "close", vm_name]
+    if inventory is not None:
+        cmd += ["--inventory", str(inventory)]
+    subprocess.run(cmd, capture_output=True, text=True)
 
 
 def vncdo(host: str, port: int, password: str, *args: str, timeout: float = 30.0) -> str:
@@ -245,6 +251,7 @@ def main() -> int:
     parser.add_argument("--winrm-host", default="127.0.0.1")
     parser.add_argument("--winrm-host-port", type=int, required=True, help="Host-side NAT port forwarded to the guest's WinRM port (see build-virtualbox.sh's WINRM_HOST_PORT).")
     parser.add_argument("--vnc-port", type=int, default=None, help="Explicit VNC port; default lets vnc-console.sh derive one.")
+    parser.add_argument("--inventory", type=Path, default=None, help="Explicit runner-inventory.json path to pass through to vnc-console.sh -- needed when this script is invoked from a location (e.g. a consumed pinned release) other than where the real inventory file lives; default lets vnc-console.sh use its own next-to-itself default.")
     parser.add_argument("--volume-label", default="SBOMNSISAUX", help="Volume label of the auxiliary ISO built by build-nsis-bootstrap-iso.sh.")
     parser.add_argument("--installer-name", default="winrm-setup-installer.exe")
     parser.add_argument("--oobe-timeout", type=float, default=1800.0, help="Seconds to wait for first OOBE/auto-logon.")
@@ -265,13 +272,13 @@ def main() -> int:
     try:
         wait_for_guest_stability(args.vm_name, args.oobe_timeout, args.restart_timeout, args.settle_seconds)
 
-        host, port, password = open_vnc(args.vm_name, script_dir, args.vnc_port)
+        host, port, password = open_vnc(args.vm_name, script_dir, args.vnc_port, args.inventory)
         log(f"VNC console open at {host}:{port}")
         try:
             wake_and_verify_desktop(host, port, password, args.wake_timeout, args.wake_poll_interval)
             launch_installer(host, port, password, args.volume_label, args.installer_name)
         finally:
-            close_vnc(args.vm_name, script_dir)
+            close_vnc(args.vm_name, script_dir, args.inventory)
 
         log(f"polling WinRM at {args.winrm_host}:{args.winrm_host_port} for up to {args.winrm_timeout:.0f}s")
         if poll_winrm_ready(args.winrm_host, args.winrm_host_port, args.winrm_timeout):

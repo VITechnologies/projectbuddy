@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.2.1
+
+`vm/windows-labview/vnc-bootstrap.py` now accepts an explicit `--inventory`
+flag (passed through to `vnc-console.sh`), needed when this script runs
+from a location other than where a consumer's real `runner-inventory.json`
+lives (e.g. checked out as a pinned release into a subdirectory) -- found
+while wiring `VITechnologies/SandboxSBOMReporting`'s real production
+cutover (epic #207's #212): without this, the consumer's pinned
+`vncPort`/`winrmHostPort` lookups would silently miss (falling back to
+this engine's own derived-port logic instead of the consumer's real,
+intentional inventory values).
+
 ## v0.2.0
 
 First real engine release: the VM-provisioning pipeline
