@@ -314,23 +314,25 @@
                      block the specialize pass itself, risking the whole Setup
                      sequence, not just this one optional step.
 
-                     TEMPORARY DIAGNOSTIC VARIANT (SandboxSBOMReporting#290): a real-VM
-                     test with this command actually running the installer hit a
-                     deterministic "computer restarted unexpectedly" Windows Setup
-                     resume-corruption loop before OOBE. To isolate whether that's
-                     caused by running the installer during the specialize pass, vs.
-                     merely having a 3rd non-hot-pluggable SATA device attached (see
-                     #290's two hypotheses), this command is temporarily scoped down to
-                     ONLY stage (copy) the installer to C:\vm-provisioning; it does NOT
-                     execute it. If a real-VM build with this variant still hits the
-                     same corruption, the 3-SATA-device topology itself is implicated
-                     (hypothesis 2); if it reaches OOBE cleanly, the installer's
-                     execution during specialize is implicated instead (hypothesis 1).
-                     Revert to actually running the installer once #290 is resolved. -->
+                     TEMPORARY DIAGNOSTIC VARIANT, round 2 (SandboxSBOMReporting#290):
+                     round 1 (copy-only, no execution, still enumerating/reading the
+                     SBOMSVCAUX volume via Get-Volume + Copy-Item) hit the IDENTICAL
+                     "computer restarted unexpectedly" resume-corruption loop as the
+                     original execute-the-installer variant, ruling out "the
+                     installer's execution" as the sole necessary trigger. This round
+                     makes the command a genuine no-op (no Get-Volume, no optical-media
+                     access at all) while build-virtualbox.sh's ENABLE_SERVICE_BOOTSTRAP
+                     still attaches the 3rd, non-hot-pluggable SATA device. If THIS
+                     still crashes, the 3-SATA-device topology alone is sufficient
+                     (hypothesis 2 confirmed, independent of what the specialize pass
+                     actually does); if it reaches OOBE cleanly, some form of touching
+                     the new device during the specialize pass is still implicated,
+                     narrower than originally thought. Revert to actually running the
+                     installer once #290 is resolved. -->
                 <RunAsynchronousCommand>
                     <Order>10</Order>
-                    <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$j = Start-Job { $d = (Get-Volume | Where-Object FileSystemLabel -eq 'SBOMSVCAUX').DriveLetter; if ($d) { New-Item -ItemType Directory -Force -Path 'C:\vm-provisioning' | Out-Null; Copy-Item -Path ($d + ':\winrm-service-bootstrap-installer.exe') -Destination 'C:\vm-provisioning\winrm-service-bootstrap-installer.exe' -Force } }; Wait-Job $j -Timeout 60 | Out-Null; Remove-Job $j -Force"</Path>
-                    <Description>SandboxSBOMReporting: stage (do not run) Windows-Service-based WinRM bootstrap installer -- diagnostic variant for #290</Description>
+                    <Path>cmd.exe /c exit 0</Path>
+                    <Description>SandboxSBOMReporting: genuine no-op -- diagnostic variant round 2 for #290 (isolates SATA topology alone)</Description>
                 </RunAsynchronousCommand>
             </RunAsynchronous>
         </component>
