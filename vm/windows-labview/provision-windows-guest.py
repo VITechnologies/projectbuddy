@@ -227,6 +227,17 @@ def cmd_register_runner(args: argparse.Namespace) -> int:
 
     prereq_script = rf"""
 $ErrorActionPreference = 'Stop'
+# Invoke-WebRequest's default progress bar emits a CLIXML progress-stream
+# record for every chunk written, which over WinRM remoting can collide
+# with/be mistaken for the error stream -- pywinrm's error decoder then
+# fails with "There was a problem converting the Powershell error message:
+# not well-formed (invalid token)" and the real underlying error (if any)
+# can be lost. Confirmed live 2026-11-05 during a register-runner failure
+# whose root cause became unrecoverable from the captured logs for this
+# reason. Suppressing the progress bar also makes the download itself
+# dramatically faster (a well-known side effect of this same PowerShell
+# gotcha).
+$ProgressPreference = 'SilentlyContinue'
 function Test-Cmd($name) {{ Get-Command $name -CommandType Application -ErrorAction SilentlyContinue }}
 $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
 if (-not (Test-Cmd 'gh')) {{
@@ -255,6 +266,9 @@ Write-Output 'Prerequisites verified: gh, git, pwsh all present.'
 
     runner_script = rf"""
 $ErrorActionPreference = 'Stop'
+# Same Invoke-WebRequest progress-stream/CLIXML gotcha as prereq_script
+# above -- suppress it here too.
+$ProgressPreference = 'SilentlyContinue'
 $runnerRoot = '{args.runner_root}'
 if (-not (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {{
     $zipPath = "$env:TEMP\{args.runner_filename}"
