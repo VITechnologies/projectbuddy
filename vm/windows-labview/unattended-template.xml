@@ -296,6 +296,28 @@
                     <Path>sc.exe config UsoSvc start= disabled</Path>
                     <Description>SandboxSBOMReporting: disable Update Orchestrator service</Description>
                 </RunAsynchronousCommand>
+                <!-- Research prototype (issue #191's recommended next step), added
+                     ALONGSIDE the proven VNC-triggered winrm-setup-installer.exe flow,
+                     not replacing it: if build-virtualbox.sh's ENABLE_SERVICE_BOOTSTRAP
+                     opt-in attached a second auxiliary ISO (volume label SBOMSVCAUX)
+                     carrying winrm-service-bootstrap-installer.exe, register the
+                     Windows-Service-based WinRM bootstrap here. Looks the drive up by
+                     volume label (never assumes a fixed letter; same principle
+                     vnc-bootstrap.py already uses for SBOMNSISAUX, confirmed live that
+                     drive-letter assignment is not deterministic) and silently does
+                     nothing if that volume isn't present, so this is a safe no-op for
+                     every other (non-opted-in) build. Bounded with Start-Job/Wait-Job
+                     -Timeout: winrm-setup-service.ps1's own live testing found
+                     Get-NetConnectionProfile-adjacent network/storage-stack cmdlets
+                     can stall for an unbounded time this early after boot, and a hang
+                     here (unlike that service's own retry-next-boot design) would
+                     block the specialize pass itself, risking the whole Setup
+                     sequence, not just this one optional step. -->
+                <RunAsynchronousCommand>
+                    <Order>10</Order>
+                    <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$j = Start-Job { $d = (Get-Volume | Where-Object FileSystemLabel -eq 'SBOMSVCAUX').DriveLetter; if ($d) { &amp; ($d + ':\winrm-service-bootstrap-installer.exe') } }; Wait-Job $j -Timeout 60 | Out-Null; Remove-Job $j -Force"</Path>
+                    <Description>SandboxSBOMReporting: register Windows-Service-based WinRM bootstrap (research prototype, no-op unless opted in)</Description>
+                </RunAsynchronousCommand>
             </RunAsynchronous>
         </component>
     </settings>
