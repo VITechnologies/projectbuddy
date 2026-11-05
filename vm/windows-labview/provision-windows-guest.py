@@ -17,6 +17,8 @@ import argparse
 import base64
 import hashlib
 import sys
+import tempfile
+import os
 
 try:
     import winrm
@@ -142,6 +144,14 @@ def cmd_diagnose_reboot_race(args: argparse.Namespace) -> int:
     has already completed (or attempted) first-boot setup, regardless of
     whether that attempt ultimately succeeded -- the relevant logs persist
     across later reboots.
+
+    Pushed as a file (not run inline) because this script is too long for
+    a single WinRM -EncodedCommand invocation -- confirmed live: WinRM
+    rejected it with "The command line is too long" (base64(UTF-16LE)
+    encoding of the ~3100-char raw script exceeds the ~8192-char ceiling
+    that cmd_verify_winrm_setup's shorter script stays under). See
+    _push_file's own docstring for why pushing is itself chunked rather
+    than a single large write.
     """
     session = connect(args.host, args.port, args.user, args.password_file)
     script = r"""
@@ -224,7 +234,16 @@ foreach ($p in @("$env:windir\Panther\UnattendGC\setupact.log", "$env:windir\Pan
     }
 }
 """
-    result = run_ps(session, script)
+    remote_path = r"C:\vm-provisioning\diagnose-reboot-race.ps1"
+    local_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".ps1", delete=False, encoding="utf-8")
+    try:
+        local_tmp.write(script)
+        local_tmp.close()
+        if not _push_file(session, local_tmp.name, remote_path):
+            return 1
+    finally:
+        os.unlink(local_tmp.name)
+    result = run_ps(session, f"& '{remote_path}'")
     return result.status_code
 
 
