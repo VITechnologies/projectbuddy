@@ -124,10 +124,50 @@ fi
 
 password="$(openssl rand -base64 9 | tr -d '/+=' | head -c 12)"
 
-VBoxManage controlvm "$VM_NAME" vrde on
-VBoxManage controlvm "$VM_NAME" vrdeproperty "TCP/Address=127.0.0.1"
-VBoxManage controlvm "$VM_NAME" vrdeport "$port"
-VBoxManage controlvm "$VM_NAME" vrdeproperty "VNCPassword=$password"
+# Confirmed live 2026-11-04: enabling VRDE on a running VM can fail
+# transiently with "VBoxManage: error: Code NS_ERROR_ABORT ... Context:
+# COMSETTER(Enabled)(fEnabled)" -- and in the observed case this didn't
+# just fail cleanly, it crashed the entire VM to the "aborted" state
+# (confirmed via the VM's own VBox.log: the log simply stops mid-VRDE-init
+# with no power-off record). Retry the enable sequence a few times for the
+# ordinary transient case, and if the VM is actually down afterward,
+# restart it and retry once more rather than leaving a crashed, offline
+# VM behind nothing louder than batch-provision.sh's best-effort WARNING.
+vm_state() {
+  VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p'
+}
+
+enable_vrde() {
+  local attempt
+  for attempt in 1 2 3; do
+    if VBoxManage controlvm "$VM_NAME" vrde on \
+      && VBoxManage controlvm "$VM_NAME" vrdeproperty "TCP/Address=127.0.0.1" \
+      && VBoxManage controlvm "$VM_NAME" vrdeport "$port" \
+      && VBoxManage controlvm "$VM_NAME" vrdeproperty "VNCPassword=$password"; then
+      return 0
+    fi
+    echo "NOTE: enabling VRDE for $VM_NAME failed (attempt $attempt/3); retrying in 5s..." >&2
+    sleep 5
+  done
+  return 1
+}
+
+if ! enable_vrde; then
+  post_state="$(vm_state)"
+  if [[ "$post_state" != "running" ]]; then
+    echo "WARNING: $VM_NAME crashed (state: ${post_state:-unknown}) while enabling VRDE -- a known intermittent VBoxManage issue (NS_ERROR_ABORT on COMSETTER(Enabled)). Restarting it and retrying once..." >&2
+    VBoxManage startvm "$VM_NAME" --type headless
+    sleep 15
+    if ! enable_vrde; then
+      echo "ERROR: $VM_NAME was restarted but VRDE still could not be enabled. Connect manually once the guest has fully booted (see README's 'Activate LabVIEW + VIPM' step)." >&2
+      exit 1
+    fi
+    echo "NOTE: $VM_NAME recovered after a restart; VRDE is now enabled." >&2
+  else
+    echo "ERROR: could not enable VRDE for $VM_NAME after 3 attempts (VM still running; not a crash this time)." >&2
+    exit 1
+  fi
+fi
 
 # Rewrite (not append) this VM's line so repeated opens don't accumulate
 # stale entries -- one current line per VM.
