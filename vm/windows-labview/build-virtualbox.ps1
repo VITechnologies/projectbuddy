@@ -211,6 +211,21 @@ $temporaryDirectory = $null
 try {
     if ($Run) {
         if (-not $IsWindows) { Stop-Build "Windows VirtualBox builder: mutation requires Windows" 3 }
+        # A long-running GitHub Actions runner service process caches the
+        # PATH it started with; a VirtualBox install that happened after
+        # the service started (or even before, if the service was never
+        # restarted since) won't be visible via Get-Command until this
+        # process's PATH is refreshed from the registry -- confirmed live
+        # 2026-11-05: VBoxManage.exe existed at the default install
+        # location but "VBoxManage.exe is missing" fired anyway. Same
+        # pattern this workflow already uses for chocolatey/NSIS.
+        $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
+        if (-not (Get-Command VBoxManage.exe -ErrorAction SilentlyContinue)) {
+            $fallback = Join-Path ${env:ProgramFiles} "Oracle\VirtualBox\VBoxManage.exe"
+            if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+                $env:Path = "$(Split-Path -Parent $fallback);$env:Path"
+            }
+        }
         if (-not (Get-Command VBoxManage.exe -ErrorAction SilentlyContinue)) {
             Stop-Build "Windows VirtualBox builder: VBoxManage.exe is missing" 3
         }
