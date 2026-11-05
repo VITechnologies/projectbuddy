@@ -312,11 +312,25 @@
                      can stall for an unbounded time this early after boot, and a hang
                      here (unlike that service's own retry-next-boot design) would
                      block the specialize pass itself, risking the whole Setup
-                     sequence, not just this one optional step. -->
+                     sequence, not just this one optional step.
+
+                     TEMPORARY DIAGNOSTIC VARIANT (SandboxSBOMReporting#290): a real-VM
+                     test with this command actually running the installer hit a
+                     deterministic "computer restarted unexpectedly" Windows Setup
+                     resume-corruption loop before OOBE. To isolate whether that's
+                     caused by running the installer during the specialize pass, vs.
+                     merely having a 3rd non-hot-pluggable SATA device attached (see
+                     #290's two hypotheses), this command is temporarily scoped down to
+                     ONLY stage (copy) the installer to C:\vm-provisioning; it does NOT
+                     execute it. If a real-VM build with this variant still hits the
+                     same corruption, the 3-SATA-device topology itself is implicated
+                     (hypothesis 2); if it reaches OOBE cleanly, the installer's
+                     execution during specialize is implicated instead (hypothesis 1).
+                     Revert to actually running the installer once #290 is resolved. -->
                 <RunAsynchronousCommand>
                     <Order>10</Order>
-                    <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$j = Start-Job { $d = (Get-Volume | Where-Object FileSystemLabel -eq 'SBOMSVCAUX').DriveLetter; if ($d) { &amp; ($d + ':\winrm-service-bootstrap-installer.exe') } }; Wait-Job $j -Timeout 60 | Out-Null; Remove-Job $j -Force"</Path>
-                    <Description>SandboxSBOMReporting: register Windows-Service-based WinRM bootstrap (research prototype, no-op unless opted in)</Description>
+                    <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$j = Start-Job { $d = (Get-Volume | Where-Object FileSystemLabel -eq 'SBOMSVCAUX').DriveLetter; if ($d) { New-Item -ItemType Directory -Force -Path 'C:\vm-provisioning' | Out-Null; Copy-Item -Path ($d + ':\winrm-service-bootstrap-installer.exe') -Destination 'C:\vm-provisioning\winrm-service-bootstrap-installer.exe' -Force } }; Wait-Job $j -Timeout 60 | Out-Null; Remove-Job $j -Force"</Path>
+                    <Description>SandboxSBOMReporting: stage (do not run) Windows-Service-based WinRM bootstrap installer -- diagnostic variant for #290</Description>
                 </RunAsynchronousCommand>
             </RunAsynchronous>
         </component>
