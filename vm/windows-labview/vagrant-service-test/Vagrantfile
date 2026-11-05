@@ -1,0 +1,119 @@
+# Fast-iteration test harness for the Windows-Service-based WinRM bootstrap
+# prototype (vm/windows-labview/winrm-service-bootstrap-installer.nsi),
+# testing issue #191's own recommended next step: does a genuine SCM
+# service (registered the same way the already-proven-safe wuauserv/UsoSvc
+# StartupType disable is, NOT via the RunOnce key Setup's own continuation
+# machinery collides with) survive the #188 restart where
+# RunOnce/FirstLogonCommands did not.
+#
+# IMPORTANT SCOPE LIMIT: this golden box (actor/win11-labview2026) is
+# already fully past Windows Setup/OOBE -- it never reproduces the #188
+# restart itself. This harness validates the SERVICE MECHANICS ONLY (does
+# registration succeed, does the wrapped script run correctly as
+# LocalSystem, is it idempotent, does it survive an ordinary reboot and
+# re-run correctly) in under a minute per iteration, instead of a ~20-30
+# minute from-scratch Windows Setup cycle. Whether this mechanism actually
+# survives the real #188 restart can only be tested via an actual
+# create-vm dispatch (a genuine Windows Setup cycle) -- that is a
+# separate, necessary follow-up validation this harness cannot replace.
+#
+# Usage:
+#   cd ..
+#   ./build-winrm-service-bootstrap-iso.sh --out /tmp/discard.iso --nssm-cache /tmp/nssm-cache
+#     # (builds vagrant-service-test/../winrm-service-bootstrap-installer.exe
+#     #  as a side effect of compiling -- see that script; or compile
+#     #  directly: makensis winrm-service-bootstrap-installer.nsi in a work
+#     #  dir with nssm.exe + winrm-setup-service.ps1 staged alongside it)
+#   cd vagrant-service-test
+#   vagrant up
+#   vagrant provision --provision-with run-installer
+#   vagrant provision --provision-with verify-service-registered
+#   vagrant provision --provision-with break-winrm-setting
+#   vagrant provision --provision-with start-service-now
+#   vagrant provision --provision-with verify-fixed
+#   vagrant winrm -c 'Get-Content C:\vm-provisioning\winrm-setup-install.log' -e
+#   vagrant destroy -f
+
+Vagrant.configure("2") do |config|
+  config.vm.box = ENV.fetch("VIHS_SERVICE_TEST_BOX", "actor/win11-labview2026")
+  config.vm.hostname = "svc-test"
+  config.vm.communicator = "winrm"
+
+  config.winrm.username = ENV.fetch("VIHS_SERVICE_TEST_WINRM_USER", "vagrant")
+  config.winrm.password = ENV.fetch("VIHS_SERVICE_TEST_WINRM_PASSWORD", "Vagrant1234!")
+  config.winrm.timeout = 1800
+
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false
+    vb.memory = ENV.fetch("VIHS_SERVICE_TEST_MEM", "4096")
+    vb.cpus = ENV.fetch("VIHS_SERVICE_TEST_CPUS", "2")
+    vb.name = "vm-service-bootstrap-test"
+  end
+
+  config.vm.provision "upload-installer", type: "file",
+    source: "../winrm-service-bootstrap-installer.exe",
+    destination: "C:/Windows/Temp/winrm-service-bootstrap-installer.exe"
+
+  config.vm.provision "run-installer", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Continue'
+    Write-Host "Running winrm-service-bootstrap-installer.exe ..."
+    & "C:\Windows\Temp\winrm-service-bootstrap-installer.exe" /S
+    Write-Host "Exit code: $LASTEXITCODE"
+    Write-Host "---- C:\vm-provisioning\winrm-service-bootstrap-install.log ----"
+    if (Test-Path 'C:\vm-provisioning\winrm-service-bootstrap-install.log') {
+      Get-Content 'C:\vm-provisioning\winrm-service-bootstrap-install.log'
+    } else {
+      Write-Host "LOG FILE NOT FOUND."
+    }
+  PS1
+
+  config.vm.provision "verify-service-registered", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $svc = Get-Service -Name SandboxSbomWinRmSetup -ErrorAction SilentlyContinue
+    if (-not $svc) { Write-Host "FAIL: service not found"; exit 1 }
+    Write-Host "Service found: Status=$($svc.Status) StartType=$($svc.StartType)"
+    if ($svc.StartType -ne 'Automatic') { Write-Host "FAIL: expected Automatic startup"; exit 1 }
+    Write-Host "PASS"
+  PS1
+
+  # Simulates "not yet configured" by reverting one of the six steps'
+  # effects, so the next run has real work to do instead of a trivial
+  # already-complete no-op -- without this, every test run after the first
+  # would just exercise the fast-path exit.
+  config.vm.provision "break-winrm-setting", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Stop'
+    Remove-NetFirewallRule -Name SandboxSbom-WinRM-HTTP -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'C:\vm-provisioning\winrm-setup-complete.marker' -Force -ErrorAction SilentlyContinue
+    Write-Host "Removed SandboxSbom-WinRM-HTTP firewall rule and completion marker."
+  PS1
+
+  # Fast-iteration equivalent of "wait for the next real boot" -- NSSM's
+  # Automatic-startup service will genuinely only start again on a real
+  # boot, but we can invoke the exact same entry point directly to
+  # validate the script's own idempotent re-check/fix logic without
+  # waiting for `vagrant reload`.
+  config.vm.provision "start-service-now", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Continue'
+    Start-Service SandboxSbomWinRmSetup
+    Start-Sleep -Seconds 5
+    Write-Host "---- C:\vm-provisioning\winrm-setup-install.log (tail) ----"
+    Get-Content 'C:\vm-provisioning\winrm-setup-install.log' -Tail 60
+  PS1
+
+  config.vm.provision "verify-fixed", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Continue'
+    $fwRule = Get-NetFirewallRule -Name SandboxSbom-WinRM-HTTP -ErrorAction SilentlyContinue
+    $markerExists = Test-Path 'C:\vm-provisioning\winrm-setup-complete.marker'
+    Write-Host "Firewall rule present: $([bool]$fwRule)"
+    Write-Host "Completion marker present: $markerExists"
+    $svc = Get-Service -Name SandboxSbomWinRmSetup -ErrorAction SilentlyContinue
+    Write-Host "Service StartType after self-disable: $($svc.StartType)"
+    if ($fwRule -and $markerExists -and $svc.StartType -eq 'Disabled') {
+      Write-Host "PASS: service detected the broken setting and fixed it, then self-disabled."
+    } else {
+      Write-Host "FAIL: one or more expected post-fix conditions not met."
+      exit 1
+    }
+  PS1
+end
