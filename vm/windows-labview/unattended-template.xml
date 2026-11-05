@@ -296,44 +296,26 @@
                     <Path>sc.exe config UsoSvc start= disabled</Path>
                     <Description>SandboxSBOMReporting: disable Update Orchestrator service</Description>
                 </RunAsynchronousCommand>
-                <!-- Research prototype (issue #191's recommended next step), added
-                     ALONGSIDE the proven VNC-triggered winrm-setup-installer.exe flow,
-                     not replacing it: if build-virtualbox.sh's ENABLE_SERVICE_BOOTSTRAP
-                     opt-in attached a second auxiliary ISO (volume label SBOMSVCAUX)
-                     carrying winrm-service-bootstrap-installer.exe, register the
-                     Windows-Service-based WinRM bootstrap here. Looks the drive up by
-                     volume label (never assumes a fixed letter; same principle
-                     vnc-bootstrap.py already uses for SBOMNSISAUX, confirmed live that
-                     drive-letter assignment is not deterministic) and silently does
-                     nothing if that volume isn't present, so this is a safe no-op for
-                     every other (non-opted-in) build. Bounded with Start-Job/Wait-Job
-                     -Timeout: winrm-setup-service.ps1's own live testing found
-                     Get-NetConnectionProfile-adjacent network/storage-stack cmdlets
-                     can stall for an unbounded time this early after boot, and a hang
-                     here (unlike that service's own retry-next-boot design) would
-                     block the specialize pass itself, risking the whole Setup
-                     sequence, not just this one optional step.
-
-                     TEMPORARY DIAGNOSTIC VARIANT, round 2 (SandboxSBOMReporting#290):
-                     round 1 (copy-only, no execution, still enumerating/reading the
-                     SBOMSVCAUX volume via Get-Volume + Copy-Item) hit the IDENTICAL
-                     "computer restarted unexpectedly" resume-corruption loop as the
-                     original execute-the-installer variant, ruling out "the
-                     installer's execution" as the sole necessary trigger. This round
-                     makes the command a genuine no-op (no Get-Volume, no optical-media
-                     access at all) while build-virtualbox.sh's ENABLE_SERVICE_BOOTSTRAP
-                     still attaches the 3rd, non-hot-pluggable SATA device. If THIS
-                     still crashes, the 3-SATA-device topology alone is sufficient
-                     (hypothesis 2 confirmed, independent of what the specialize pass
-                     actually does); if it reaches OOBE cleanly, some form of touching
-                     the new device during the specialize pass is still implicated,
-                     narrower than originally thought. Revert to actually running the
-                     installer once #290 is resolved. -->
-                <RunAsynchronousCommand>
-                    <Order>10</Order>
-                    <Path>cmd.exe /c exit 0</Path>
-                    <Description>SandboxSBOMReporting: genuine no-op -- diagnostic variant round 2 for #290 (isolates SATA topology alone)</Description>
-                </RunAsynchronousCommand>
+                <!-- A Windows-Service-based WinRM bootstrap was previously
+                     prototyped as a specialize-pass RunAsynchronousCommand
+                     here (issue #191's recommended next step). Issue #290
+                     found and conclusively isolated (two real-VM diagnostic
+                     rounds) that merely ACCESSING the auxiliary optical
+                     drive during the specialize pass (via Get-Volume/
+                     Copy-Item, no execution required) causes the real
+                     #188 restart (Windows 11 25H2's WMIC-FOD-package
+                     enablement reboot) to fire prematurely, mid-specialize-
+                     pass instead of its normal post-desktop timing, which
+                     Windows Setup's specialize pass cannot survive. A
+                     genuine no-op in this same slot reached OOBE and
+                     correctly survived the real #188 restart via the
+                     already-proven VNC flow below, proving the 3-SATA-
+                     device topology itself was never the problem. The
+                     Service bootstrap is now triggered from vnc-bootstrap.py
+                     instead, AFTER OOBE/auto-logon and AFTER the #188
+                     restart has already recurred and recovered, the same
+                     proven trigger point as winrm-setup-installer.exe below,
+                     so this pass has nothing left to do for it. -->
             </RunAsynchronous>
         </component>
     </settings>
