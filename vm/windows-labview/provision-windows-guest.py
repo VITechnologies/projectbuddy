@@ -127,6 +127,107 @@ if ($failed.Count -gt 0) { exit 1 }
     return result.status_code
 
 
+def cmd_diagnose_reboot_race(args: argparse.Namespace) -> int:
+    """Root-cause investigation for issue #188: correlate the exact
+    winlogon.exe-initiated restart event (System log, Event ID 1074,
+    reason "Operating System: Upgrade (Planned)") against CBS.log and
+    Windows Setup's own Panther logs, to find what CBS/servicing action
+    was in progress or had just completed immediately before the restart
+    fired. This is the researcher's own recommended next step recorded in
+    issue #191's closing comment, after finding that no in-guest
+    scheduling mechanism (RunOnce from either the specialize or
+    oobeSystem pass) survived this restart.
+
+    Read-only: makes no guest changes. Safe to run against any guest that
+    has already completed (or attempted) first-boot setup, regardless of
+    whether that attempt ultimately succeeded -- the relevant logs persist
+    across later reboots.
+    """
+    session = connect(args.host, args.port, args.user, args.password_file)
+    script = r"""
+$ErrorActionPreference = 'Continue'
+Write-Output "==== System log: Event ID 1074 (controlled restart/shutdown requests) ===="
+$events1074 = Get-WinEvent -FilterHashtable @{LogName='System'; Id=1074} -ErrorAction SilentlyContinue
+if (-not $events1074) {
+    Write-Output "(none found -- System log may have rolled over, or no controlled restart was ever logged)"
+} else {
+    foreach ($e in $events1074) {
+        Write-Output "---- $($e.TimeCreated.ToString('o')) ----"
+        Write-Output $e.Message
+    }
+}
+
+Write-Output ""
+Write-Output "==== System log: Event ID 41 (Kernel-Power, unexpected/dirty reboot) ===="
+$events41 = Get-WinEvent -FilterHashtable @{LogName='System'; Id=41; ProviderName='Microsoft-Windows-Kernel-Power'} -ErrorAction SilentlyContinue
+if (-not $events41) {
+    Write-Output "(none found)"
+} else {
+    foreach ($e in $events41) {
+        Write-Output "---- $($e.TimeCreated.ToString('o')) ----"
+        Write-Output $e.Message
+    }
+}
+
+Write-Output ""
+Write-Output "==== Setup event log channel, last 40 (chronological) ===="
+try {
+    $setupEvents = Get-WinEvent -LogName 'Setup' -MaxEvents 40 -ErrorAction Stop | Sort-Object TimeCreated
+    foreach ($e in $setupEvents) {
+        $oneLine = ($e.Message -replace "\r?\n", ' ')
+        Write-Output "$($e.TimeCreated.ToString('o')) [$($e.Id)] $($e.LevelDisplayName): $oneLine"
+    }
+} catch {
+    Write-Output "(Setup log channel unavailable: $($_.Exception.Message))"
+}
+
+Write-Output ""
+Write-Output "==== CBS.log excerpt around each 1074 restart (+/- 3 minutes) ===="
+$cbsPath = "$env:windir\Logs\CBS\CBS.log"
+if (-not (Test-Path -LiteralPath $cbsPath)) {
+    Write-Output "(CBS.log not found at $cbsPath)"
+} elseif (-not $events1074) {
+    Write-Output "(no restart timestamps to correlate against)"
+} else {
+    # CBS.log lines look like: 2026-11-05 08:41:23, Info ...
+    $cbsLines = Get-Content -LiteralPath $cbsPath
+    foreach ($e in $events1074) {
+        $windowStart = $e.TimeCreated.AddMinutes(-3)
+        $windowEnd = $e.TimeCreated.AddMinutes(3)
+        Write-Output "---- window around $($e.TimeCreated.ToString('o')) ----"
+        $matched = 0
+        foreach ($line in $cbsLines) {
+            if ($line -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),') {
+                try {
+                    $ts = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
+                } catch {
+                    continue
+                }
+                if ($ts -ge $windowStart -and $ts -le $windowEnd) {
+                    Write-Output $line
+                    $matched++
+                }
+            }
+        }
+        Write-Output "($matched matching CBS.log lines in this window)"
+    }
+}
+
+Write-Output ""
+Write-Output "==== Windows Setup Panther logs (last 40 lines each, if present) ===="
+foreach ($p in @("$env:windir\Panther\UnattendGC\setupact.log", "$env:windir\Panther\setupact.log", "C:\vboxpostinstall.log")) {
+    if (Test-Path -LiteralPath $p) {
+        Write-Output "---- $p (last 40 lines) ----"
+        Get-Content -LiteralPath $p -Tail 40
+    } else {
+        Write-Output "---- $p (not present) ----"
+    }
+}
+"""
+    result = run_ps(session, script)
+    return result.status_code
+
+
 def cmd_shutdown_guest(args: argparse.Namespace) -> int:
     """Issue a graceful OS-level shutdown over WinRM.
 
@@ -443,6 +544,7 @@ def main() -> int:
 
     subparsers.add_parser("wait-ready").set_defaults(func=cmd_wait_ready)
     subparsers.add_parser("verify-winrm-setup").set_defaults(func=cmd_verify_winrm_setup)
+    subparsers.add_parser("diagnose-reboot-race").set_defaults(func=cmd_diagnose_reboot_race)
     subparsers.add_parser("shutdown-guest").set_defaults(func=cmd_shutdown_guest)
 
     vipm_parser = subparsers.add_parser("install-vipm")
