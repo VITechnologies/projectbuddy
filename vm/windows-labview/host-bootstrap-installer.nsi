@@ -11,10 +11,11 @@
 ; with its own copy-pasted PATH-refresh/fallback logic -- confirmed live
 ; 2026-11-05 to be a real source of bugs (a step replacing, rather than
 ; appending to, $env:Path discarded another step's fix for the rest of
-; that same job). This installer makes PATH additions PERMANENT at the
-; system/registry level (not a per-job $env:Path or $GITHUB_PATH
-; workaround), so the fix persists across every future job on this host,
-; not just the job that happened to trigger the install.
+; that same job). This installer persists PATH additions to the registry
+; (Machine scope if the calling account is elevated, falling back to User
+; scope otherwise -- not a per-job $env:Path or $GITHUB_PATH workaround),
+; so the fix persists across every future job on this host, not just the
+; job that happened to trigger the install.
 ;
 ; Covers: chocolatey, Python, NSIS (makensis.exe), VirtualBox presence +
 ; PATH. Does NOT auto-install VirtualBox itself (a hypervisor with
@@ -39,7 +40,6 @@
 Name "VM Provisioner Host Bootstrap"
 OutFile "host-bootstrap-installer.exe"
 SilentInstall silent
-RequestExecutionLevel admin
 ShowInstDetails nevershow
 
 Var LogHandle
@@ -66,16 +66,25 @@ Var StepRC
   ${EndIf}
 !macroend
 
-; Persists a directory onto the SYSTEM (HKLM) PATH permanently, if not
-; already present -- not just this process's $env:Path, so every future
-; job on this host (not just the one that happened to trigger this
-; installer) sees it without needing its own PATH-refresh workaround.
-; Confirmed live 2026-11-05: a stale/missing *registry* PATH entry (not
-; just a stale process environment block) was the real root cause behind
-; several bugs this same day (VBoxManage.exe discovery, python.exe
-; discovery both needed per-step workarounds that this macro replaces).
+; Persists a directory onto the PATH permanently (registry, not just this
+; process's $env:Path), so every future job on this host sees it without
+; needing its own PATH-refresh workaround. Confirmed live 2026-11-05: a
+; stale/missing *registry* PATH entry (not just a stale process
+; environment block) was the real root cause behind several bugs this
+; same day (VBoxManage.exe discovery, python.exe discovery both needed
+; per-step workarounds that this macro replaces).
+;
+; Tries system-wide (HKLM/Machine) scope first -- but this installer
+; deliberately does NOT request UAC elevation (RequestExecutionLevel
+; admin caused the whole install to silently produce no output at all
+; when launched non-interactively from a GitHub Actions runner service
+; account, confirmed live 2026-11-05: no interactive desktop session
+; exists to show the UAC consent prompt). If the calling account isn't
+; already elevated, the Machine-scope write fails; falls back to
+; per-user (HKCU) scope instead, which is still durable across every
+; future job dispatched under that same account.
 !macro EnsureSystemPathContains dir
-  nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = \"Stop\"; $$p = [System.Environment]::GetEnvironmentVariable(\"Path\", \"Machine\"); $$want = \"${dir}\"; if (($$p -split \";\") -notcontains $$want) { [System.Environment]::SetEnvironmentVariable(\"Path\", \"$$p;$$want\", \"Machine\"); Write-Output \"added\" } else { Write-Output \"already present\" }"'
+  nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = \"Stop\"; $$want = \"${dir}\"; try { $$p = [System.Environment]::GetEnvironmentVariable(\"Path\", \"Machine\"); if (($$p -split \";\") -notcontains $$want) { [System.Environment]::SetEnvironmentVariable(\"Path\", \"$$p;$$want\", \"Machine\"); Write-Output \"added (Machine)\" } else { Write-Output \"already present (Machine)\" } } catch { $$p = [System.Environment]::GetEnvironmentVariable(\"Path\", \"User\"); if (($$p -split \";\") -notcontains $$want) { [System.Environment]::SetEnvironmentVariable(\"Path\", \"$$p;$$want\", \"User\"); Write-Output \"added (User -- Machine scope write failed, not elevated: $$($$_.Exception.Message))\" } else { Write-Output \"already present (User)\" } }"'
   Pop $StepRC
   Pop $StepOutput
   FileWrite $LogHandle "---- Ensure system PATH contains ${dir} ----$\r$\n"
@@ -84,8 +93,15 @@ Var StepRC
 !macroend
 
 Section "Host Bootstrap" SEC_MAIN
-  CreateDirectory "C:\vm-provisioning"
-  FileOpen $LogHandle "C:\vm-provisioning\host-bootstrap-install.log" w
+  ; $TEMP (not a hardcoded C:\ path) is always writable by whichever
+  ; account is actually running this installer, regardless of whether
+  ; that account is elevated -- confirmed live 2026-11-05: a hardcoded
+  ; C:\vm-provisioning path silently failed to be created/written under
+  ; the non-elevated runner service account, and because this installer
+  ; (deliberately, see above) never requests elevation, every FileWrite
+  ; to the resulting invalid handle silently no-opped, leaving no log
+  ; file at all and no visible error.
+  FileOpen $LogHandle "$TEMP\host-bootstrap-install.log" w
   !insertmacro LogLine "Host bootstrap installer starting"
 
   ; --- Chocolatey ---
