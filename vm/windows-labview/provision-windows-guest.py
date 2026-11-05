@@ -243,7 +243,17 @@ foreach ($p in @("$env:windir\Panther\UnattendGC\setupact.log", "$env:windir\Pan
             return 1
     finally:
         os.unlink(local_tmp.name)
-    result = run_ps(session, f"& '{remote_path}'")
+    # Windows PowerShell 5.1 (powershell.exe, the WinRM listener's own
+    # shell) defaults to the 'Restricted' execution policy on client
+    # Windows editions, which blocks loading ANY .ps1 file regardless of
+    # signing -- confirmed live: "running scripts is disabled on this
+    # system" (PSSecurityException/UnauthorizedAccess) on a plain '&
+    # <path>' call. -ExecutionPolicy Bypass scopes the bypass to this one
+    # process only, unlike Set-ExecutionPolicy (no persistent guest
+    # mutation) and works regardless of whether pwsh (PowerShell 7,
+    # RemoteSigned by default) has been installed yet -- this diagnostic
+    # must work on a guest at any point in its provisioning history.
+    result = run_ps(session, f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{remote_path}'")
     return result.status_code
 
 
