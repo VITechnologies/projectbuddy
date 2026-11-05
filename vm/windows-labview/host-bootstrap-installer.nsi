@@ -147,7 +147,7 @@ Section "Host Bootstrap" SEC_MAIN
   Pop $StepOutput
   FileWrite $LogHandle "---- VirtualBox VNC Extension Pack check ----$\r$\n$StepOutput$\r$\n"
   ${If} $StepRC != 0
-    !insertmacro LogLine "GAP (operator-gated, not auto-installed): VirtualBox VNC Extension Pack not found. Confirmed 2026-11-05: Oracle's official Windows Extension Pack no longer includes any VRDE module; the VNC-capable module used on this project's Linux host comes from Ubuntu's own from-source rebuild of VBoxVNC, not available as a downloadable file for Windows. VNC-dependent automation (vnc-bootstrap.py, enable-vrde) will not work on this host until this is resolved."
+    !insertmacro LogLine "GAP (operator-gated, not auto-installed): VirtualBox VNC Extension Pack not found. Confirmed 2026-11-05: Oracle's official Windows Extension Pack no longer includes any VRDE module; the VNC-capable module used on this project's Linux host comes from Ubuntu's own from-source rebuild of VBoxVNC, not available as a downloadable file for Windows. VNC-dependent automation (vnc-bootstrap.py, enable-vrde) will not work on this host until this is resolved -- see VITechnologies/SandboxSBOMReporting#280."
   ${Else}
     !insertmacro LogLine "VirtualBox VNC Extension Pack already present"
   ${EndIf}
