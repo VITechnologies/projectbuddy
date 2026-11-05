@@ -50,6 +50,24 @@ WINRM_HOST_PORT="${WINRM_HOST_PORT:-15985}"
 # overrides it with a path to a pre-built ISO (e.g. a pinned/pre-verified
 # build for a specific CI run).
 NSIS_BOOTSTRAP_ISO="${NSIS_BOOTSTRAP_ISO:-}"
+# Research prototype (issue #191's recommended next step): an independent,
+# second auxiliary ISO carrying winrm-service-bootstrap-installer.nsi's
+# compiled output (a genuine Windows-Service-based WinRM bootstrap,
+# alongside -- not replacing -- the proven VNC-triggered
+# winrm-setup-installer.exe flow above). Strictly opt-in (empty/unset
+# changes nothing about this script's existing, proven behavior): set
+# ENABLE_SERVICE_BOOTSTRAP=1 to auto-build it fresh from
+# winrm-service-bootstrap-installer.nsi, or set SERVICE_BOOTSTRAP_ISO
+# directly to a pre-built ISO path (which also enables it). Attached on a
+# NEW SATA port 2 (bumping --portcount from 2 to 3 only when enabled),
+# following NSIS_BOOTSTRAP_ISO's exact empty-drive-then-swap-in-after-
+# unattended-install-starts pattern -- see that variable's own comment for
+# why (VBoxManage unattended install unconditionally ejects any
+# pre-existing optical media on any controller/port before constructing
+# its own install media).
+ENABLE_SERVICE_BOOTSTRAP="${ENABLE_SERVICE_BOOTSTRAP:-0}"
+SERVICE_BOOTSTRAP_ISO="${SERVICE_BOOTSTRAP_ISO:-}"
+[[ -z "$SERVICE_BOOTSTRAP_ISO" ]] || ENABLE_SERVICE_BOOTSTRAP=1
 DRY_RUN=1
 
 usage() {
@@ -68,6 +86,13 @@ The NSIS WinRM-setup injection point (see build-nsis-bootstrap-iso.sh) is
 auto-built and attached on SATA port 1, moments after the VM starts (not
 before -- see this script's NSIS_BOOTSTRAP_ISO comment for why). Set
 NSIS_BOOTSTRAP_ISO to a pre-built ISO to override the auto-build.
+
+Research prototype, strictly opt-in (set ENABLE_SERVICE_BOOTSTRAP=1 or
+SERVICE_BOOTSTRAP_ISO to a pre-built ISO path; default is off, identical
+to this script's prior behavior): also attaches the Windows-Service-based
+WinRM bootstrap installer (see build-winrm-service-bootstrap-iso.sh) on a
+new SATA port 2, alongside -- not replacing -- the NSIS_BOOTSTRAP_ISO/VNC
+flow above.
 EOF
 }
 
@@ -155,6 +180,10 @@ if ((DRY_RUN == 0)); then
     echo "NSIS_BOOTSTRAP_ISO is set but not a file: $NSIS_BOOTSTRAP_ISO" >&2
     exit 3
   }
+  [[ -z "$SERVICE_BOOTSTRAP_ISO" || -f "$SERVICE_BOOTSTRAP_ISO" ]] || {
+    echo "SERVICE_BOOTSTRAP_ISO is set but not a file: $SERVICE_BOOTSTRAP_ISO" >&2
+    exit 3
+  }
   password_mode="$(stat -c '%a' "$GUEST_PASSWORD_FILE")"
   (((8#$password_mode & 077) == 0)) || { echo "GUEST_PASSWORD_FILE must have mode 0600 or stricter" >&2; exit 3; }
   printf '%s  %s\n' "$iso_sha256" "$ISO" | sha256sum --check
@@ -225,6 +254,19 @@ if [[ -z "$NSIS_BOOTSTRAP_ISO" ]]; then
   fi
 fi
 
+if [[ "$ENABLE_SERVICE_BOOTSTRAP" == 1 && -z "$SERVICE_BOOTSTRAP_ISO" ]]; then
+  service_builder="$SCRIPT_DIR/build-winrm-service-bootstrap-iso.sh"
+  [[ -x "$service_builder" ]] || { echo "Service bootstrap ISO builder missing or not executable: $service_builder" >&2; exit 2; }
+  # Same persistence requirement as NSIS_BOOTSTRAP_ISO above -- see that
+  # block's CRITICAL comment for why a real run must not use
+  # $temporary_dir.
+  if ((DRY_RUN == 0)); then
+    SERVICE_BOOTSTRAP_ISO="$("$service_builder" --out "$BASEFOLDER/$VM_NAME/service-bootstrap.iso")"
+  else
+    SERVICE_BOOTSTRAP_ISO="$("$service_builder" --out "$temporary_dir/service-bootstrap.iso")"
+  fi
+fi
+
 
 run() {
   if ((DRY_RUN)); then
@@ -262,7 +304,11 @@ run VBoxManage modifynvram "$VM_NAME" enrollmssignatures
 run VBoxManage modifynvram "$VM_NAME" enrollorclpk
 run VBoxManage modifynvram "$VM_NAME" secureboot --enable
 run VBoxManage createmedium disk --filename "$disk_path" --size "$((disk_gb * 1024))" --format VDI --variant Standard
-run VBoxManage storagectl "$VM_NAME" --name SATA --add sata --controller IntelAhci --portcount 2 --bootable on
+sata_portcount=2
+if [[ "$ENABLE_SERVICE_BOOTSTRAP" == 1 ]]; then
+  sata_portcount=3
+fi
+run VBoxManage storagectl "$VM_NAME" --name SATA --add sata --controller IntelAhci --portcount "$sata_portcount" --bootable on
 run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 0 --device 0 --type hdd --medium "$disk_path"
 if [[ -n "$NSIS_BOOTSTRAP_ISO" ]]; then
   # Attach an EMPTY drive at this slot now, not the real ISO -- `storageattach
@@ -273,6 +319,11 @@ if [[ -n "$NSIS_BOOTSTRAP_ISO" ]]; then
   # an already-empty drive has nothing for that pass to eject, so it's
   # unaffected.
   run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 1 --device 0 --type dvddrive --medium emptydrive
+fi
+if [[ "$ENABLE_SERVICE_BOOTSTRAP" == 1 ]]; then
+  # Same empty-drive-then-swap-in pattern as NSIS_BOOTSTRAP_ISO above, on
+  # the new SATA port 2 this block's portcount bump made room for.
+  run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 2 --device 0 --type dvddrive --medium emptydrive
 fi
 run VBoxManage storagectl "$VM_NAME" --name IDE --add ide
 run VBoxManage storageattach "$VM_NAME" --storagectl IDE --port 0 --device 0 --type dvddrive --medium "${ISO:-emptydrive}"
@@ -304,12 +355,28 @@ if [[ "$START_MODE" != none ]]; then
       run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 1 --device 0 --type dvddrive --medium "$NSIS_BOOTSTRAP_ISO"
     fi
   fi
+  if [[ "$ENABLE_SERVICE_BOOTSTRAP" == 1 ]]; then
+    if ((DRY_RUN)); then
+      run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 2 --device 0 --type dvddrive --medium "$SERVICE_BOOTSTRAP_ISO"
+    else
+      for _ in $(seq 1 12); do
+        state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+        [[ "$state" == running ]] && break
+        sleep 1
+      done
+      [[ "$state" == running ]] || { echo "VM did not reach 'running' in time for SERVICE_BOOTSTRAP_ISO attach (state: ${state:-unknown})" >&2; exit 4; }
+      run VBoxManage storageattach "$VM_NAME" --storagectl SATA --port 2 --device 0 --type dvddrive --medium "$SERVICE_BOOTSTRAP_ISO"
+    fi
+  fi
 else
   if ((DRY_RUN)); then
     run "(unattended install skipped: --no-start)"
   fi
   if [[ -n "$NSIS_BOOTSTRAP_ISO" ]]; then
     echo "NOTE: --no-start set; NSIS_BOOTSTRAP_ISO was not attached (it must be attached after a later 'unattended install' call starts the VM, not before -- see this script's NSIS_BOOTSTRAP_ISO comment)." >&2
+  fi
+  if [[ "$ENABLE_SERVICE_BOOTSTRAP" == 1 ]]; then
+    echo "NOTE: --no-start set; SERVICE_BOOTSTRAP_ISO was not attached (same reason as NSIS_BOOTSTRAP_ISO above)." >&2
   fi
 fi
 

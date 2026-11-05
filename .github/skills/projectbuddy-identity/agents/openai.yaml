@@ -1,0 +1,4 @@
+interface:
+  display_name: "ProjectBuddy VM & SBOM Pipeline Engine"
+  short_description: "Public, project-agnostic engine that provisions VirtualBox Windows/Ubuntu LabVIEW build VMs, registers them as GitHub Actions self-hosted runners, and runs the native SBOM build/scan/report pipeline consumed by downstream repos such as SandboxSBOMReporting."
+  default_prompt: "Use ProjectBuddy's VM provisioning workflow (create-vm/teardown/enable-vrde phases in provision-windows-labview-vm.yml), Register-WindowsRunner.ps1, and Run-Pipeline.ps1/.sh for native (non-container) LabVIEW SBOM builds on activated self-hosted runners. This repo ships zero pre-committed project identifiers or infrastructure state -- every VM identity value and project config is a required input supplied by the consuming repo. Treat svelderrainruiz/projectbuddy as the active engineering fork and VITechnologies/projectbuddy as the public upstream it should flow back into once stable."

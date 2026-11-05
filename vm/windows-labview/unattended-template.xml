@@ -296,6 +296,26 @@
                     <Path>sc.exe config UsoSvc start= disabled</Path>
                     <Description>SandboxSBOMReporting: disable Update Orchestrator service</Description>
                 </RunAsynchronousCommand>
+                <!-- A Windows-Service-based WinRM bootstrap was previously
+                     prototyped as a specialize-pass RunAsynchronousCommand
+                     here (issue #191's recommended next step). Issue #290
+                     found and conclusively isolated (two real-VM diagnostic
+                     rounds) that merely ACCESSING the auxiliary optical
+                     drive during the specialize pass (via Get-Volume/
+                     Copy-Item, no execution required) causes the real
+                     #188 restart (Windows 11 25H2's WMIC-FOD-package
+                     enablement reboot) to fire prematurely, mid-specialize-
+                     pass instead of its normal post-desktop timing, which
+                     Windows Setup's specialize pass cannot survive. A
+                     genuine no-op in this same slot reached OOBE and
+                     correctly survived the real #188 restart via the
+                     already-proven VNC flow below, proving the 3-SATA-
+                     device topology itself was never the problem. The
+                     Service bootstrap is now triggered from vnc-bootstrap.py
+                     instead, AFTER OOBE/auto-logon and AFTER the #188
+                     restart has already recurred and recovered, the same
+                     proven trigger point as winrm-setup-installer.exe below,
+                     so this pass has nothing left to do for it. -->
             </RunAsynchronous>
         </component>
     </settings>

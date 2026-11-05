@@ -64,5 +64,15 @@
     "winX64MsiSha256": "50d33c7494aaf82b987cfd4de3f232d04f91fdd4c0deeca8a669cced3e7cf8f9",
     "downloadUrlTemplate": "https://github.com/PowerShell/PowerShell/releases/download/v{version}/{winX64MsiFilename}",
     "verification": "SHA-256 independently computed locally on 2026-11-02 from the downloaded asset. Register-Runner.ps1 (#requires -Version 7.0) needs the real machine-wide MSI, NOT winget's Microsoft.PowerShell package -- that resolves to a broken per-user MSIX stub invisible to the dedicated runner service account (confirmed live during the q3-pro functional proof). provision-windows-guest.py's register-runner subcommand installs this MSI if pwsh isn't already present."
+  },
+  "nssm": {
+    "version": "2.24-101-g897c7ad",
+    "zipFilename": "nssm-2.24-101-g897c7ad.zip",
+    "zipSha256": "99f5045fffbffb745d67fe3a065a953c4a3d9c253b868892d9b685b0ee7d07b8",
+    "win64ExePathInZip": "nssm-2.24-101-g897c7ad/win64/nssm.exe",
+    "win64ExeSha256": "eee9c44c29c2be011f1f1e43bb8c3fca888cb81053022ec5a0060035de16d848",
+    "downloadUrl": "https://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip",
+    "license": "Public domain (per https://nssm.cc/download).",
+    "verification": "nssm.cc's own download page explicitly recommends this pre-release build (not the nominal \"latest release\" 2.24 from 2014-08-31) for \"Windows 10 Creators Update or newer\" -- which Windows 11 25H2 falls under -- to avoid a documented services-failing-to-start issue in the older build. SHA-256 for both the zip and the extracted win64/nssm.exe independently computed locally on 2026-11-05 from the asset downloaded directly from nssm.cc (the official/canonical source, not a third-party mirror or fork). Used by build-winrm-service-bootstrap-installer.nsi (research prototype for issue #191's own recommended next step: test whether a genuine SCM service, registered the same way the already-proven-safe wuauserv/UsoSvc StartupType disable is, survives the #188 restart where RunOnce/FirstLogonCommands did not)."
   }
 }
