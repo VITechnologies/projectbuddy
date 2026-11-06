@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.9
+
+Adopt GitFlow branch governance (`develop` branch, `feature/*`,
+`release/*`, `hotfix/*`), per operator decision on `VITechnologies/projectbuddy#6`,
+to satisfy `svelderrainruiz/repo-standards-review`'s CM gate — see
+`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`
+and `docs/release/release-procedure.md`. The decision's condition: every
+compliance document stamps the exact `repo-standards-review` version (tag
++ commit SHA) it was assessed against — see
+`docs/architecture/standards-compliance.md`, which also documents a weekly,
+flag-only (never auto-editing) re-certification check
+(`.github/workflows/standards-compliance-recheck.yml`). The
+`svelderrainruiz/projectbuddy` fork's `main` now plays GitFlow's `develop`
+role; sync pull requests target this repo's `develop` branch going forward,
+not `main`.
+
 ## v0.3.8
 
 Add `Enable-RepoIssueTracking.ps1`: enables Issues (idempotent, never

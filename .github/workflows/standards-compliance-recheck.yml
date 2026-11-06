@@ -1,0 +1,85 @@
+name: Standards Compliance Recheck
+
+on:
+  schedule:
+    # Weekly: every Monday at 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  recheck:
+    name: Recheck repo-standards-review Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Compare Stamped Version Against Latest
+        id: compare
+        shell: bash
+        env:
+          # svelderrainruiz/repo-standards-review is a private repo owned by
+          # a different user than this one; the default GITHUB_TOKEN cannot
+          # read it. A PAT with at least read access to that specific repo
+          # must be configured here for this check to actually run -- a
+          # missing/insufficiently-scoped token only warns and skips (never
+          # fails the workflow), matching the pattern already established
+          # for ACTIONS_REPO_ADMIN_TOKEN in add-project.yml.
+          GH_TOKEN: ${{ secrets.STANDARDS_REVIEW_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          stamp_file="docs/architecture/standards-compliance.md"
+          stamped_tag=$(grep -o 'tag=[^ ]*' "$stamp_file" | head -1 | cut -d= -f2)
+          stamped_sha=$(grep -o 'sha=[^ ]*' "$stamp_file" | head -1 | cut -d= -f2)
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::STANDARDS_REVIEW_ACCESS_TOKEN is not configured (needs read access to the private svelderrainruiz/repo-standards-review repo); skipping this week's recheck. Currently stamped: $stamped_tag ($stamped_sha)."
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          latest_sha=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" \
+            | grep -v '\^{}$' | sort -t/ -k3 -V | tail -1 | cut -f1)
+          latest_tag=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" \
+            | grep -v '\^{}$' | sort -t/ -k3 -V | tail -1 | sed 's#.*refs/tags/##')
+          # Peeled (dereferenced) SHA is the actual commit for an annotated tag.
+          peeled_sha=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" "refs/tags/${latest_tag}^{}" | cut -f1)
+          if [ -n "$peeled_sha" ]; then
+            latest_sha="$peeled_sha"
+          fi
+
+          echo "Stamped: $stamped_tag ($stamped_sha)"
+          echo "Latest:  $latest_tag ($latest_sha)"
+
+          if [ "$stamped_tag" != "$latest_tag" ] || [ "$stamped_sha" != "$latest_sha" ]; then
+            {
+              echo "drift=true"
+              echo "stamped_tag=$stamped_tag"
+              echo "latest_tag=$latest_tag"
+              echo "latest_sha=$latest_sha"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Flag Re-certification Due
+        if: steps.compare.outputs.drift == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./New-HumanEscalation.ps1 `
+            -Repo "${{ github.repository }}" `
+            -EscalationId "standards-compliance-recheck-due" `
+            -Title "repo-standards-review has a newer version: re-certification due" `
+            -Context "docs/architecture/standards-compliance.md currently stamps svelderrainruiz/repo-standards-review@${{ steps.compare.outputs.stamped_tag }}, but the latest published version is ${{ steps.compare.outputs.latest_tag }} (${{ steps.compare.outputs.latest_sha }})." `
+            -WhyAgentCannotResolve "Compliance could have regressed or the standard's requirements could have changed under the newer version; this is always a human review/decision, never an automated overwrite of the stamp." `
+            -OptionsConsidered @("Re-run python3 scripts/run_assurance.py against this repo using the newer repo-standards-review version and review the result", "Defer re-certification to a later date if no urgent drift is suspected") `
+            -Recommendation "Re-run the assurance pipeline against the newer version and update docs/architecture/standards-compliance.md's stamp (and gate table) only after reviewing the result." `
+            -RelatedIssues @("docs/architecture/standards-compliance.md") `
+            -Assignee "svelderrainruiz"
