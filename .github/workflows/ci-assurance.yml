@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   coverage:
     # The literal job name "PR Coverage Gate / coverage" is required --
