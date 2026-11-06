@@ -30,6 +30,16 @@ was itself re-triggering a false DoD `PASS` -- rephrased the same way,
 without reproducing the matched string, restoring the real, correctly
 `FAIL (not required)` DoD state reflected below.
 
+A follow-on full 5-area semantic-audit pass (same `v0.2.23` tooling, 3
+independent models) found and fixed a cluster of real documentation/code
+defects spanning REQ/ARCH/DOC (see `v0.3.26`'s `CHANGELOG.md` entry), and
+surfaced one still-open, high-severity finding needing an operator
+decision (`#62`: `provision-ubuntu-vm.yml` has never been successfully
+dispatched and references 3 scripts that have never existed). None of
+these affect the 5 required gates below -- the heuristic scanner has no
+rule that would have caught any of them, which is the entire reason the
+semantic-audit capability was built.
+
 ## Current gate status (as of the version above)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
@@ -44,13 +54,13 @@ recorded result.
 | Gate | Status | Confidence | Tracking |
 |---|---|---|---|
 | CM (incl. GitFlow branch governance) | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#6` (closed) |
-| Coverage | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#8` (closed) |
+| Coverage | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#8` (closed) |
 | REQ | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#9` (closed) |
-| ARCH | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#10` (closed) |
+| ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
 | DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
-| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (88%) | not tracked |
+| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (91%) | not tracked |
 
-Overall confidence: High (99%); 0 contradictions.
+Overall confidence: High (100%); 0 contradictions.
 
 DoD is intentionally not one of this repo's 5 required gates (per the
 tracking column above) -- `repo-standards-review`'s own rubric only awards

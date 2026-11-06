@@ -118,8 +118,15 @@ jobs:
             [[ -n "${GUEST_PASSWORD:-}" ]] || { echo "WINDOWS_LABVIEW_VM_GUEST_PASSWORD secret is required for create-vm" >&2; exit 2; }
             install -m 0600 /dev/null "$GUEST_PASSWORD_FILE"
             printf '%s' "$GUEST_PASSWORD" > "$GUEST_PASSWORD_FILE"
+            # A trap (not an end-of-step cleanup line) so the credential file is
+            # removed under set -e even if build-virtualbox.sh fails partway
+            # through -- an end-of-step-only cleanup line is never reached once
+            # `set -e` aborts the step on an earlier failure (confirmed by this
+            # session's own semantic-audit cross-model review: two independent
+            # models flagged the previous end-of-step-only placement as a
+            # real credential-retention gap on any ordinary failure).
+            trap 'shred -u "$GUEST_PASSWORD_FILE" 2>/dev/null || rm -f "$GUEST_PASSWORD_FILE"' EXIT
             ./vm/windows-labview/build-virtualbox.sh --run --headless
-            shred -u "$GUEST_PASSWORD_FILE" 2>/dev/null || rm -f "$GUEST_PASSWORD_FILE"
           else
             ./vm/windows-labview/build-virtualbox.sh --dry-run --headless
           fi
@@ -206,6 +213,9 @@ jobs:
           # and wait-ready failed with FileNotFoundError instead of a WinRM error.
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          # Trap, not an end-of-step cleanup line -- see the create-vm step's
+          # comment above for why.
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
           if [[ "$state" == running ]]; then
             # acpipowerbutton has proven unreliable against this guest (WinRM stays
@@ -272,7 +282,6 @@ jobs:
           # confusingly ("installer not found") instead of surfacing the real
           # WinRM-never-came-back-up problem here, at the actual point of failure.
           [[ "$winrm_ready" == "1" ]] || { echo "WinRM did not become ready after reboot within the retry budget." >&2; exit 4; }
-          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Install VIPM Professional Over WinRM
         if: inputs.phase == 'install-vipm'
@@ -284,11 +293,11 @@ jobs:
           set -euo pipefail
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           python3 -m venv "${{ runner.temp }}/winrm-venv"
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
             --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-vipm
-          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Install LabVIEW Professional Over WinRM
         if: inputs.phase == 'install-labview'
@@ -300,11 +309,11 @@ jobs:
           set -euo pipefail
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           python3 -m venv "${{ runner.temp }}/winrm-venv"
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
             --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-labview
-          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Register GitHub Actions Runner Over WinRM
         if: inputs.phase == 'register-runner'
@@ -339,6 +348,10 @@ jobs:
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
           install -m 0600 /dev/null "$PAT_FILE"
           printf '%s' "$RUNNER_REGISTRATION_PAT" > "$PAT_FILE"
+          trap '
+            shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
+            shred -u "$PAT_FILE" 2>/dev/null || rm -f "$PAT_FILE"
+          ' EXIT
           runner_filename="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Filename'])")"
           runner_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Sha256'])")"
           runner_url="$(python3 -c "import json; m = json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']; print(m['downloadUrlTemplate'].format(version=m['version'], winX64Filename=m['winX64Filename']))")"
@@ -361,6 +374,4 @@ jobs:
             --pwsh-msi-url "$pwsh_msi_url" \
             --pwsh-msi-filename "$pwsh_msi_filename" \
             --pwsh-msi-sha256 "$pwsh_msi_sha256"
-          shred -u "$PAT_FILE" 2>/dev/null || rm -f "$PAT_FILE"
-          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
