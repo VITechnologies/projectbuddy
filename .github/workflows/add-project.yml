@@ -137,12 +137,13 @@ jobs:
           vipm_configs = load("VIPM_TOML_CONFIGS", {}, dict)
 
           entry = {"name": name, "labels": labels, "pipelineConfig": config}
-          index = next((i for i, p in enumerate(projects) if isinstance(p, dict) and p.get("name") == name), None)
-          action = "Added" if index is None else "Updated"
-          if index is None:
-              projects.append(entry)
-          else:
-              projects[index] = entry
+          # Drop every existing entry for this name (not just the first
+          # match) before appending the fresh one, so a pre-existing
+          # duplicate -- however it got there -- can't survive an upsert.
+          existing_indexes = [i for i, p in enumerate(projects) if isinstance(p, dict) and p.get("name") == name]
+          action = "Added" if not existing_indexes else "Updated"
+          projects = [p for i, p in enumerate(projects) if i not in existing_indexes]
+          projects.append(entry)
 
           vipm_status = "updated" if name in vipm_configs else "added"
           vipm_configs[name] = manifest
