@@ -33,7 +33,24 @@ The stamp above is a **point-in-time record**, not a one-time claim that is
 assumed to remain true forever. A scheduled check
 (`.github/workflows/standards-compliance-recheck.yml`, weekly) compares the
 stamped version above against `repo-standards-review`'s latest published
-tag:
+tag.
+
+`repo-standards-review` is a private repo. Rather than grant a CI token
+broad cross-repo access, this check runs on a **self-hosted runner labeled
+`standards-review-local`**, registered against this fork
+(`svelderrainruiz/projectbuddy`) specifically, whose own ambient git/gh
+credentials already have real, working read access to the private repo (no
+per-workflow secret needed). This is a deliberately reusable pattern: anyone
+forking this engine can create their own private `repo-standards-review`
+instance and register their own `standards-review-local`-labeled runner the
+same way, on their own fork, to get the same living compliance check.
+Repos without such a runner (including this engine's own public upstream,
+`VITechnologies/projectbuddy`, which deliberately carries zero private
+infrastructure state) will see this job queue and auto-fail once a week
+after GitHub's standard 24-hour no-runner timeout -- expected, and not an
+error requiring action there.
+
+What the check does once it runs:
 
 - **If a newer version exists**: the workflow opens or updates a tracking
   issue (labeled `needs-human-decision`, via `New-HumanEscalation.ps1`)
@@ -51,5 +68,7 @@ tag:
   as part of that review -- the same way the original stamp above was
   produced.
 
-This policy, and the version stamp format, is specific to this repo for
-now (not yet a reusable engine capability offered to other consumers).
+The version-stamp format and the self-hosted-runner mechanism are a
+documented, reusable pattern (see above) for any fork of this engine that
+wants its own living compliance infrastructure; this document itself
+remains specific to this repo's own current stamp and gate status.

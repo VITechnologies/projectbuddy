@@ -1,0 +1,6 @@
+self-hosted-runner:
+  # Custom label for the self-hosted runner that has working local git/gh
+  # credentials for the private svelderrainruiz/repo-standards-review repo
+  # (see docs/architecture/standards-compliance.md).
+  labels:
+    - standards-review-local

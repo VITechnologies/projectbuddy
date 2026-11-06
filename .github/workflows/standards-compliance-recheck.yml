@@ -13,7 +13,22 @@ permissions:
 jobs:
   recheck:
     name: Recheck repo-standards-review Version
-    runs-on: ubuntu-latest
+    # svelderrainruiz/repo-standards-review is a private repo; no CI token
+    # (not even a PAT) can read it reliably from a GitHub-hosted runner
+    # without granting that token broad cross-repo access. Instead, this
+    # runs on a self-hosted runner labeled "standards-review-local" whose
+    # own ambient git/gh credentials already have real, working read access
+    # -- the same model documented in
+    # docs/architecture/standards-compliance.md for "anyone forking this
+    # engine can register their own repo-standards-review instance and
+    # runner this way."
+    #
+    # On a repo with no such runner registered (e.g. this engine's own
+    # public upstream, which deliberately carries zero private
+    # infrastructure state), this job will simply queue and GitHub will
+    # auto-fail it after its standard 24-hour no-runner timeout, once a
+    # week -- expected, and not an error requiring action there.
+    runs-on: [self-hosted, standards-review-local]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -21,15 +36,6 @@ jobs:
       - name: Compare Stamped Version Against Latest
         id: compare
         shell: bash
-        env:
-          # svelderrainruiz/repo-standards-review is a private repo owned by
-          # a different user than this one; the default GITHUB_TOKEN cannot
-          # read it. A PAT with at least read access to that specific repo
-          # must be configured here for this check to actually run -- a
-          # missing/insufficiently-scoped token only warns and skips (never
-          # fails the workflow), matching the pattern already established
-          # for ACTIONS_REPO_ADMIN_TOKEN in add-project.yml.
-          GH_TOKEN: ${{ secrets.STANDARDS_REVIEW_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -37,18 +43,16 @@ jobs:
           stamped_tag=$(grep -o 'tag=[^ ]*' "$stamp_file" | head -1 | cut -d= -f2)
           stamped_sha=$(grep -o 'sha=[^ ]*' "$stamp_file" | head -1 | cut -d= -f2)
 
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::STANDARDS_REVIEW_ACCESS_TOKEN is not configured (needs read access to the private svelderrainruiz/repo-standards-review repo); skipping this week's recheck. Currently stamped: $stamped_tag ($stamped_sha)."
-            echo "drift=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          latest_sha=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" \
+          # Relies on this runner's own ambient git/gh credentials (no
+          # per-workflow token) to read the private repo-standards-review
+          # repo, exactly as a local `git ls-remote`/`git clone` already
+          # works unassisted on this host.
+          latest_sha=$(git ls-remote --tags "https://github.com/svelderrainruiz/repo-standards-review.git" \
             | grep -v '\^{}$' | sort -t/ -k3 -V | tail -1 | cut -f1)
-          latest_tag=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" \
+          latest_tag=$(git ls-remote --tags "https://github.com/svelderrainruiz/repo-standards-review.git" \
             | grep -v '\^{}$' | sort -t/ -k3 -V | tail -1 | sed 's#.*refs/tags/##')
           # Peeled (dereferenced) SHA is the actual commit for an annotated tag.
-          peeled_sha=$(git ls-remote --tags "https://x-access-token:${GH_TOKEN}@github.com/svelderrainruiz/repo-standards-review.git" "refs/tags/${latest_tag}^{}" | cut -f1)
+          peeled_sha=$(git ls-remote --tags "https://github.com/svelderrainruiz/repo-standards-review.git" "refs/tags/${latest_tag}^{}" | cut -f1)
           if [ -n "$peeled_sha" ]; then
             latest_sha="$peeled_sha"
           fi
