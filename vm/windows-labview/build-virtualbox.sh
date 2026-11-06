@@ -141,6 +141,13 @@ print("\t".join(str(value) for value in values))
 PY
 )
 
+# Cross-checked against these literal expected values (not just read and
+# trusted from the manifest) deliberately: this script provisions exactly
+# one validated Windows 11 25H2 configuration, so an edit to
+# provisioning-manifest.json alone (whether accidental or malicious) can
+# never silently redirect a "known-good" provisioning run to an
+# unvalidated OS/hardware profile -- both the manifest and this script
+# must agree before any VM is created.
 [[ "$os_type" == Windows11_64 ]] || { echo "unsupported VirtualBox OS type: $os_type" >&2; exit 2; }
 [[ "$iso_filename" == Win11_25H2_English_x64_v2.iso ]] || { echo "unexpected Windows ISO filename" >&2; exit 2; }
 [[ "$iso_sha256" == 768984706b909479417b2368438909440f2967ff05c6a9195ed2667254e465e3 ]] || { echo "unexpected Windows ISO SHA-256" >&2; exit 2; }

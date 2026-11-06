@@ -1,9 +1,8 @@
 name: Provision Windows LabVIEW VM
 
 # v1: covers validate, create-vm, install-vipm, and install-labview. All four
-# phases are live-dispatch proven (2026-11-02; see runs 41423338530,
-# 41426452635, 41428297144) against the operator-built, activated
-# sandbox-sbom-windows11-labview2026-q3-pro VM -- including the full
+# phases are live-dispatch proven (2026-11-02) against the operator-built,
+# activated sandbox-sbom-windows11-labview2026-q3-pro VM -- including the full
 # attach-media + power-cycle + WinRM-reinstall path with a real reboot.
 # v2: adds register-runner, automating the previously-manual, WinRM-driven
 # (no interactive session required) GitHub Actions runner registration
