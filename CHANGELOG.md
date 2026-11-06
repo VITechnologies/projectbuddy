@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.15
+
+Branch protection live on both repos, implementing `VITechnologies/projectbuddy#20`:
+
+- `VITechnologies/projectbuddy` `main`/`develop`: require `Docs Link Check / lychee` + `PR Coverage Gate / coverage` + 1 approving review; default branch moved `main` -> `develop`.
+- `svelderrainruiz/projectbuddy` `main`: same 2 required checks, 0 required approvals (solo maintainer -- requiring reviews would self-lock).
+- All force-push/delete disabled on every protected branch; `enforce_admins: false` everywhere (deliberate -- admins can still bypass via `--admin` for already-CI-vetted automation).
+- Live-verified with real test PRs: fork merged cleanly with 0 approvals; upstream correctly blocked a plain merge, `--admin` override succeeded as designed.
+- `CONTRIBUTING.md`: documents the `--admin` merge pattern as the sanctioned, operator-confirmed resolution specifically for fork-to-`develop` sync PRs and `release/*`-to-`main` promotions -- not a general bypass.
+
 ## v0.3.14
 
 Per operator direction: proactively consider future-agent-success risks
