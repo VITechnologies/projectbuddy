@@ -14,6 +14,15 @@ repository's reusable workflows and scripts as a versioned, pinned
 dependency — never the other way around. No credentials or private
 configuration ever flow into this repository.
 
+## Standards compliance
+
+Assessed against `svelderrainruiz/repo-standards-review`'s `release-gate`
+profile, **version `v0.2.19`** (commit `d44f210`). See
+[`docs/architecture/standards-compliance.md`](docs/architecture/standards-compliance.md)
+for the full gate status, the living re-certification policy, and
+[`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
+for the branch-governance decision this assessment drove.
+
 ## Consumption model
 
 - **Reusable GitHub Actions workflows** are called by downstream repositories
