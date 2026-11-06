@@ -164,6 +164,25 @@ jobs:
           [[ "$actual_sha256" == "$expected_sha256" ]] || { echo "VIPM installer SHA-256 mismatch: expected $expected_sha256, got $actual_sha256" >&2; exit 2; }
           xorriso -as mkisofs -o "${{ runner.temp }}/vipm-installer.iso" -V VIPMSETUP -J -r "$VIPM_INSTALLER_PATH"
 
+      - name: Verify LabVIEW Installer
+        # Mirrors "Build VIPM Installer ISO"'s fail-closed SHA-256 check,
+        # minus the xorriso wrap -- labview_iso_path already points directly
+        # at an ISO, unlike VIPM's .exe installer. Closes the asymmetry
+        # documented in docs/vm-provisioning/procedure.md: this media was
+        # previously attached with no verification at all, even though
+        # provisioning-manifest.json already pins its exact expected hash
+        # (VITechnologies/projectbuddy#38).
+        if: inputs.phase == 'install-labview'
+        shell: bash
+        env:
+          LABVIEW_ISO_PATH: ${{ inputs.labview_iso_path }}
+        run: |
+          set -euo pipefail
+          [[ -n "$LABVIEW_ISO_PATH" && -f "$LABVIEW_ISO_PATH" ]] || { echo "LabVIEW installer ISO not found: $LABVIEW_ISO_PATH" >&2; exit 2; }
+          expected_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['labview']['installer']['sha256'])")"
+          actual_sha256="$(sha256sum "$LABVIEW_ISO_PATH" | cut -d' ' -f1)"
+          [[ "$actual_sha256" == "$expected_sha256" ]] || { echo "LabVIEW installer ISO SHA-256 mismatch: expected $expected_sha256, got $actual_sha256" >&2; exit 2; }
+
       - name: Attach Installer Media And Restart
         if: inputs.phase == 'install-vipm' || inputs.phase == 'install-labview'
         shell: bash

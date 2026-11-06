@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.25
+
+- fix `install-labview`: verify the supplied LabVIEW installer ISO's SHA-256 against `provisioning-manifest.json`'s pinned `labview.installer.sha256` before attaching it, fail-closed on mismatch -- previously this phase attached the operator-supplied ISO with no verification at all, unlike `install-vipm`'s existing fail-closed check, even though the manifest already pinned the exact expected hash (`#38`). Real-dispatch validated against an actual VM: confirmed the valid-hash path installs LabVIEW successfully end to end, and the mismatched-hash path fails closed before any VM is touched
+
 ## v0.3.24
 
 - remove `docker/windows-sbom/`'s unused code-signing toolchain (`Install-SigningTools.ps1`, `Install-VerifiedNugetPackage.ps1`, and their Dockerfile `COPY`/`RUN` lines): a complete, self-verifying SignTool/Azure-Artifact-Signing install with zero consumers anywhere in the pipeline since the very first commit (`v0.2.0`) -- the `.lvlibp` output this would plausibly sign is already trusted downstream via GitHub's in-toto release attestation chain, not a code-signing certificate, so this was unconnected scaffolding adding real image-build time and an unused native-DLL load for no current benefit. Removing it in favor of adding it back deliberately, with real wiring and tests, if a genuine signing requirement ever materializes (`#44` finding 1)

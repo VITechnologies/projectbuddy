@@ -61,13 +61,12 @@ the VM being built).
    SOAP/PowerShell-remoting service could actually handle requests).
 4. **`install-labview`** -- same attach/restart/readiness-poll mechanics
    as `install-vipm`, installing the operator-supplied LabVIEW
-   Professional ISO instead. **Known gap, not yet fixed**: unlike
-   `install-vipm`, this phase does *not* verify the supplied ISO's
-   SHA-256 before attaching it, even though `provisioning-manifest.json`'s
-   `labview.installer.sha256` field already pins the exact expected hash
-   -- the manifest data exists, but nothing reads it here. Tracked as a
-   real asymmetry worth closing to match `install-vipm`'s own fail-closed
-   guarantee.
+   Professional ISO instead. This phase now also verifies the supplied
+   ISO's SHA-256 against `provisioning-manifest.json`'s
+   `labview.installer.sha256` before attaching it, fail-closed on
+   mismatch, exactly matching `install-vipm`'s own guarantee (closed via
+   a real `workflow_dispatch` validation against an actual VM, confirming
+   both the valid-hash and mismatched-hash paths; `VITechnologies/projectbuddy#38`).
 5. **`register-runner`** -- registers the VM as a GitHub Actions
    self-hosted runner for a target repo over WinRM (no interactive
    session needed), using a dedicated local Windows service account (not
