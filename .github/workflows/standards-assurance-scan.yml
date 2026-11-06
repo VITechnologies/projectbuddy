@@ -1,0 +1,83 @@
+name: Standards Assurance Scan
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly: every Monday at 09:30 UTC (after standards-compliance-recheck's 09:00 slot).
+    - cron: "30 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Run repo-standards-review Assurance Pipeline
+    # repo-standards-review is a private repo; this runner's ambient git/gh
+    # credentials already have real, working read access to it (see
+    # docs/architecture/standards-compliance.md). The wiki is public, so no
+    # special credentials are needed to clone it.
+    runs-on: [self-hosted, standards-review-local]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # See standards-compliance-recheck.yml's own comment: persisted
+          # credentials here would hijack the unrelated repo-standards-review
+          # clone below with this job's own scope-less token.
+          persist-credentials: false
+
+      - name: Assemble Scan Checkout (main repo + wiki specs)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The SRS/RTM/Architecture Packet live in VITechnologies/projectbuddy's
+          # wiki specifically (the authoritative, assessed repo -- per
+          # operator decision, not the fork's own wiki, which doesn't exist),
+          # not in this checkout -- copy them into the paths
+          # repo-standards-review's scanner actually looks for. This is an
+          # ephemeral, scan-time-only copy; the wiki remains the one real
+          # source of truth and is never written back to here.
+          rm -rf /tmp/projectbuddy-wiki-scan
+          git clone --quiet --depth 1 "https://github.com/VITechnologies/projectbuddy.wiki.git" /tmp/projectbuddy-wiki-scan
+
+          mkdir -p docs/requirements
+          cp /tmp/projectbuddy-wiki-scan/Software-Requirements-Specification.md docs/requirements/srs.md
+          cp /tmp/projectbuddy-wiki-scan/Requirements-Traceability-Matrix.md docs/requirements/rtm.md
+          cp /tmp/projectbuddy-wiki-scan/Architecture-Packet.md docs/architecture/overview.md
+
+          rm -rf /tmp/repo-standards-review-scan
+          git clone --quiet "https://github.com/svelderrainruiz/repo-standards-review.git" /tmp/repo-standards-review-scan
+
+      - name: Run Assurance Pipeline
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/standards-scan-out
+          python3 /tmp/repo-standards-review-scan/scripts/run_assurance.py "$PWD" \
+            --profile release-gate --mode evidence-pack \
+            --save-dir /tmp/standards-scan-out --output gate-scorecard \
+            | tee /tmp/scan-summary.txt
+
+          {
+            echo "## Standards Assurance Scan"
+            echo '```'
+            cat /tmp/scan-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          score_file=$(find /tmp/standards-scan-out -name score.json | head -1)
+          req_status=$(python3 -c "import json; print(json.load(open('$score_file'))['gates']['req']['status'])")
+          arch_status=$(python3 -c "import json; print(json.load(open('$score_file'))['gates']['arch']['status'])")
+          echo "req_status=$req_status" >> "$GITHUB_OUTPUT"
+          echo "arch_status=$arch_status" >> "$GITHUB_OUTPUT"
+          echo "REQ gate: $req_status"
+          echo "ARCH gate: $arch_status"
+
+      - name: Fail If REQ Or ARCH Regressed
+        if: steps.scan.outputs.req_status != 'PASS' || steps.scan.outputs.arch_status != 'PASS'
+        shell: bash
+        run: |
+          echo "::error::REQ gate: ${{ steps.scan.outputs.req_status }}, ARCH gate: ${{ steps.scan.outputs.arch_status }} -- both were passing when this workflow was authored (VITechnologies/projectbuddy#9, #10). Check the wiki content or this scan's own copy step for a regression."
+          exit 1

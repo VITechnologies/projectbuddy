@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to tag and release, e.g. v0.3.11 (must match a "## vX.Y.Z" heading in CHANGELOG.md).
+        required: true
+        type: string
+      target:
+        description: Branch or commit SHA to tag (normally "main", after a release/* branch has already been promoted there).
+        required: false
+        type: string
+        default: main
+      publish:
+        description: Publish immediately instead of leaving it as a draft. Releases are immutable once published (tag/assets cannot change) -- defaults to draft so a human verifies first.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and Release ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.target }}
+
+      - name: Validate Version Format
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::-version must look like vX.Y.Z, got: ${{ inputs.version }}"
+            exit 1
+          fi
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.version }} already exists. Immutable releases do not allow tag reuse, even after deletion -- pick a new version."
+            exit 1
+          fi
+
+      - name: Extract Matching CHANGELOG Section
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes=$(sed -n "/^## ${{ inputs.version }}/,/^## v/p" CHANGELOG.md | sed '$d' | tail -n +2)
+          if [ -z "$notes" ]; then
+            echo "::error::No '## ${{ inputs.version }}' section found in CHANGELOG.md. Add the entry there first."
+            exit 1
+          fi
+          {
+            echo "notes<<RELEASE_NOTES_EOF"
+            echo "$notes"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          publish_flag=""
+          if [ "${{ inputs.publish }}" != "true" ]; then
+            publish_flag="--draft"
+          fi
+          gh release create "${{ inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ inputs.target }}" \
+            --title "${{ inputs.version }}" \
+            --notes "${{ steps.changelog.outputs.notes }}" \
+            $publish_flag
