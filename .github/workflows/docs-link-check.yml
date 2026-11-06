@@ -1,0 +1,32 @@
+name: Docs Link Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lychee:
+    # The literal job name "Docs Link Check / lychee" is required --
+    # repo-standards-review's GATE:lychee:context rule looks for this exact
+    # text, not just the presence of a lychee-based workflow.
+    name: Docs Link Check / lychee
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run lychee on docs and markdown
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --verbose
+            --no-progress
+            --include-fragments
+            --exclude-path .github
+            docs/**/*.md
+            *.md
+          fail: true
