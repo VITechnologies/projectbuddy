@@ -45,13 +45,13 @@ recorded result.
 
 DoD is intentionally not one of this repo's 5 required gates (per the
 tracking column above) -- `repo-standards-review`'s own rubric only awards
-a full `PASS` when a literal `DoD Gate / dod` CI status-check context
-exists, which this repo does not have and is not required to add. This
-repo's `CONTRIBUTING.md` does carry a genuine, itemized Definition of
-Done checklist (added alongside this re-certification), which is why the
-score moved from 0/5 (0%, no DoD content at all) to 3/5 (60%, itemized
-checklist present but no enforcing CI gate) rather than being a
-fabricated pass.
+a full `PASS` when a literal CI status-check context (the gate's own name
+joined to its job id by a slash) is visible, which this repo does not
+have and is not required to add. This repo's `CONTRIBUTING.md` does carry
+a genuine, itemized Definition of Done checklist (added alongside this
+re-certification), which is why the score moved from 0/5 (0%, no DoD
+content at all) to 3/5 (60%, itemized checklist present but no enforcing
+CI gate) rather than being a fabricated pass.
 
 ## Living re-certification policy
 
