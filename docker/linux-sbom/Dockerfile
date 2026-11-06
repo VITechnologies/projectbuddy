@@ -1,5 +1,5 @@
 # Linux SBOM generation image: NI's official LabVIEW container + VIPM CLI + Grype.
-# Built and run by Run-LinuxSbom.ps1; see docs/linux-sbom-docker.md.
+# Built and run by Run-LinuxSbom.ps1; see docs/sbom-pipeline/procedure.md.
 ARG LABVIEW_IMAGE=nationalinstruments/labview:latest-linux
 FROM ${LABVIEW_IMAGE}
 

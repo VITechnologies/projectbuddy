@@ -1,7 +1,7 @@
 # escape=`
 # Windows SBOM generation image: NI's official LabVIEW Windows container
 # + VIPM CLI + PowerShell 7 + Git + Subversion + Grype.
-# Built and run by Run-WindowsSbom.ps1; see docs/windows-sbom-docker.md.
+# Built and run by Run-WindowsSbom.ps1; see docs/sbom-pipeline/procedure.md.
 ARG LABVIEW_IMAGE=nationalinstruments/labview:latest-windows
 FROM ${LABVIEW_IMAGE}
 

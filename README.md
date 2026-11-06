@@ -94,7 +94,13 @@ closed with a clear error rather than silently trying to reach someone
 else's private instance.
 
 `docker/linux-sbom/` and `docker/windows-sbom/` are the container images'
-own Dockerfiles and in-container pipeline scripts.
+own Dockerfiles and in-container pipeline scripts. See
+[`docs/sbom-pipeline/procedure.md`](docs/sbom-pipeline/procedure.md) for
+the full stage-by-stage procedure (both native and containerized paths),
+including the full-mode fail-fast reporting preflight, the LVLIBP
+release-dependency attestation-verification chain, and the deliberate
+native-vs-container difference in whether Grype's own findings gate the
+run.
 
 ### Runner/registration helpers (root-level)
 
