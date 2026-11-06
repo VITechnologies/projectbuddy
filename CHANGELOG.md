@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.18
+
+Fix `VITechnologies/projectbuddy#35` (stale CI-integration text in the
+wiki spec) and act on new operator guidance: workflow run logs/summaries
+are ephemeral and must never be cited as "the evidence" in persistent
+documentation.
+
+- `docs/architecture/standards-compliance.md`, `CHANGELOG.md`'s own
+  `v0.3.10` entry: removed the 2 bare workflow-run-ID citations found in
+  this repo, replaced with descriptions of the reproducible mechanism
+  itself (re-runnable via `workflow_dispatch`) instead of a specific past
+  run number.
+- Wiki: fixed the SRS's stale "wiring question still open" text (resolved
+  back in `v0.3.11`, but never actually documented where it was pointing);
+  added the real resolution to the Architecture Packet's Correspondence
+  And Rationale section; fixed the one bare run-ID citation there too
+  (`REQ-011`); updated the RTM's "Verified (live)" legend to state the
+  no-ephemeral-run-ID principle explicitly for future additions.
+
+Live-verified before committing: ran the real assurance pipeline against
+the fully updated spec set -- all 5 gates still `PASS`.
+
 ## v0.3.17
 
 Close the same shallow-spec-coverage pattern `#29` closed for VM
@@ -176,8 +198,10 @@ host-wide `http.https://github.com/.extraheader` override into
 `.git/config` that hijacks *any* subsequent `https://github.com/...` git
 operation in the job (not just this repo's own checkout) with the wrong,
 scope-less ephemeral job token. `persist-credentials: false` removes it at
-the source. Live-verified end to end (run 42196529270: stamped and latest
-versions correctly compared and matched, no drift). The
+the source. Live-verified end to end: the recheck correctly compared
+stamped and latest versions and reported no drift, reproducible any time
+via `workflow_dispatch` on a repo with a `standards-review-local` runner
+registered. The
 `STANDARDS_REVIEW_ACCESS_TOKEN` secret is no longer used anywhere and has
 been removed from both this fork and the upstream repo.
 
