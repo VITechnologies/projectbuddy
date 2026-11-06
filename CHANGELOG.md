@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.13
+
+Close the Coverage gate (`VITechnologies/projectbuddy#8`) -- the last of
+the 5 `release-gate` gates to close:
+
+- `scripts/tests/test_convert_vipb_json.py`: 17 real, assertion-based
+  unit/CLI tests for `Convert-VipbJson.py`'s XML<->JSON and dot-path-patch
+  logic (the genuinely unit-testable script in this repo -- VM
+  provisioning/pipeline scripts need a live VM/VIPM toolchain to exercise
+  meaningfully and stay validated via real CI dispatch instead, per
+  `docs/requirements/srs.md` REQ-008/REQ-009). 95% line coverage of the
+  module under test, 97.9% including the test file itself.
+- `.github/workflows/ci-assurance.yml`: job literally named
+  `PR Coverage Gate / coverage` (required by `GATE:coverage:context`),
+  triggered on `pull_request` and `push` to `main`. Scoped honestly to
+  `scripts/` (not the whole repo) -- enforces a 90% threshold, real and
+  verified locally before committing, and uploads `coverage.xml` as a
+  retained artifact.
+
 ## v0.3.12
 
 Close the remaining DOC gate gaps (`VITechnologies/projectbuddy#11`):

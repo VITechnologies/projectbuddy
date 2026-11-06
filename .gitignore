@@ -3,3 +3,6 @@ __pycache__/
 .vagrant/
 *.exe
 *.iso
+coverage.xml
+.pytest_cache/
+.coverage
