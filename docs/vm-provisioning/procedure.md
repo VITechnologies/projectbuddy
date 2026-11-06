@@ -20,9 +20,9 @@ silently reuses another fork's naming or infrastructure.
 
 A single-VM, 5-phase lifecycle. Each phase is independently
 `workflow_dispatch`-able and individually dispatch-proven in production
-(see the workflow's own header comment for the specific proof-run IDs).
-Runs on a self-hosted runner labeled `vm-provisioner` (the host that will
-actually run VirtualBox, not the VM being built).
+(see the workflow's own header comment). Runs on a self-hosted runner
+labeled `vm-provisioner` (the host that will actually run VirtualBox, not
+the VM being built).
 
 1. **`validate`** -- dry-runs `build-virtualbox.sh --dry-run --headless`
    against the supplied inputs with no real VM created. Use this to check
@@ -33,7 +33,20 @@ actually run VirtualBox, not the VM being built).
    built and WinRM-reachable -- not a separate manual follow-up step. This
    replaced an earlier `FirstLogonCommands`-based mechanism, retired
    because an in-guest `winlogon.exe`-initiated restart unconditionally
-   interrupted it.
+   interrupted it. The target OS/hardware profile
+   (`os`/`virtualBox` sections of `provisioning-manifest.json`) is
+   **double-pinned**: `build-virtualbox.sh` reads these values from the
+   manifest *and* cross-checks each one against its own hardcoded literal
+   expectation (`Windows11_64`, the exact ISO filename/SHA-256, 120GB/
+   8192MB/4-CPU/128MB-VRAM, `efi64`/`ich9`/TPM 2.0), refusing to proceed if
+   either source disagrees -- a manifest edit alone can never silently
+   redirect a run to an unvalidated profile. `unattended-template.xml`
+   (the actual Windows Setup answer file) is a **vendored, near-verbatim
+   copy** of VirtualBox's own shipped template, deliberately kept
+   byte-close to upstream (including upstream's own stale/generic
+   comments) specifically to keep future re-vendoring against a newer
+   VirtualBox version a tractable diff -- see the file's own header
+   comment for the one documented additive change.
 3. **`install-vipm`** -- verifies the supplied VIPM installer's SHA-256
    against `provisioning-manifest.json`'s pinned hash (fails closed on
    mismatch, before building any install media), wraps it into an ISO,
@@ -48,7 +61,13 @@ actually run VirtualBox, not the VM being built).
    SOAP/PowerShell-remoting service could actually handle requests).
 4. **`install-labview`** -- same attach/restart/readiness-poll mechanics
    as `install-vipm`, installing the operator-supplied LabVIEW
-   Professional ISO instead.
+   Professional ISO instead. **Known gap, not yet fixed**: unlike
+   `install-vipm`, this phase does *not* verify the supplied ISO's
+   SHA-256 before attaching it, even though `provisioning-manifest.json`'s
+   `labview.installer.sha256` field already pins the exact expected hash
+   -- the manifest data exists, but nothing reads it here. Tracked as a
+   real asymmetry worth closing to match `install-vipm`'s own fail-closed
+   guarantee.
 5. **`register-runner`** -- registers the VM as a GitHub Actions
    self-hosted runner for a target repo over WinRM (no interactive
    session needed), using a dedicated local Windows service account (not

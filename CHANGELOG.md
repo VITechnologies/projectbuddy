@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.19
+
+First real pass at the operator's "spec-driven reproducibility" exercise:
+re-read the already-documented VM provisioning source specifically
+hunting for places where the spec and the real implementation disagree,
+on the theory that such a mismatch signals an implementation problem
+(dead code, tech debt, an unjustified heuristic), not just a doc gap.
+
+Findings:
+
+- `vm/windows-labview/build-virtualbox.sh`: added a one-line rationale
+  comment explaining why the OS/hardware profile is deliberately
+  double-pinned (manifest values cross-checked against hardcoded literal
+  expectations) -- the design was sound, it just had no comment
+  explaining why, which this exercise is specifically meant to catch.
+- `docs/vm-provisioning/procedure.md`: documents 2 real findings honestly
+  rather than papering over them -- `unattended-template.xml` is a
+  deliberately near-verbatim *vendored copy* of VirtualBox's own shipped
+  template (not projectbuddy's own stale TODOs, confirmed via the file's
+  own header before touching anything), and `install-labview` has a real,
+  undocumented-until-now asymmetry with `install-vipm`: no SHA-256
+  verification of the supplied ISO, despite the manifest already pinning
+  the exact expected hash. Filed as `VITechnologies/projectbuddy#38`
+  rather than patched blind, per this engine's own real-dispatch-only
+  validation discipline.
+- `.github/workflows/provision-windows-labview-vm.yml`: removed one more
+  ephemeral workflow-run-ID citation found during this pass (continuing
+  `#35`'s fix, this time in a pre-existing workflow comment rather than a
+  doc), describing what was proven instead of citing specific run
+  numbers.
+
+Live-verified before committing: ran the real assurance pipeline against
+the updated spec set -- all 5 gates still `PASS`.
+
 ## v0.3.18
 
 Fix `VITechnologies/projectbuddy#35` (stale CI-integration text in the
