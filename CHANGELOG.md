@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.17
+
+Close the same shallow-spec-coverage pattern `#29` closed for VM
+provisioning, this time for the native + containerized SBOM pipeline
+(`VITechnologies/projectbuddy#32`).
+
+- `docs/sbom-pipeline/procedure.md` (new): the full stage-by-stage
+  procedure for both the native pipeline (`Run-Pipeline.ps1`/`.sh`,
+  `Build-Sbom.ps1`, `internal/Pipeline.Stages.ps1`) and the containerized
+  pipeline (`docker/linux-sbom/`, `docker/windows-sbom/`), grounded
+  directly in the real code -- including the full-mode fail-fast
+  reporting preflight, the LVLIBP release-dependency immutable-release +
+  in-toto-attestation + tag-chain + manifest verification chain, and the
+  deliberate native-vs-container difference in whether Grype's own
+  findings gate the run. Also fixes 2 dangling doc references
+  (`docker/linux-sbom/Dockerfile`, `docker/windows-sbom/Dockerfile`
+  pointed at `docs/linux-sbom-docker.md`/`docs/windows-sbom-docker.md`,
+  neither of which ever existed) to point at this new, real doc instead.
+- Wiki: 8 new requirements (`REQ-022`-`REQ-029`) and matching RTM rows,
+  Architecture Packet Component View expanded with the real stage
+  library and shared schemas.
+- `docs/information-item-map.md`, `README.md`: updated to reference the
+  new procedure doc.
+
+Live-verified before committing: ran the real assurance pipeline against
+this repo + the updated wiki content -- all 5 release-gate gates still
+`PASS`.
+
 ## v0.3.16
 
 Close a real documentation gap the operator flagged directly and the

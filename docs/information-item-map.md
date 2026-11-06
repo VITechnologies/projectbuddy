@@ -22,6 +22,7 @@ requirement (`VITechnologies/projectbuddy#11`).
 | Plan | `docs/cm/cm-plan.md` | Operator | configuration/release-process change | change control and status accounting sections stay current |
 | Procedure | `docs/release/release-procedure.md` | Operator | release/hotfix flow change | the procedure matches the live GitFlow branch rules in practice |
 | Procedure | `docs/vm-provisioning/procedure.md` | Operator | VM-provisioning workflow/phase change | the procedure matches each workflow's real phase list and inline-documented safety properties |
+| Procedure | `docs/sbom-pipeline/procedure.md` | Operator | SBOM-pipeline stage/env-var contract change | the procedure matches both the native and containerized pipelines' real stage lists and documented env-var contracts |
 | Compliance Stamp | `docs/architecture/standards-compliance.md` | Operator | `repo-standards-review` publishes a new version | `standards-compliance-recheck.yml` flags drift weekly; stamp updated only after human review |
 
 ## Notes
