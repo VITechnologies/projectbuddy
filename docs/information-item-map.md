@@ -21,6 +21,7 @@ requirement (`VITechnologies/projectbuddy#11`).
 | Decision Record | `docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md` | Operator | a significant, retained technical decision | a new `ADR-NNNN` file is added, never edited after acceptance |
 | Plan | `docs/cm/cm-plan.md` | Operator | configuration/release-process change | change control and status accounting sections stay current |
 | Procedure | `docs/release/release-procedure.md` | Operator | release/hotfix flow change | the procedure matches the live GitFlow branch rules in practice |
+| Procedure | `docs/vm-provisioning/procedure.md` | Operator | VM-provisioning workflow/phase change | the procedure matches each workflow's real phase list and inline-documented safety properties |
 | Compliance Stamp | `docs/architecture/standards-compliance.md` | Operator | `repo-standards-review` publishes a new version | `standards-compliance-recheck.yml` flags drift weekly; stamp updated only after human review |
 
 ## Notes
