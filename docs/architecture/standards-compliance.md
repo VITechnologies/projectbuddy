@@ -18,13 +18,18 @@ compliance posture was assessed against.
 
 ## Current gate status (as of the version above)
 
+All 5 gates now `PASS`, verified via real CI
+(`.github/workflows/standards-assurance-scan.yml`, run `42201479527`),
+not just manual assertion. Re-run that workflow (`workflow_dispatch`)
+any time to reconfirm.
+
 | Gate | Status | Tracking |
 |---|---|---|
-| CM (incl. GitFlow branch governance) | Addressed by this change (`ADR-0001`) | `VITechnologies/projectbuddy#6` |
-| Coverage | FAIL | `VITechnologies/projectbuddy#8` |
-| REQ | FAIL | `VITechnologies/projectbuddy#9` |
-| ARCH | FAIL (partially addressed by `ADR-0001` + this doc) | `VITechnologies/projectbuddy#10` |
-| DOC | FAIL | `VITechnologies/projectbuddy#11` |
+| CM (incl. GitFlow branch governance) | ✅ PASS | `VITechnologies/projectbuddy#6` (closed) |
+| Coverage | ✅ PASS | `VITechnologies/projectbuddy#8` (closed) |
+| REQ | ✅ PASS | `VITechnologies/projectbuddy#9` (closed) |
+| ARCH | ✅ PASS | `VITechnologies/projectbuddy#10` (closed) |
+| DOC | ✅ PASS | `VITechnologies/projectbuddy#11` (closed) |
 | DoD | N/A (optional, not required) | not tracked |
 
 ## Living re-certification policy
