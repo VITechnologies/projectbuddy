@@ -58,12 +58,6 @@ RUN [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; `
 COPY Test-VipmVersion.ps1 C:/sbom/Test-VipmVersion.ps1
 RUN & C:\sbom\Test-VipmVersion.ps1 -CliVersion $env:VIPM_CLI_VERSION -DesktopVersion $env:VIPM_DESKTOP_VERSION
 
-COPY Install-SigningTools.ps1 C:/sbom/Install-SigningTools.ps1
-COPY Install-VerifiedNugetPackage.ps1 C:/sbom/Install-VerifiedNugetPackage.ps1
-
-# Use Windows PowerShell: pwsh 7.6 terminates during setup in this Server 2022 image.
-RUN & C:\sbom\Install-SigningTools.ps1
-
 SHELL ["pwsh", "-NoLogo", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 RUN git --version; svn --version --quiet; grype version; vipm --version; `
