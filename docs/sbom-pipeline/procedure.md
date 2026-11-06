@@ -3,8 +3,11 @@
 Satisfies `repo-standards-review`'s DOC/ARCH gaps for the native and
 containerized SBOM pipelines (`VITechnologies/projectbuddy#32`, following
 the same gap pattern `#29` closed for VM provisioning). Describes the
-real, already-implemented behavior of `Run-Pipeline.ps1`/`.sh`,
-`Build-Sbom.ps1`, `internal/Pipeline.Stages.ps1`, and
+real, already-implemented behavior of `Run-Pipeline.ps1` (Windows-only
+native pipeline; `Run-Pipeline.sh` is a separate, unrelated Linux
+LabVIEWCLI analysis tool, not a native-pipeline counterpart -- see the
+Native pipeline section below), `Build-Sbom.ps1`,
+`internal/Pipeline.Stages.ps1`, and
 `docker/linux-sbom/`/`docker/windows-sbom/` -- this is a
 procedural/operational document, not a requirements document; see the
 wiki's Software Requirements Specification (`REQ-022` onward) and
@@ -45,10 +48,19 @@ troubleshooting one does not have to assume it behaves like the other.
   run (both natively via `Test-Json` in `Run-Pipeline.ps1`, and the same
   schema file mounted into both container images).
 
-## Native pipeline (`Run-Pipeline.ps1` on Windows, `Run-Pipeline.sh` on Linux)
+## Native pipeline (`Run-Pipeline.ps1`, Windows only)
 
-Runs directly on a self-hosted runner (no container). Per project, in
-order:
+Runs directly on a self-hosted Windows runner (no container). **There is
+no native Linux equivalent of this pipeline in this repo.**
+`Run-Pipeline.sh` is a separate, unrelated script: a Linux LabVIEWCLI
+MassCompile/VI Analyzer tool for NI's own open-source example VIs
+(`examples/cicd-examples/Test-VIs`), explicitly analysis-only per its own
+header comment (`LABVIEW_PACKAGE_BUILD`'s own description: "this script
+is analysis-only and does not generate .vip build artifacts") -- it has
+no checkout, manifest, SBOM, scan, or Dependency-Track stages at all.
+For a Linux-hosted SBOM pipeline, see the **Containerized pipeline**
+section below (`docker/linux-sbom/`), which is the real Linux-capable
+path. Per project, in order:
 
 1. **Checkout** (`Invoke-PipelineCheckoutStage`) -- wipes any existing
    working directory (including hidden `.svn`/`.git`, since a stale one
@@ -78,23 +90,30 @@ order:
    the checkout root, then overwrites the freshly-initialized
    `vipm.toml` with the project's configured manifest content verbatim
    (exact UTF-8, no BOM).
-5. **SBOM** (`Invoke-PipelineSbomStage`) -- runs `vipm sbom` to produce a
+5. **Packages** (optional, `build.packages` config) -- builds VI packages
+   in dependency order (`Invoke-PackageBuild`), generates `vipm.lock` from
+   the deployed manifest (`vipm lock`), and, when a signed build is
+   configured, builds and Authenticode-verifies all VIPM targets
+   (`Invoke-ReportedVipmBuild`). Skipped (not merely absent) when
+   `build.packages` is not enabled, recorded as such on the run record.
+6. **SBOM** (`Invoke-PipelineSbomStage`) -- runs `vipm sbom` to produce a
    CycloneDX 1.5 SBOM. `ALLOW_PACKAGE_DRIFT=1` (the default) downgrades a
    drifted-package mismatch to a warning, recording the actually-installed
    versions in the SBOM instead of failing.
-6. **Scan** (`Invoke-PipelineScanStage`) -- runs Grype against the
+7. **Scan** (`Invoke-PipelineScanStage`) -- runs Grype against the
    enriched SBOM. **The native pipeline does not gate on Grype's own
    findings** -- it only reports them (`gate: not-gated`); Dependency-Track's
    own metrics are the pipeline's real security gate (step 8).
-7. **Policy gate** (`Test-PipelinePolicyGate`, `full` mode only) --
-   requires Dependency-Track's returned metrics to be bound to the exact
-   BOM just uploaded (`lastOccurrence` is checked against a required
-   occurrence marker, not just "some metrics exist"), and fails the run
-   if Critical or High vulnerability counts are nonzero.
-8. **Publish** (`Publish-DependencyTrack`) -- uploads the SBOM, polls for
-   and patches project metadata, exports server-side findings (best
-   effort -- an export failure is recorded on the run record rather than
-   failing the whole stage), then evaluates the policy gate above.
+8. **Publish and gate** (`Publish-DependencyTrack`) -- uploads the SBOM,
+   polls for and patches project metadata, exports server-side findings
+   (best effort -- an export failure is recorded on the run record rather
+   than failing the whole stage), then internally calls the policy gate
+   (`Test-PipelinePolicyGate`, `full` mode only) as its last action, not
+   as a separate preceding stage: the gate requires Dependency-Track's
+   returned metrics to be bound to the exact BOM just uploaded
+   (`lastOccurrence` is checked against a required occurrence marker, not
+   just "some metrics exist"), and fails the run if Critical or High
+   vulnerability counts are nonzero.
 
 ## Containerized pipeline (`docker/linux-sbom/`, `docker/windows-sbom/`)
 

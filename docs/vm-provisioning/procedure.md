@@ -13,8 +13,13 @@ implements.
 
 Both families share one discipline: every VM identity value (name, storage
 root, ISO path, hostname, account name, ...) is a required
-`workflow_dispatch` input with no built-in default, so a run never
-silently reuses another fork's naming or infrastructure.
+`workflow_dispatch` input. Several carry a generic, clearly-fictional
+placeholder default (e.g. `vm_name`'s `example-windows11-labview2026-myproject`,
+`guest_full_name`'s `VM Builder`, `guest_hostname`'s `vm-builder.local`) so
+the input still renders with example syntax in the dispatch form, but none
+default to any specific fork's real identity, so a run never silently
+reuses another fork's naming or infrastructure -- an operator must still
+supply the values that matter for a real dispatch.
 
 ## Windows LabVIEW VM (`vm/windows-labview/`, `provision-windows-labview-vm.yml`)
 
@@ -134,13 +139,17 @@ constrains which guest family can be built.
   in `complete-public-provisioning.py`/`verify-public-appliance-receipt.py`)
   -- installed, but not yet activated.
 - **`complete-activation`** -- **Linux-only, and only reachable after an
-  operator console gate**: the operator interactively activates
-  LabVIEW/VIPM themselves (the same human-only boundary as the Windows
-  family), and this phase then completes and verifies the activation
+  operator console gate**: the operator interactively activates LabVIEW
+  themselves (the same human-only boundary as the Windows family's
+  LabVIEW activation); VIPM activation is the one deliberate exception --
+  this phase runs it non-interactively via `activate-vipm.sh`'s
+  `vipm activate --direct-vipm-io` (see `REQ-032` in the wiki's Software
+  Requirements Specification), gated on the operator having already
+  completed LabVIEW's own interactive activation. The phase then
+  completes and verifies the activation
   *receipt* (`build-activation-receipt.py`, `finalize-activation-receipt.py`,
   `verify-activation-receipt.py`), reaching the
-  `labview2026-q3-pro-activated-ready` snapshot (`ACTIVATED_SNAPSHOT_NAME`)
-  -- it does not perform activation itself.
+  `labview2026-q3-pro-activated-ready` snapshot (`ACTIVATED_SNAPSHOT_NAME`).
 - **`package-build`** -- the strongest end-to-end proof phase: builds a
   real `.vip` package (`vi_technologies_lib_super_network_streams`)
   against the activated appliance, verifies its installation, and

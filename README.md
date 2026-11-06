@@ -29,11 +29,12 @@ risks.
 ## Consumption model
 
 - **Reusable GitHub Actions workflows** are called by downstream repositories
-  via `uses: VITechnologies/projectbuddy/.github/workflows/<name>.yml@<tag>`,
-  pinned to a release tag whose commit SHA is independently documented and
-  verified by the caller (matching the pattern already established for
-  LabVIEW plugin module releases in the `labview-benchmark-actor-plugins`
-  org).
+  via `uses: VITechnologies/projectbuddy/.github/workflows/<name>.yml@<commit-sha> # <tag>`
+  (pinned to the exact release commit SHA, with the tag as a trailing
+  comment for readability -- see `toolchain-smoke-test.yml`'s own header
+  comment for the canonical example), matching the pattern already
+  established for LabVIEW plugin module releases in the
+  `labview-benchmark-actor-plugins` org.
 - **Directly-invoked scripts** (not wrapped in a GitHub Actions workflow) are
   consumed via a second `actions/checkout` step pinned to the exact release
   commit SHA (not just the tag), inside any downstream workflow that needs
@@ -79,13 +80,17 @@ fleet-status verification design.
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 
-`Run-Pipeline.ps1`/`Run-Pipeline.sh` run the native Windows/Linux LabVIEW
-build-and-report pipeline directly on a self-hosted runner;
-`Run-WindowsSbom.ps1`/`Run-LinuxSbom.ps1` run the equivalent containerized
-(Docker) pipelines. All four read project configuration from either the
-`PROJECTS_OVERRIDE` environment variable (the documented CI mechanism) or
-an explicit `-ConfigName`/`-VipmTomlPath` local file — neither has a
-built-in default pointing at any specific project; supply your own.
+`Run-Pipeline.ps1` runs the native Windows LabVIEW build-and-report
+pipeline directly on a self-hosted runner (there is no native Linux
+equivalent in this repo -- `Run-Pipeline.sh` is a separate, unrelated
+LabVIEWCLI MassCompile/VI Analyzer tool for NI's own example VIs, not a
+SBOM pipeline; see `docs/sbom-pipeline/procedure.md`'s Native pipeline
+section). `Run-WindowsSbom.ps1`/`Run-LinuxSbom.ps1` run the equivalent
+containerized (Docker) pipelines on either platform. All three read
+project configuration from either the `PROJECTS_OVERRIDE` environment
+variable (the documented CI mechanism) or an explicit
+`-ConfigName`/`-VipmTomlPath` local file — neither has a built-in
+default pointing at any specific project; supply your own.
 
 Dependency-Track reporting (`full` mode) requires an explicit
 `DEPENDENCY_TRACK_URL` — there is no built-in default pointing at any
