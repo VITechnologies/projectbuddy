@@ -6,29 +6,29 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.22 sha=914d8e337602f14c6d120a7fe54acd5141b8b757 -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.23 sha=ba72187ce5f745a1ffea93536cf83982b747819a -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.2.22` |
-| Version (commit SHA) | `914d8e337602f14c6d120a7fe54acd5141b8b757` |
+| Version (tag) | `v0.2.23` |
+| Version (commit SHA) | `ba72187ce5f745a1ffea93536cf83982b747819a` |
 | Assessed | 2026-11-06 |
 | Profile | `release-gate` |
 
-`v0.2.21` fixed a real gap in `v0.2.20`'s own release: the quantified
-`confidence_score`/`completion_pct` fields existed in the schema but
-were never surfaced in any actual report renderer. `v0.2.22` fixed a
-further flaw: `confidence_score` capped at exactly 100 right at the old
-qualitative `High` threshold, so a repo with barely enough evidence and
-one with overwhelming evidence looked identical -- replaced with a
-diminishing-returns model giving real headroom above that threshold
-(the old `High` threshold now shows 86%, not 100%), and
-`overall_confidence_score` now applies the same per-contradiction
-penalty the qualitative label already did. Re-certification against
-`v0.2.22` found no regression in the 5 required gates (all still `PASS`,
-now with a genuinely differentiated High confidence in the high
-90s-100%, not a flat ceiling) and is reflected below.
+`v0.2.23` added a canonical multi-model semantic-audit mode
+(`scripts/semantic_audit.py`), which extracts real standards clause text
+live from the local PDF corpus and delegates it to independent models
+rather than relying on pattern-match heuristics alone; it does not change
+the heuristic `release-gate` scoring logic itself. Re-certification
+against `v0.2.23` found no regression in the 5 required gates (all still
+`PASS`, High confidence 99-100%) and caught a second instance of the same
+self-referential false-positive bug class this document already fixed
+once: `CHANGELOG.md`'s own v0.3.22 entry (describing the first fix)
+quoted the exact literal CI-context string the DoD rule detects, which
+was itself re-triggering a false DoD `PASS` -- rephrased the same way,
+without reproducing the matched string, restoring the real, correctly
+`FAIL (not required)` DoD state reflected below.
 
 ## Current gate status (as of the version above)
 
