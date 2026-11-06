@@ -111,6 +111,23 @@ module docstring -- summarized here, not duplicated verbatim:
   from the deployed `vipm.toml`, no VIPM invocation, no `vipm.lock`
   merge) -- useful when the container doesn't have a licensed VIPM Pro
   available.
+- **VIPM Pro activation** (both `docker/linux-sbom/entrypoint.sh` and
+  `docker/windows-sbom/entrypoint.ps1`): on every container start where
+  `SBOM_SOURCE` is not `manifest`, the entrypoint requires
+  `VIPM_SERIAL_NUMBER`/`VIPM_FULL_NAME`/`VIPM_EMAIL` to be set and
+  activates VIPM Pro via `vipm activate --direct-vipm-io`, chosen
+  specifically because VIPM Desktop's first-run licensing dialogs cannot
+  be answered inside a container. The serial number is redacted from any
+  activation error output before it reaches the container's stdout/
+  stderr, and all 3 environment variables are unset immediately after
+  activation completes (or is skipped), before the pipeline itself runs
+  -- so they are never visible to the SBOM pipeline process or anything
+  it shells out to. `SBOM_SOURCE=manifest` is the way to run the
+  container without supplying real VIPM Pro credentials at all; this is
+  a deliberate, repeated pattern in this engine (the Ubuntu-LabVIEW VM
+  family's `complete-activation` phase performs the equivalent
+  non-interactive VIPM activation the same way -- see `REQ-032` in the
+  wiki's Software Requirements Specification).
 - **Platform-specific dependency-closure enrichment**: the Linux image
   replaces the native pipeline's Windows-only `nipkg` deep scan with a
   recursive `dpkg` scan of the NI Debian packages installed in the
