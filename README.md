@@ -108,3 +108,28 @@ decision to escalate is a judgment call made during an agent's own
 analysis, not a routine CI step, so it is invoked directly (second
 consumption model above) at the point that judgment is made.
 
+### Repo onboarding (`Enable-RepoIssueTracking.ps1`)
+
+Many repos this engine builds for start with Issues disabled, which forces
+their technical issues into whichever consumer repo happened to drive the
+work instead of their own tracker. `Enable-RepoIssueTracking.ps1` enables
+Issues on a given `owner/repo` (idempotent, never disables anything) and
+seeds the `needs-human-decision` label so the repo is immediately ready for
+both normal issues and `New-HumanEscalation.ps1` escalations.
+
+`add-project.yml` calls this automatically, as a best-effort step, for
+every GitHub-hosted repo a newly-registered project's config references
+(`repoUrl`, `sourceCheckouts[].repository`,
+`build.lvlibpDependencies[].repository`) -- this needs a repo-scoped
+`ACTIONS_REPO_ADMIN_TOKEN` secret (`administration:write` on the target
+repos; distinct from `ACTIONS_VARIABLES_TOKEN`, which is Variables-scoped
+only). A missing or insufficiently-scoped token only logs a warning; it
+never fails project registration itself.
+
+Projects outside the `PROJECTS_OVERRIDE` registration mechanism (e.g. a
+standalone source repo being brought into a separate cross-repo build-spec
+effort) have no formal onboarding workflow yet -- run
+`Enable-RepoIssueTracking.ps1` directly against such a repo as the first
+step of bringing it in, until/unless that kind of effort gets its own
+onboarding workflow.
+
