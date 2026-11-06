@@ -6,34 +6,52 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.19 sha=d44f210ded557cda6d4598cdaffe938da51d873e -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.20 sha=63eecc2e8e1f54450b21c9a90d0c132cf6b4c06a -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.2.19` |
-| Version (commit SHA) | `d44f210ded557cda6d4598cdaffe938da51d873e` |
+| Version (tag) | `v0.2.20` |
+| Version (commit SHA) | `63eecc2e8e1f54450b21c9a90d0c132cf6b4c06a` |
 | Assessed | 2026-11-06 |
 | Profile | `release-gate` |
 
+`v0.2.20` added a `confidence_score` (0-100) alongside every existing
+High/Med/Low label, and replaced the DoD gate's old binary
+PASS/N/A check with a graduated 0-5 score and `completion_pct`, matching
+the REQ/ARCH/TEST/CM/DOC rubric pattern. Re-certification against this
+version found no regression in the 5 required gates (all still `PASS`
+with `High`/100% confidence) and is reflected below.
+
 ## Current gate status (as of the version above)
 
-All 5 gates now `PASS`, verified via real CI
-(`.github/workflows/standards-assurance-scan.yml`), not just manual
-assertion. This is reproducible, not a one-time historical claim: re-run
-that workflow (`workflow_dispatch`, requires a `standards-review-local`
-self-hosted runner) any time to reconfirm the current state -- its own
-"Compare Stamped Version Against Latest" step always re-derives the
-answer fresh rather than relying on any past run's recorded result.
+All 5 required gates now `PASS` at `High` confidence (100%), verified via
+real CI (`.github/workflows/standards-assurance-scan.yml`), not just
+manual assertion. This is reproducible, not a one-time historical claim:
+re-run that workflow (`workflow_dispatch`, requires a
+`standards-review-local` self-hosted runner) any time to reconfirm the
+current state -- its own "Compare Stamped Version Against Latest" step
+always re-derives the answer fresh rather than relying on any past run's
+recorded result.
 
-| Gate | Status | Tracking |
-|---|---|---|
-| CM (incl. GitFlow branch governance) | ✅ PASS | `VITechnologies/projectbuddy#6` (closed) |
-| Coverage | ✅ PASS | `VITechnologies/projectbuddy#8` (closed) |
-| REQ | ✅ PASS | `VITechnologies/projectbuddy#9` (closed) |
-| ARCH | ✅ PASS | `VITechnologies/projectbuddy#10` (closed) |
-| DOC | ✅ PASS | `VITechnologies/projectbuddy#11` (closed) |
-| DoD | N/A (optional, not required) | not tracked |
+| Gate | Status | Confidence | Tracking |
+|---|---|---|---|
+| CM (incl. GitFlow branch governance) | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#6` (closed) |
+| Coverage | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#8` (closed) |
+| REQ | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#9` (closed) |
+| ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
+| DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
+| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (65%) | not tracked |
+
+DoD is intentionally not one of this repo's 5 required gates (per the
+tracking column above) -- `repo-standards-review`'s own rubric only awards
+a full `PASS` when a literal `DoD Gate / dod` CI status-check context
+exists, which this repo does not have and is not required to add. This
+repo's `CONTRIBUTING.md` does carry a genuine, itemized Definition of
+Done checklist (added alongside this re-certification), which is why the
+score moved from 0/5 (0%, no DoD content at all) to 3/5 (60%, itemized
+checklist present but no enforcing CI gate) rather than being a
+fabricated pass.
 
 ## Living re-certification policy
 
