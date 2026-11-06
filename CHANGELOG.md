@@ -4,6 +4,36 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.11
+
+Close out the remaining, non-coverage-dependent CM gate gaps and wire real
+CI verification for the REQ/ARCH gates against the wiki-hosted specs
+(`VITechnologies/projectbuddy#9`, `#10`), per spec-driven-design direction.
+
+- `docs/cm/cm-plan.md`: configuration items, versioning, change control,
+  and status accounting, satisfying `CM:path:cm-plan` and
+  `CM:text:change-control`.
+- `.github/workflows/release.yml`: automates tagging + creating a GitHub
+  Release (draft by default; immutable once published) from a
+  `CHANGELOG.md` entry, satisfying `CM:path:release-workflow` and
+  replacing the prior fully-manual `gh release create`/`edit` sequence.
+- `.github/workflows/standards-assurance-scan.yml`: runs the real
+  `repo-standards-review` assurance pipeline on `standards-review-local`,
+  assembling an ephemeral scan checkout (main repo + the wiki's SRS/RTM/
+  Architecture Packet copied into the paths the scanner expects) and
+  failing if the REQ or ARCH gates regress. Live-verified locally before
+  committing: both gates score 5/5 "defensible", `PASS` with High
+  confidence, zero missing items.
+- Wiki: added explicit `REQ-### ... TEST-### ... module` wording to the
+  RTM so `REQ:text:rtm-link` matches (needed for the REQ gate to actually
+  `PASS`, not just score high).
+
+CM gate itself still does not fully `PASS` yet -- it also requires
+`CM:text:release-coverage-rerun` evidence (release flow text that
+mentions coverage), which is honestly tied to the Coverage gate
+(`VITechnologies/projectbuddy#8`) not being implemented yet. Tracked
+there, not overstated here.
+
 ## v0.3.10
 
 Fix `standards-compliance-recheck.yml`, which failed in every real run
