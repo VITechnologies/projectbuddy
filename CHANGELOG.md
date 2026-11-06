@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.14
+
+Per operator direction: proactively consider future-agent-success risks
+and codify filing issues for them as standing policy, not a one-off.
+
+- `CONTRIBUTING.md`: the branch model summary + a durable policy on
+  proactively filing issues for spec drift and future-agent-success
+  risks (e.g. a required branch-protection check that depends on
+  infrastructure only one fork has), linked from `README.md`.
+- Hardened repository-level Actions settings on both this fork and
+  upstream: `default_workflow_permissions` tightened from `write` to
+  `read` (upstream only -- the fork was already `read`), and
+  `sha_pinning_required` enabled on both (matches the manual pinning
+  discipline already followed everywhere in this repo).
+- `.github/workflows/ci-assurance.yml`, `docs-link-check.yml`: added the
+  explicit `contents: read` permissions block they were missing (found
+  while auditing for the above) -- verified both still pass in real CI
+  after the repo-wide default tightened.
+- Filed `VITechnologies/projectbuddy#20`: branch protection currently
+  does not exist anywhere (fork or upstream, `main` or `develop`), and
+  the default branch on both is still `main`, not `develop`. Tracked
+  there rather than fixed blind, since the correct required-check/review
+  configuration differs materially between the solo-maintained fork and
+  the multi-admin upstream org repo.
+
 ## v0.3.13
 
 Close the Coverage gate (`VITechnologies/projectbuddy#8`) -- the last of
