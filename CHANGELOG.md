@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.24
+
+- remove `docker/windows-sbom/`'s unused code-signing toolchain (`Install-SigningTools.ps1`, `Install-VerifiedNugetPackage.ps1`, and their Dockerfile `COPY`/`RUN` lines): a complete, self-verifying SignTool/Azure-Artifact-Signing install with zero consumers anywhere in the pipeline since the very first commit (`v0.2.0`) -- the `.lvlibp` output this would plausibly sign is already trusted downstream via GitHub's in-toto release attestation chain, not a code-signing certificate, so this was unconnected scaffolding adding real image-build time and an unused native-DLL load for no current benefit. Removing it in favor of adding it back deliberately, with real wiring and tests, if a genuine signing requirement ever materializes (`#44` finding 1)
+- document the containerized pipeline's VIPM Pro activation flow in `docs/sbom-pipeline/procedure.md`: both `docker/linux-sbom/entrypoint.sh` and `docker/windows-sbom/entrypoint.ps1` require `VIPM_SERIAL_NUMBER`/`VIPM_FULL_NAME`/`VIPM_EMAIL` and activate VIPM Pro via `vipm activate --direct-vipm-io` on every container start unless `SBOM_SOURCE=manifest`, redacting the serial number from error output and unsetting all 3 variables before the pipeline itself runs -- previously undocumented (`#44` finding 2)
+
 ## v0.3.23
 
 - fix REQ-017: the guest/WinRM password file written during Windows LabVIEW VM provisioning was never shredded/removed anywhere in the workflow (only an unrelated PAT file was) -- added a `shred` (with `rm -f` fallback) cleanup line to every step in `provision-windows-labview-vm.yml` that writes it
