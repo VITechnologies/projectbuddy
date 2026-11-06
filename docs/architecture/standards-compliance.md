@@ -6,27 +6,34 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.20 sha=63eecc2e8e1f54450b21c9a90d0c132cf6b4c06a -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.22 sha=914d8e337602f14c6d120a7fe54acd5141b8b757 -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.2.20` |
-| Version (commit SHA) | `63eecc2e8e1f54450b21c9a90d0c132cf6b4c06a` |
+| Version (tag) | `v0.2.22` |
+| Version (commit SHA) | `914d8e337602f14c6d120a7fe54acd5141b8b757` |
 | Assessed | 2026-11-06 |
 | Profile | `release-gate` |
 
-`v0.2.20` added a `confidence_score` (0-100) alongside every existing
-High/Med/Low label, and replaced the DoD gate's old binary
-PASS/N/A check with a graduated 0-5 score and `completion_pct`, matching
-the REQ/ARCH/TEST/CM/DOC rubric pattern. Re-certification against this
-version found no regression in the 5 required gates (all still `PASS`
-with `High`/100% confidence) and is reflected below.
+`v0.2.21` fixed a real gap in `v0.2.20`'s own release: the quantified
+`confidence_score`/`completion_pct` fields existed in the schema but
+were never surfaced in any actual report renderer. `v0.2.22` fixed a
+further flaw: `confidence_score` capped at exactly 100 right at the old
+qualitative `High` threshold, so a repo with barely enough evidence and
+one with overwhelming evidence looked identical -- replaced with a
+diminishing-returns model giving real headroom above that threshold
+(the old `High` threshold now shows 86%, not 100%), and
+`overall_confidence_score` now applies the same per-contradiction
+penalty the qualitative label already did. Re-certification against
+`v0.2.22` found no regression in the 5 required gates (all still `PASS`,
+now with a genuinely differentiated High confidence in the high
+90s-100%, not a flat ceiling) and is reflected below.
 
 ## Current gate status (as of the version above)
 
-All 5 required gates now `PASS` at `High` confidence (100%), verified via
-real CI (`.github/workflows/standards-assurance-scan.yml`), not just
+All 5 required gates now `PASS` at `High` confidence (99-100%), verified
+via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
 manual assertion. This is reproducible, not a one-time historical claim:
 re-run that workflow (`workflow_dispatch`, requires a
 `standards-review-local` self-hosted runner) any time to reconfirm the
@@ -37,11 +44,13 @@ recorded result.
 | Gate | Status | Confidence | Tracking |
 |---|---|---|---|
 | CM (incl. GitFlow branch governance) | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#6` (closed) |
-| Coverage | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#8` (closed) |
-| REQ | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#9` (closed) |
-| ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
+| Coverage | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#8` (closed) |
+| REQ | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#9` (closed) |
+| ARCH | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#10` (closed) |
 | DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
-| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (65%) | not tracked |
+| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (88%) | not tracked |
+
+Overall confidence: High (99%); 0 contradictions.
 
 DoD is intentionally not one of this repo's 5 required gates (per the
 tracking column above) -- `repo-standards-review`'s own rubric only awards
