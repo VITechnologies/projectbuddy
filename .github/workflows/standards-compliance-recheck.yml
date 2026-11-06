@@ -32,6 +32,17 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Required: actions/checkout's default persist-credentials: true
+          # writes a local http.https://github.com/.extraheader override
+          # into .git/config, scoped to the *host* (github.com), not just
+          # this repo -- confirmed live, on this runner, to hijack every
+          # subsequent https://github.com/... git operation in the job,
+          # including the unrelated private repo-standards-review fetch
+          # below, with the wrong, scope-less ephemeral job token (causing
+          # a misleading "Repository not found"). This job never pushes
+          # back to its own repo, so disabling persistence is safe.
+          persist-credentials: false
 
       - name: Compare Stamped Version Against Latest
         id: compare
