@@ -119,6 +119,7 @@ jobs:
             install -m 0600 /dev/null "$GUEST_PASSWORD_FILE"
             printf '%s' "$GUEST_PASSWORD" > "$GUEST_PASSWORD_FILE"
             ./vm/windows-labview/build-virtualbox.sh --run --headless
+            shred -u "$GUEST_PASSWORD_FILE" 2>/dev/null || rm -f "$GUEST_PASSWORD_FILE"
           else
             ./vm/windows-labview/build-virtualbox.sh --dry-run --headless
           fi
@@ -252,6 +253,7 @@ jobs:
           # confusingly ("installer not found") instead of surfacing the real
           # WinRM-never-came-back-up problem here, at the actual point of failure.
           [[ "$winrm_ready" == "1" ]] || { echo "WinRM did not become ready after reboot within the retry budget." >&2; exit 4; }
+          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Install VIPM Professional Over WinRM
         if: inputs.phase == 'install-vipm'
@@ -267,6 +269,7 @@ jobs:
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
             --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-vipm
+          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Install LabVIEW Professional Over WinRM
         if: inputs.phase == 'install-labview'
@@ -282,6 +285,7 @@ jobs:
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
             --port "${{ inputs.winrm_host_port }}" --password-file "$WINRM_PASSWORD_FILE" install-labview
+          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
       - name: Register GitHub Actions Runner Over WinRM
         if: inputs.phase == 'register-runner'
@@ -339,4 +343,5 @@ jobs:
             --pwsh-msi-filename "$pwsh_msi_filename" \
             --pwsh-msi-sha256 "$pwsh_msi_sha256"
           shred -u "$PAT_FILE" 2>/dev/null || rm -f "$PAT_FILE"
+          shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
 
