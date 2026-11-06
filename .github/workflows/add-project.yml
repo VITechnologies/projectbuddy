@@ -33,6 +33,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Upsert Project in Repository Variables
+        id: upsert
         shell: python
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_VARIABLES_TOKEN }}
@@ -42,6 +43,7 @@ jobs:
         run: |
           import json
           import os
+          import re
           import subprocess
           import sys
           import tomllib
@@ -156,3 +158,48 @@ jobs:
               f"| `labels` | `{', '.join(labels)}` |\n| VIPM manifest | {vipm_status} |\n\n"
               f"<details><summary>PROJECTS_OVERRIDE</summary>\n\n```json\n{json.dumps(projects, indent=2)}\n```\n</details>\n")
           print(f"{action} '{name}' in PROJECTS_OVERRIDE.")
+
+          # Collect every GitHub-hosted repo this project's config references,
+          # so a later best-effort step can enable Issues on each one (see
+          # Enable-RepoIssueTracking.ps1 and issue #4: repos this engine
+          # builds for should get first-class Issues, not have their
+          # technical issues forced into whichever consumer repo registered
+          # them).
+          def github_repo_from_url(url):
+              if not isinstance(url, str):
+                  return None
+              match = re.match(r"^https://github\.com/([^/]+/[^/.]+?)(?:\.git)?/?$", url.strip())
+              return match.group(1) if match else None
+
+          repo_refs = set()
+          direct_repo = github_repo_from_url(selected.get("repoUrl"))
+          if direct_repo:
+              repo_refs.add(direct_repo)
+          for checkout in selected.get("sourceCheckouts", []) or []:
+              repository = checkout.get("repository") if isinstance(checkout, dict) else None
+              if isinstance(repository, str) and repository.strip():
+                  repo_refs.add(repository.strip())
+          for dependency in ((selected.get("build") or {}).get("lvlibpDependencies") or []):
+              repository = dependency.get("repository") if isinstance(dependency, dict) else None
+              if isinstance(repository, str) and repository.strip():
+                  repo_refs.add(repository.strip())
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as gh_output:
+              gh_output.write(f"repo_refs={json.dumps(sorted(repo_refs))}\n")
+
+      - name: Enable Issue Tracking on Referenced Repos
+        if: steps.upsert.outputs.repo_refs != '' && steps.upsert.outputs.repo_refs != '[]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_REPO_ADMIN_TOKEN }}
+          REPO_REFS: ${{ steps.upsert.outputs.repo_refs }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::ACTIONS_REPO_ADMIN_TOKEN is not configured (needs administration:write on the referenced repos); skipping automatic Issues-enablement for: $REPO_REFS. This does not fail project registration."
+            exit 0
+          fi
+          echo "$REPO_REFS" | python3 -c "import json, sys; [print(r) for r in json.load(sys.stdin)]" | while IFS= read -r repo; do
+            pwsh -NoProfile -File Enable-RepoIssueTracking.ps1 -Repo "$repo" \
+              || echo "::warning::Could not enable Issues on $repo (continuing; this does not fail project registration)."
+          done
