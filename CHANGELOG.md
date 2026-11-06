@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.12
+
+Close the remaining DOC gate gaps (`VITechnologies/projectbuddy#11`):
+
+- `docs/information-item-map.md`: maps every real information item (wiki
+  specs, ADRs, CM plan, release procedure, compliance stamp) to its owner,
+  trigger, and proving evidence.
+- `.github/workflows/docs-link-check.yml`: a `lychee`-based docs link
+  checker, job literally named `Docs Link Check / lychee` (required by
+  `GATE:lychee:context`), triggered on `pull_request` and `push` to
+  `main`. Dry-run-verified locally first (0 broken links across 8 checked).
+
+Also noting a known false-positive in the prior `v0.3.11` entry: that
+entry's own sentence about `CM:text:release-coverage-rerun` (explaining
+the gap) accidentally satisfies that rule's regex just by naming it,
+which is why the CM gate started showing `PASS` before real Coverage-gate
+work (`VITechnologies/projectbuddy#8`) exists. The gate's literal,
+tool-reported status should not be read as "release flow genuinely
+re-runs/retains coverage today" until #8 is actually done.
+
 ## v0.3.11
 
 Close out the remaining, non-coverage-dependent CM gate gaps and wire real
