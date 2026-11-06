@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.22
+
+- fix a self-referential false-positive: `docs/architecture/standards-compliance.md`'s own explanatory prose quoted the literal `DoD Gate / dod` CI-context string, which was itself matching `repo-standards-review`'s detection rule and producing a false DoD `PASS` -- rephrased without reproducing the exact matched string, same class of bug already fixed in `repo-standards-review`'s own `references/scoring-rubric.md`
+- re-certify the compliance stamp against `repo-standards-review@v0.2.22` (two releases stale at `v0.2.20`): all 5 required gates still `PASS`, now with genuinely differentiated `High` confidence (99-100%) instead of a flat ceiling, following `v0.2.22`'s fix for `confidence_score`'s saturation flaw
+
 ## v0.3.21
 
 First spec-driven reproducibility audit pass on the SBOM pipeline
