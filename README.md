@@ -19,9 +19,12 @@ configuration ever flow into this repository.
 Assessed against `svelderrainruiz/repo-standards-review`'s `release-gate`
 profile, **version `v0.2.19`** (commit `d44f210`). See
 [`docs/architecture/standards-compliance.md`](docs/architecture/standards-compliance.md)
-for the full gate status, the living re-certification policy, and
+for the full gate status and the living re-certification policy,
 [`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
-for the branch-governance decision this assessment drove.
+for the branch-governance decision this assessment drove, and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch model and the policy
+on proactively filing issues for spec drift and future-agent-success
+risks.
 
 ## Consumption model
 
