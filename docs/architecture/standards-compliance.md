@@ -19,9 +19,12 @@ compliance posture was assessed against.
 ## Current gate status (as of the version above)
 
 All 5 gates now `PASS`, verified via real CI
-(`.github/workflows/standards-assurance-scan.yml`, run `42201479527`),
-not just manual assertion. Re-run that workflow (`workflow_dispatch`)
-any time to reconfirm.
+(`.github/workflows/standards-assurance-scan.yml`), not just manual
+assertion. This is reproducible, not a one-time historical claim: re-run
+that workflow (`workflow_dispatch`, requires a `standards-review-local`
+self-hosted runner) any time to reconfirm the current state -- its own
+"Compare Stamped Version Against Latest" step always re-derives the
+answer fresh rather than relying on any past run's recorded result.
 
 | Gate | Status | Tracking |
 |---|---|---|
