@@ -4,9 +4,17 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.23
+
+- fix REQ-017: the guest/WinRM password file written during Windows LabVIEW VM provisioning was never shredded/removed anywhere in the workflow (only an unrelated PAT file was) -- added a `shred` (with `rm -f` fallback) cleanup line to every step in `provision-windows-labview-vm.yml` that writes it
+- fix REQ-030: `add-project.yml`'s upsert only replaced the first matching entry by project name, so a pre-existing duplicate entry would survive a re-registration instead of collapsing to one -- now filters out every matching entry before appending the fresh one
+- correct REQ-013, REQ-018/REQ-019 (narrowed "LabVIEW/VIPM" to "LabVIEW" -- VIPM activation on the Ubuntu-LabVIEW family is genuinely automated and deliberately so, now its own REQ-032), and REQ-025 wiki SRS/RTM/Architecture-Packet wording to match the real code they cite -- all found by this session's multi-model semantic audit (`#52`) cross-checking the SRS against the real ISO/IEC/IEEE 29148:2018 clause text and the real repo source, not just the heuristic `repo-standards-review` pattern-match score
+- fix a second instance of the same self-referential DoD false-positive bug class: `CHANGELOG.md`'s own v0.3.22 entry (describing the first fix) quoted the exact literal CI-context string the DoD rule detects, re-triggering a false DoD `PASS` -- rephrased the same way, without reproducing the matched string
+- re-certify the compliance stamp against `repo-standards-review@v0.2.23` (adds the canonical multi-model semantic-audit mode used to find the REQ findings above): all 5 required gates still `PASS`, High confidence (99-100%); DoD correctly back to its real `FAIL (not required)`/60% state once the self-referential false positive above was fixed
+
 ## v0.3.22
 
-- fix a self-referential false-positive: `docs/architecture/standards-compliance.md`'s own explanatory prose quoted the literal `DoD Gate / dod` CI-context string, which was itself matching `repo-standards-review`'s detection rule and producing a false DoD `PASS` -- rephrased without reproducing the exact matched string, same class of bug already fixed in `repo-standards-review`'s own `references/scoring-rubric.md`
+- fix a self-referential false-positive: `docs/architecture/standards-compliance.md`'s own explanatory prose quoted the literal CI-context string `repo-standards-review`'s DoD rule detects (gate name, a slash, then the job id), which was itself matching that detection rule and producing a false DoD `PASS` -- rephrased without reproducing the exact matched string, same class of bug already fixed in `repo-standards-review`'s own `references/scoring-rubric.md`
 - re-certify the compliance stamp against `repo-standards-review@v0.2.22` (two releases stale at `v0.2.20`): all 5 required gates still `PASS`, now with genuinely differentiated `High` confidence (99-100%) instead of a flat ceiling, following `v0.2.22`'s fix for `confidence_score`'s saturation flaw
 
 ## v0.3.21
