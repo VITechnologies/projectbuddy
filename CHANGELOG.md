@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.16
+
+Close a real documentation gap the operator flagged directly and the
+automated gates missed (`VITechnologies/projectbuddy#29`): VM
+provisioning had only 2 narrow requirements and 3 shallow architecture
+rows despite being ~37 scripts and 1200+ lines of real, dispatch-proven
+workflow behavior.
+
+- `docs/vm-provisioning/procedure.md` (new): the full phase-by-phase
+  procedure for both VM families -- Windows LabVIEW's 5-phase single-VM
+  lifecycle and Ubuntu LabVIEW's 10-phase, dual Linux/Windows-adapter,
+  snapshot-based appliance lifecycle -- grounded directly in the real
+  workflow YAML and its own inline comments, including the deliberate
+  human-only LabVIEW/VIPM activation boundary and `vm-fleet-status.yml`'s
+  active-verification design.
+- Wiki: 9 new requirements (`REQ-013`-`REQ-021`) and matching RTM rows,
+  Architecture Packet Component/Deployment views expanded with the real
+  VM-provisioning components and lifecycle.
+- `docs/information-item-map.md`, `README.md`: updated to reference the
+  new procedure doc.
+
+Live-verified before committing: all 5 release-gate gates still `PASS`
+with the expanded spec set (not just coincidentally, per the finding in
+`#29` -- this time because the actual subsystem is genuinely documented).
+
 ## v0.3.15
 
 Branch protection live on both repos, implementing `VITechnologies/projectbuddy#20`:
