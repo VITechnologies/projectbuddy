@@ -1,5 +1,25 @@
 # Contributing
 
+## Definition of Done
+
+A change (PR, issue, or agent turn) is Done when all of the following are
+true:
+
+- [ ] Real CI passes (`Docs Link Check / lychee`, `PR Coverage Gate /
+      coverage`), not just local validation.
+- [ ] Wiki SRS/RTM/Architecture Packet
+      ([VITechnologies/projectbuddy.wiki](https://github.com/VITechnologies/projectbuddy/wiki))
+      are updated when behavior, a requirement, or an architectural
+      decision changes -- a spec that can't accurately depict the code
+      signals a real implementation problem, not just a doc gap.
+- [ ] `CHANGELOG.md` has an entry for the shipped version.
+- [ ] Any new gap between the spec and the implementation discovered along
+      the way is filed as an issue per
+      [Proactively filing issues](#proactively-filing-issues-for-spec-drift-and-future-agent-success-risks)
+      below, not silently deferred.
+- [ ] The next session has a filed issue and an updated `#23` (Current
+      Direction) handoff before the turn ends.
+
 ## Branch model
 
 This repo follows GitFlow (`ADR-0001`): `feature/*` branches land on
