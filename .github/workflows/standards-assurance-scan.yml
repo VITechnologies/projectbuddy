@@ -31,13 +31,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The SRS/RTM/Architecture Packet live in this repo's wiki (a
-          # separate git repo), not in this checkout -- copy them into the
-          # paths repo-standards-review's scanner actually looks for. This
-          # is an ephemeral, scan-time-only copy; the wiki remains the one
-          # real source of truth and is never written back to here.
+          # The SRS/RTM/Architecture Packet live in VITechnologies/projectbuddy's
+          # wiki specifically (the authoritative, assessed repo -- per
+          # operator decision, not the fork's own wiki, which doesn't exist),
+          # not in this checkout -- copy them into the paths
+          # repo-standards-review's scanner actually looks for. This is an
+          # ephemeral, scan-time-only copy; the wiki remains the one real
+          # source of truth and is never written back to here.
           rm -rf /tmp/projectbuddy-wiki-scan
-          git clone --quiet --depth 1 "https://github.com/${{ github.repository }}.wiki.git" /tmp/projectbuddy-wiki-scan
+          git clone --quiet --depth 1 "https://github.com/VITechnologies/projectbuddy.wiki.git" /tmp/projectbuddy-wiki-scan
 
           mkdir -p docs/requirements
           cp /tmp/projectbuddy-wiki-scan/Software-Requirements-Specification.md docs/requirements/srs.md
