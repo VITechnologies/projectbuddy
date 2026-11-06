@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.21
+
+First spec-driven reproducibility audit pass on the SBOM pipeline
+subsystem (mirroring `v0.3.19`'s pass on VM provisioning):
+
+- Fixed a real, concrete copy-paste artifact: `docker/windows-sbom/Dockerfile`
+  had `COPY Install-SigningTools.ps1 C:/sbom/Install-SigningTools.ps1`
+  duplicated on two consecutive lines (harmless -- Docker just
+  re-executes an idempotent COPY -- but clearly unintentional).
+- Found, but did not patch blind: a complete code-signing toolchain
+  (`Install-SigningTools.ps1`, `Install-VerifiedNugetPackage.ps1`,
+  `VipmInstallerSignature.ps1`) is downloaded, SHA-512/Authenticode
+  verified, and installed at image-build time, but has zero consumers
+  anywhere in the pipeline -- present unused since this engine's very
+  first commit (`v0.2.0`). Also found the containerized pipeline's real
+  VIPM Pro activation flow (`entrypoint.ps1`) is undocumented. Filed as
+  `#44` for an operator decision (remove the unused toolchain vs. finish
+  wiring it up) rather than guessing intent.
+
 ## v0.3.20
 
 Re-certified this repo's compliance stamp against
