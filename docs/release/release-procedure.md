@@ -6,6 +6,18 @@ its GitLab-specific `scripts/pipeline.py` merge-request automation. See
 [`../architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](../architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
 for why this repo adopted GitFlow.
 
+## GitFlow Branch Rules (summary)
+
+- Feature branches originate from `develop`.
+- Feature branches merge into `develop`.
+- Release branches originate from `develop`.
+- Release branches merge into `main`.
+- Release branches also merge into `develop`.
+- Delete the release branch after both required merges complete.
+- Hotfix branches originate from `main`.
+- Hotfix branches merge into `main`.
+- Hotfix branches also merge into `develop` (or an active release branch, if one exists).
+
 ## Scope
 
 - Product: `VITechnologies/projectbuddy`
