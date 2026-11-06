@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.8
+
+Add `Enable-RepoIssueTracking.ps1`: enables Issues (idempotent, never
+disables) on a given `owner/repo` and seeds the `needs-human-decision`
+label. `add-project.yml` now calls it automatically, as a best-effort step,
+for every GitHub-hosted repo a newly-registered project's config
+references (`repoUrl`, `sourceCheckouts[].repository`,
+`build.lvlibpDependencies[].repository`); this needs a new
+`ACTIONS_REPO_ADMIN_TOKEN` secret and only warns (never fails project
+registration) if it is missing or insufficiently scoped. Fixes
+`VITechnologies/projectbuddy#4`.
+
 ## v0.3.7
 
 Add `New-HumanEscalation.ps1` and `Get-HumanEscalations.ps1`: a first-class,
