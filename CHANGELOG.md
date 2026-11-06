@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.10
+
+Fix `standards-compliance-recheck.yml`, which failed in every real run
+after v0.3.9's `STANDARDS_REVIEW_ACCESS_TOKEN` PAT approach turned out not
+to work in practice (fine-grained PAT, correct repository access and
+Contents:Read permission, still got "Repository not found" from a
+GitHub-hosted runner). Switched to a self-hosted runner labeled
+`standards-review-local` (registered against this fork) using ambient git
+credentials instead of a PAT — but that still failed identically, until
+live diagnostics on the runner found the real root cause:
+`actions/checkout`'s default `persist-credentials: true` writes a
+host-wide `http.https://github.com/.extraheader` override into
+`.git/config` that hijacks *any* subsequent `https://github.com/...` git
+operation in the job (not just this repo's own checkout) with the wrong,
+scope-less ephemeral job token. `persist-credentials: false` removes it at
+the source. Live-verified end to end (run 42196529270: stamped and latest
+versions correctly compared and matched, no drift). The
+`STANDARDS_REVIEW_ACCESS_TOKEN` secret is no longer used anywhere and has
+been removed from both this fork and the upstream repo.
+
 ## v0.3.9
 
 Adopt GitFlow branch governance (`develop` branch, `feature/*`,
