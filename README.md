@@ -89,3 +89,22 @@ running, respectively. `Add-Project.ps1` validates and dispatches a
 project-registration workflow call (`add-project.yml`-equivalent) against
 the schema in `pipeline-config.schema.json`.
 
+### Human escalation (`New-HumanEscalation.ps1`, `Get-HumanEscalations.ps1`)
+
+A first-class, project-agnostic mechanism for flagging a blocker that
+automated iteration cannot resolve on its own, instead of leaving that
+determination buried in an ad-hoc issue comment. `New-HumanEscalation.ps1`
+creates (or, re-run with the same `-EscalationId`, idempotently updates) a
+structured GitHub issue in any caller-supplied repo: context, why the agent
+could not resolve it, options considered, a recommendation if one exists,
+and related issue links, all under a consistent `needs-human-decision`
+label (configurable via `-Label`). `Get-HumanEscalations.ps1` queries one
+or more repos for open issues carrying that label and prints a single
+consolidated dashboard, so a human reviewing multiple forks/repos in this
+ecosystem does not have to check each one individually.
+
+This is deliberately a plain script, not a GitHub Actions workflow: the
+decision to escalate is a judgment call made during an agent's own
+analysis, not a routine CI step, so it is invoked directly (second
+consumption model above) at the point that judgment is made.
+

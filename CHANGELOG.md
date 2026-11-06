@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.3.7
+
+Add `New-HumanEscalation.ps1` and `Get-HumanEscalations.ps1`: a first-class,
+project-agnostic mechanism for flagging a blocker that automated iteration
+cannot resolve on its own, instead of leaving that determination buried in
+an ad-hoc issue comment. `New-HumanEscalation.ps1` creates or (re-run with
+the same `-EscalationId`) idempotently updates a structured GitHub issue
+(context, why the agent could not resolve it, options considered, a
+recommendation, related issues) under a consistent `needs-human-decision`
+label. `Get-HumanEscalations.ps1` queries one or more repos for open
+escalations and prints a single consolidated dashboard.
+
 ## v0.3.6
 
 `Run-WindowsSbom.ps1`/`Run-LinuxSbom.ps1` now mount their own location
