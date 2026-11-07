@@ -18,6 +18,7 @@ on:
           - resume-public
           - provision-public
           - complete-activation
+          - register-runner
           - package-build
       runner_os:
         description: Operating system of the self-hosted VirtualBox provisioner.
@@ -71,6 +72,26 @@ on:
         required: true
         type: string
         default: 'vm-builder'
+      target_repo:
+        description: Repository to register the runner against, e.g. my-org/my-repo; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      runner_name:
+        description: Distinct runner identity name; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      runner_labels:
+        description: Comma-separated custom labels, e.g. ubuntu-labview2026-testcoord; required for register-runner.
+        required: false
+        type: string
+        default: ''
+      dedicated_service_account_name:
+        description: Dedicated local Linux service account name for the runner's systemd service; required for register-runner.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -579,6 +600,68 @@ jobs:
           path: ${{ runner.temp }}/${{ inputs.vm_name }}-activation-receipt
           retention-days: 7
           if-no-files-found: error
+
+      - name: Register GitHub Actions Runner Over SSH
+        if: runner.os == 'Linux' && inputs.phase == 'register-runner'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          GUEST_PASSWORD: ${{ secrets.UBUNTU_VM_GUEST_PASSWORD }}
+          RUNNER_REGISTRATION_PAT: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+          INPUT_VM_NAME: ${{ inputs.vm_name }}
+          INPUT_VM_UUID: ${{ inputs.vm_uuid }}
+          INPUT_SSH_HOST_PORT: ${{ inputs.ssh_host_port }}
+          INPUT_TARGET_REPO: ${{ inputs.target_repo }}
+          INPUT_RUNNER_NAME: ${{ inputs.runner_name }}
+          INPUT_RUNNER_LABELS: ${{ inputs.runner_labels }}
+          INPUT_SERVICE_ACCOUNT: ${{ inputs.dedicated_service_account_name }}
+        run: |
+          set -euo pipefail
+          [[ -n "$RUNNER_REGISTRATION_PAT" ]] || { echo "RUNNER_REGISTRATION_PAT secret is required for register-runner" >&2; exit 2; }
+          [[ -n "$INPUT_TARGET_REPO" && -n "$INPUT_RUNNER_NAME" && -n "$INPUT_RUNNER_LABELS" && -n "$INPUT_SERVICE_ACCOUNT" ]] || {
+            echo "target_repo, runner_name, runner_labels, and dedicated_service_account_name are all required for register-runner" >&2
+            exit 2
+          }
+          private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-register-runner.XXXXXX")"
+          password_file="$private_root/guest-password"
+          pat_file="$private_root/runner.pat"
+          known_hosts="$private_root/known-hosts"
+          cleanup() {
+            unset GUEST_PASSWORD RUNNER_REGISTRATION_PAT
+            rm -rf "$private_root"
+          }
+          trap cleanup EXIT
+
+          umask 077
+          [[ -n "$GUEST_PASSWORD" && "$GUEST_PASSWORD" != *$'\n'* ]] || { echo "GUEST_PASSWORD secret is missing or contains a line break." >&2; exit 2; }
+          printf '%s' "$GUEST_PASSWORD" > "$password_file"
+          printf '%s' "$RUNNER_REGISTRATION_PAT" > "$pat_file"
+          chmod 600 "$password_file" "$pat_file"
+
+          runner_version="$(python3 -c "import json; print(json.load(open('vm/ubuntu-labview/provisioning-manifest.json'))['actionsRunner']['version'])")"
+          runner_filename="$(python3 -c "import json; print(json.load(open('vm/ubuntu-labview/provisioning-manifest.json'))['actionsRunner']['linX64Filename'])")"
+          runner_sha256="$(python3 -c "import json; print(json.load(open('vm/ubuntu-labview/provisioning-manifest.json'))['actionsRunner']['linX64Sha256'])")"
+          runner_url="$(python3 -c "import json; m = json.load(open('vm/ubuntu-labview/provisioning-manifest.json'))['actionsRunner']; print(m['downloadUrlTemplate'].format(version=m['version'], linX64Filename=m['linX64Filename']))")"
+
+          ./vm/ubuntu-labview/enroll-vm-ssh-host-key.py \
+            --vm-name "$INPUT_VM_NAME" --vm-uuid "$INPUT_VM_UUID" \
+            --port "$INPUT_SSH_HOST_PORT" --out "$known_hosts"
+          EXPECTED_VM_UUID="$INPUT_VM_UUID" VM_NAME="$INPUT_VM_NAME" \
+          GUEST_PASSWORD_FILE="$password_file" SSH_KNOWN_HOSTS="$known_hosts" \
+          SSH_PORT="$INPUT_SSH_HOST_PORT" PAT_FILE="$pat_file" \
+          TARGET_REPO="$INPUT_TARGET_REPO" RUNNER_NAME="$INPUT_RUNNER_NAME" \
+          RUNNER_LABELS="$INPUT_RUNNER_LABELS" SERVICE_ACCOUNT="$INPUT_SERVICE_ACCOUNT" \
+          RUNNER_URL="$runner_url" RUNNER_FILENAME="$runner_filename" RUNNER_SHA256="$runner_sha256" \
+            ./vm/ubuntu-labview/complete-runner-registration.sh
+
+          {
+            echo '### Linux register-runner proof'
+            echo "- Runner name: $INPUT_RUNNER_NAME"
+            echo "- Target repo: $INPUT_TARGET_REPO"
+            echo "- Labels: $INPUT_RUNNER_LABELS"
+            echo "- actions-runner version: $runner_version"
+            echo '- Outcome: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # NOTE (VITechnologies/projectbuddy#62): this step is a reference
       # template, not a generic, runnable-as-is phase. `build-vip-package.sh`
