@@ -154,27 +154,38 @@ echo "install-actions-runner: systemd service $service_name is active"
 
 expected_labels="self-hosted,Linux,X64,$LABELS"
 deadline=$(( $(date +%s) + 90 ))
-runner_json=
+runners_json=
+found_status=
 while (( $(date +%s) < deadline )); do
-    runner_json="$(gh api "repos/$REPO/actions/runners" --paginate --jq \
-        --arg name "$RUNNER_NAME" '.runners[] | select(.name == $name)' || true)"
-    if [[ -n "$runner_json" ]]; then
-        status="$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('status',''))" "$runner_json")"
-        if [[ "$status" == online ]]; then
-            break
-        fi
+    runners_json="$(gh api "repos/$REPO/actions/runners" --jq '.runners' || true)"
+    if [[ -n "$runners_json" ]]; then
+        found_status="$(python3 -c "
+import json, sys
+runners = json.loads(sys.argv[1])
+name = sys.argv[2]
+for r in runners:
+    if r.get('name') == name:
+        print(r.get('status', ''))
+        break
+" "$runners_json" "$RUNNER_NAME")"
+        [[ "$found_status" == online ]] && break
     fi
     sleep 3
 done
-[[ -n "$runner_json" ]] || { echo "install-actions-runner: FAIL: runner did not appear in repos/$REPO/actions/runners within 90s" >&2; exit 1; }
+[[ "$found_status" == online ]] || { echo "install-actions-runner: FAIL: runner did not appear online in repos/$REPO/actions/runners within 90s" >&2; exit 1; }
 
-python3 - "$runner_json" "$expected_labels" "$REPO" <<'PY'
+python3 - "$runners_json" "$expected_labels" "$REPO" "$RUNNER_NAME" <<'PY'
 import json
 import sys
 
-runner = json.loads(sys.argv[1])
+runners = json.loads(sys.argv[1])
 expected_labels = set(sys.argv[2].split(","))
 repo = sys.argv[3]
+runner_name = sys.argv[4]
+runner = next((r for r in runners if r.get("name") == runner_name), None)
+if runner is None:
+    print(f"install-actions-runner: FAIL: runner {runner_name!r} not found in the runners list", file=sys.stderr)
+    raise SystemExit(1)
 if runner.get("status") != "online":
     print(f"install-actions-runner: FAIL: runner status is {runner.get('status')!r}, not 'online'", file=sys.stderr)
     raise SystemExit(1)
