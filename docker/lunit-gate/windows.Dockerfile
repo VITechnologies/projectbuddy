@@ -29,10 +29,19 @@ COPY Install-LUnitPackages.exe C:/lunit-gate/Install-LUnitPackages.exe
 # Start-Process -Wait -PassThru, not the `&` call operator: PowerShell's `&`
 # does not reliably wait for/capture the exit code of an NSIS-compiled
 # (GUI-subsystem) executable (confirmed gotcha, nsis-host-installers skill).
+#
+# Single-quoted, non-interpolated throw messages only (no "...$(...)..."):
+# a double-quoted interpolated string here clashes with the outer
+# double-quoted SHELL directive's own -Command argument on Windows,
+# silently stripping the quotes and producing a "Missing property name
+# after reference operator" parse error -- confirmed on a real
+# live-dispatch run. Write-Host the exit code separately instead of
+# interpolating it into the thrown message.
 RUN $p = Start-Process -FilePath 'C:\lunit-gate\Install-LUnitPackages.exe' -ArgumentList '/S' -Wait -PassThru; `
+    Write-Host 'Install-LUnitPackages.exe exit code:' $p.ExitCode; `
     if ($p.ExitCode -ne 0) { `
         if (Test-Path 'C:\lunit-gate\install.log') { Get-Content 'C:\lunit-gate\install.log' | Write-Host }; `
-        throw "LUnit package installer exited $($p.ExitCode)."; `
+        throw 'LUnit package installer exited non-zero; see exit code and log above.'; `
     }; `
     if (-not (Test-Path 'C:\lunit-gate\install.log')) { throw 'LUnit package installer produced no log -- it did not run.' }; `
     $log = Get-Content -Raw 'C:\lunit-gate\install.log'; `
@@ -41,5 +50,6 @@ RUN $p = Start-Process -FilePath 'C:\lunit-gate\Install-LUnitPackages.exe' -Argu
 
 LABEL org.opencontainers.image.title="projectbuddy LUnit Windows release gate"
 LABEL org.opencontainers.image.description="Ephemeral, no-VIPM Windows LabVIEW container for ADR-0003's LUnit release gate"
+
 
 
