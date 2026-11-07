@@ -25,8 +25,8 @@ dispatches `create-vm` for each VM in its batch (it only passes `vm_name`,
 `storage_root`, `iso_path`, `winrm_host_port`), so every VM it creates in
 a single batch run gets the exact same in-guest hostname
 (`vm-builder.local`) and full name (`VM Builder`) -- a real same-hostname
-collision risk across a batch, not just a cosmetic placeholder, tracked
-as a follow-up gap.
+collision risk across a batch, not just a cosmetic placeholder
+(`VITechnologies/projectbuddy#69`, open).
 
 ## Windows LabVIEW VM (`vm/windows-labview/`, `provision-windows-labview-vm.yml`)
 
@@ -125,6 +125,21 @@ A snapshot-based appliance lifecycle with 10 phases, orchestrated from
 and Windows (`build-virtualbox.ps1`) adapter scripts take the same
 identity parameters so the choice of orchestrating host OS never
 constrains which guest family can be built.
+
+**Current reachability in this engine repo** (`VITechnologies/projectbuddy#62`):
+this workflow has zero total dispatches to date. Every phase previously
+failed immediately at the unconditional "Validate Dispatch Contract" step
+because `.github/scripts/validate-vm-provisioning-dispatch.py` did not
+exist in this repo (it was dropped during the original extraction from a
+consumer fork; now restored). `package-build` specifically remains
+blocked here by design, not by a missing file: it calls
+`vm/ubuntu-labview/build-vip-package.sh`, which hardcodes a real
+VI-Technologies project and is deliberately consumer-vendored, never part
+of the generic engine (the same pattern `add-project.yml` already
+documents for validators) -- a consuming fork supplies its own copy. The
+phase descriptions below describe the *designed* behavior a properly
+configured consumer gets; not yet re-confirmed end-to-end against this
+engine's own restored dispatch path.
 
 - **`validate`** -- dry-runs the Linux and/or Windows adapter plan plus a
   public-plan contract check (`.github/scripts/validate-vm-provisioning-dispatch.py`),
