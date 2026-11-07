@@ -24,8 +24,12 @@ jobs:
     # runner this way."
     #
     # On a repo with no such runner registered (e.g. this engine's own
-    # public upstream, which deliberately carries zero private
-    # infrastructure state), this job will simply queue and GitHub will
+    # public upstream, which has no `standards-review-local`-labeled
+    # runner -- though it does have a real, online `vm-provisioner`-
+    # labeled runner for VM-provisioning workflows specifically; "zero
+    # private infrastructure state" describes pre-committed configuration,
+    # not every runner ever registered against it), this job will simply
+    # queue and GitHub will
     # auto-fail it after its standard 24-hour no-runner timeout, once a
     # week -- expected, and not an error requiring action there.
     runs-on: [self-hosted, standards-review-local]

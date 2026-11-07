@@ -17,8 +17,10 @@ ProjectBuddy is a **public, project-agnostic engine** for:
   for NI's own example VIs, not a SBOM pipeline) that those
   runners execute.
 
-It ships with **zero pre-committed project configs, VI
-Technologies-specific identifiers, or private infrastructure state** --
+It is *intended* to ship with zero pre-committed project configs, VI
+Technologies-specific identifiers, or private infrastructure state (a
+handful of real violations of this intent are tracked and being
+resolved, see `VITechnologies/projectbuddy#68`) --
 every VM identity value and project config is a required input, supplied
 by whichever downstream repo consumes this engine. `runner-inventory.json`
 and real project `.toml`/`.json` configs are fork-local, never committed

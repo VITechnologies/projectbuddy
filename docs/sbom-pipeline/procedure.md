@@ -45,8 +45,13 @@ troubleshooting one does not have to assume it behaves like the other.
   docs, not invented).
 - **`pipeline-config.schema.json`**: the JSON Schema every project's
   pipeline configuration is validated against before any of its stages
-  run (both natively via `Test-Json` in `Run-Pipeline.ps1`, and the same
-  schema file mounted into both container images).
+  run -- natively via `Test-Json` in `Run-Pipeline.ps1`, and in the
+  Windows container (`docker/windows-sbom/windows_sbom_pipeline.ps1`,
+  same `Test-Json` mechanism, schema file mounted in). The Linux
+  container (`docker/linux-sbom/linux_sbom_pipeline.py`) does its own
+  separate, narrower inline validation in `load_config()` instead of
+  validating against this schema file -- a real divergence, not yet
+  resolved.
 
 ## Native pipeline (`Run-Pipeline.ps1`, Windows only)
 

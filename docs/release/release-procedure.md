@@ -75,6 +75,14 @@ is covered by (not independently re-stamped).
 
 ## Hotfix Flow
 
+**Not yet exercised in this repo's real history** (zero `hotfix/*`
+branches or PRs have ever existed, on either `VITechnologies/projectbuddy`
+or `svelderrainruiz/projectbuddy`) -- this flow is Feasible/Unambiguous
+as specified, but not yet Verifiable against a real execution. `v0.3.28`'s
+documented GitFlow exception (`docs/cm/cm-plan.md`'s Status Accounting
+section) is the closest real event to a hotfix, but it did not use this
+flow.
+
 1. Create `hotfix/vX.Y.Z` from `main`.
 2. Land the hotfix on the hotfix branch only.
 3. Open and merge a pull request `hotfix/vX.Y.Z` -> `main`.
