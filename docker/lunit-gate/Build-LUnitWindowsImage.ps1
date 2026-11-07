@@ -36,8 +36,19 @@ $context = Join-Path ([IO.Path]::GetTempPath()) ('lunit-gate-image-' + [guid]::N
 $staging = Join-Path ([IO.Path]::GetTempPath()) ('lunit-gate-staging-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $context -Force | Out-Null
 try {
+    # Not $LASTEXITCODE: that variable only reflects native/exe commands,
+    # not a .ps1 invoked via `&` -- checking it here produced a false-
+    # positive failure on a real live-dispatch run (staging had actually
+    # succeeded; $LASTEXITCODE was stale/unset from this fresh shell,
+    # and $null -ne 0 is true). Get-VerifiedLUnitPackageStaging.ps1 sets
+    # $ErrorActionPreference = 'Stop' and throws on any real failure,
+    # which propagates as a terminating exception (caught by this
+    # script's own try/finally) without needing an exit-code check at
+    # all; verify its actual output artifact instead.
     & (Join-Path $PSScriptRoot 'Get-VerifiedLUnitPackageStaging.ps1') -StagingDirectory $staging
-    if ($LASTEXITCODE -ne 0) { throw "LUnit package staging failed: $LASTEXITCODE" }
+    if (-not (Test-Path -LiteralPath (Join-Path $staging 'dependency-manifest.json') -PathType Leaf)) {
+        throw "LUnit package staging did not produce dependency-manifest.json."
+    }
 
     $installerExe = Join-Path $context 'Install-LUnitPackages.exe'
     & makensis -V2 "-DLUNIT_STAGING=$staging" "-DOUT_FILE=$installerExe" (Join-Path $PSScriptRoot 'Install-LUnitPackages.nsi')
