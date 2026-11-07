@@ -18,7 +18,7 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 | --- | --- | --- | --- |
 | Source repo (`main`) | Code | Operator | Tagged release only, via `release/*` -> `main` |
 | `develop` | Code | Operator | Integration branch; never released from directly |
-| Release notes | Document | Operator | One per tag, generated from `CHANGELOG.md`'s matching entry |
+| Release notes | Document | Operator | One per tag, generated from `CHANGELOG.md`'s matching entry (historical exceptions: `v0.2.2` is tagged with no matching `CHANGELOG.md` entry; `v0.3.7`/`v0.3.8`/`v0.3.11`/`v0.3.12` have `CHANGELOG.md` entries but were never tagged/released -- both predate this CM plan's introduction) |
 | `docs/architecture/standards-compliance.md` | Document | Operator | Versioned with repo; stamp updated only after human review |
 | Wiki (SRS/RTM/Architecture Packet) | Document | Operator | Versioned via the wiki's own git history (`branch-then-push`, see [the wiki Home page](https://github.com/VITechnologies/projectbuddy/wiki)) |
 
