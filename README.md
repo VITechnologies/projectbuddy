@@ -6,13 +6,15 @@ infrastructure and running native SBOM reporting pipelines, maintained by
 
 Anyone forking this repository can use it for their own projects by
 supplying their own `.toml`/`.json` project configuration — this repository
-ships with **zero pre-committed project configs**, VI Technologies-specific
-identifiers, or private infrastructure state. Private consumers (such as
-`VITechnologies/SandboxSBOMReporting`) supply their own real project
-configuration and infrastructure state separately, and consume this
-repository's reusable workflows and scripts as a versioned, pinned
-dependency — never the other way around. No credentials or private
-configuration ever flow into this repository.
+is *intended* to ship with zero pre-committed project configs, VI
+Technologies-specific identifiers, or private infrastructure state (a
+handful of real violations of this intent are tracked and being resolved,
+see [`#68`](https://github.com/VITechnologies/projectbuddy/issues/68)).
+Private consumers (such as `VITechnologies/SandboxSBOMReporting`) supply
+their own real project configuration and infrastructure state separately,
+and consume this repository's reusable workflows and scripts as a
+versioned, pinned dependency — never the other way around. No credentials
+or private configuration ever flow into this repository.
 
 ## Standards compliance
 
@@ -32,16 +34,23 @@ risks.
   via `uses: VITechnologies/projectbuddy/.github/workflows/<name>.yml@<commit-sha> # <tag>`
   (pinned to the exact release commit SHA, with the tag as a trailing
   comment for readability -- see `toolchain-smoke-test.yml`'s own header
-  comment for the canonical example), matching the pattern already
-  established for LabVIEW plugin module releases in the
+  comment for the canonical example, the only workflow here that is
+  actually `workflow_call`-consumable this way), matching the pattern
+  already established for LabVIEW plugin module releases in the
   `labview-benchmark-actor-plugins` org.
+- **`workflow_dispatch`-only workflows** (`add-project.yml`,
+  `provision-windows-labview-vm.yml`, `provision-ubuntu-vm.yml`,
+  `vm-fleet-status.yml`) cannot be pinned via `uses:@sha` -- a consumer
+  vendors its own copy of these instead (see `Add-Project.ps1`'s own
+  `$WorkspaceRoot` doc comment for the rationale, resolved as intentional
+  in `#48`), accepting that vendored copies drift from this engine's own
+  until a consumer deliberately re-syncs them.
 - **Directly-invoked scripts** (not wrapped in a GitHub Actions workflow) are
   consumed via a second `actions/checkout` step pinned to the exact release
   commit SHA (not just the tag), inside any downstream workflow that needs
   them — the same trust model GitHub's own `uses: owner/repo@<sha>` syntax
   already applies to every action pinned throughout this engine's callers.
-  This repository does not use git submodules or vendored/copied script
-  files for this purpose.
+  This repository does not use git submodules for this purpose.
 - **Upgrade path**: downstream repositories bump their pinned tag/SHA
   deliberately, as a reviewed code change (a version-bump commit), never
   automatically and never by tracking a floating branch or `latest`.
@@ -59,22 +68,30 @@ as GitHub Actions self-hosted runners, and track them in a fork-local
 to get started — it is the committed schema/template; your own real
 instance is fork-local and never committed here).
 
-Every VM identity value (`VM_NAME`, `BASEFOLDER`, `GUEST_FULLNAME`,
-`GUEST_HOSTNAME`, ISO paths, …) is a required input with no built-in
-default — these scripts never assume any fork's own naming or
-infrastructure. `vm/windows-labview/` additionally includes an NSIS/VNC
+The VM identity values that actually name a fork's own infrastructure
+(`VM_NAME`, `BASEFOLDER`, `GUEST_FULLNAME`, `GUEST_HOSTNAME`) are mandatory
+inputs with no built-in default — these scripts never assume any fork's
+own naming. (A few non-identity parameters, like the ISO path, guest
+username, and WinRM port, do have generic, non-fork-specific defaults for
+convenience; see each script's own `param()`/argument-parsing block for
+the authoritative list.) `vm/windows-labview/` additionally includes an NSIS/VNC
 WinRM-bootstrap mechanism (`winrm-setup-installer.nsi`,
 `build-nsis-bootstrap-iso.sh`, `vnc-bootstrap.py`) that configures WinRM on
 a freshly-installed Windows guest without depending on `FirstLogonCommands`
 surviving an in-guest restart — see the `.nsi` file's own header comment
 for the full rationale.
 
-`.github/workflows/provision-windows-labview-vm.yml`,
-`provision-ubuntu-vm.yml`, and `vm-fleet-status.yml` are the corresponding
-GitHub Actions entry points, each taking every real identity value as an
-explicit `workflow_dispatch` input (some carry a generic, clearly
-fictional placeholder default; none default to any specific fork's real
-infrastructure). See
+`.github/workflows/provision-windows-labview-vm.yml` and
+`provision-ubuntu-vm.yml` are the corresponding provisioning entry points,
+each taking every real identity value as an explicit `workflow_dispatch`
+input (some carry a generic, clearly fictional placeholder default; none
+default to any specific fork's real infrastructure).
+`vm-fleet-status.yml` is a separate, read-only verification workflow with
+**zero** `workflow_dispatch` inputs — it re-derives ground truth from a
+fork's own committed `vm/windows-labview/runner-inventory.json` (never
+committed in this public engine repo itself, so its 30-minute schedule
+trigger here finds no inventory and cleanly no-ops; a consuming fork with
+a real, committed inventory gets full per-VM verification). See
 [`docs/vm-provisioning/procedure.md`](docs/vm-provisioning/procedure.md)
 for the full phase-by-phase procedure (both VM families), including the
 deliberate human-only LabVIEW activation boundary (VIPM activation on the

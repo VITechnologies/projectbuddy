@@ -34,46 +34,54 @@ jobs:
 
       - name: Validate Version Format
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if ! [[ "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::-version must look like vX.Y.Z, got: ${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::-version must look like vX.Y.Z, got: $VERSION"
             exit 1
           fi
-          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "::error::Tag ${{ inputs.version }} already exists. Immutable releases do not allow tag reuse, even after deletion -- pick a new version."
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag $VERSION already exists. Immutable releases do not allow tag reuse, even after deletion -- pick a new version."
             exit 1
           fi
 
       - name: Extract Matching CHANGELOG Section
         id: changelog
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          notes=$(sed -n "/^## ${{ inputs.version }}/,/^## v/p" CHANGELOG.md | sed '$d' | tail -n +2)
+          # Write to a file rather than a step output: CHANGELOG entries can
+          # contain backticks, double quotes, and `$(...)` sequences, which
+          # are unsafe to splice back into a later run: script's expression
+          # syntax (${{ }} is a literal textual substitution, not a shell
+          # variable) -- see CM-release.yml / CM-CI-Release-notes findings.
+          notes="$(sed -n "/^## $VERSION/,/^## v/p" CHANGELOG.md | sed '$d' | tail -n +2)"
           if [ -z "$notes" ]; then
-            echo "::error::No '## ${{ inputs.version }}' section found in CHANGELOG.md. Add the entry there first."
+            echo "::error::No '## $VERSION' section found in CHANGELOG.md. Add the entry there first."
             exit 1
           fi
-          {
-            echo "notes<<RELEASE_NOTES_EOF"
-            echo "$notes"
-            echo "RELEASE_NOTES_EOF"
-          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$notes" > /tmp/release-notes.md
 
       - name: Create Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          TARGET: ${{ inputs.target }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           publish_flag=""
-          if [ "${{ inputs.publish }}" != "true" ]; then
+          if [ "$PUBLISH" != "true" ]; then
             publish_flag="--draft"
           fi
-          gh release create "${{ inputs.version }}" \
+          gh release create "$VERSION" \
             --repo "${{ github.repository }}" \
-            --target "${{ inputs.target }}" \
-            --title "${{ inputs.version }}" \
-            --notes "${{ steps.changelog.outputs.notes }}" \
+            --target "$TARGET" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-notes.md \
             $publish_flag

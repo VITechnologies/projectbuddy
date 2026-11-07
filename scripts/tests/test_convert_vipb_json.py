@@ -2,8 +2,8 @@
 and dot-path-patch logic -- the genuinely unit-testable parts of this
 engine's scripts (as opposed to the VM-provisioning/pipeline scripts,
 which need a live VM/VIPM toolchain to exercise meaningfully and are
-validated via real CI dispatch instead, see docs/requirements/srs.md
-REQ-008/REQ-009).
+validated via real CI dispatch instead, see REQ-008/REQ-009 in the wiki's
+Software-Requirements-Specification).
 
 Run with: pytest --cov=Convert-VipbJson --cov-report=xml scripts/tests/
 """

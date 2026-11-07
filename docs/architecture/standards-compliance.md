@@ -13,7 +13,7 @@ compliance posture was assessed against.
 | Standard | `svelderrainruiz/repo-standards-review` |
 | Version (tag) | `v0.2.23` |
 | Version (commit SHA) | `ba72187ce5f745a1ffea93536cf83982b747819a` |
-| Assessed | 2026-11-06 |
+| Assessed | 2026-11-07 |
 | Profile | `release-gate` |
 
 `v0.2.23` added a canonical multi-model semantic-audit mode
@@ -51,6 +51,23 @@ precondition described as enforced when it is actually only a documented
 convention) -- see `v0.3.27`'s `CHANGELOG.md` entry. This reinforces the
 practical value of a dedicated verification pass after any
 semantic-audit-driven fix round, not just the initial audit.
+
+A fourth pass (same 3 models, explicitly asked to verify `v0.3.27`'s
+fixes and hunt for anything neither prior round caught) found that the
+`v0.3.27` CHANGELOG's claim of fixing all 5 REQ-017 credential-cleanup
+sites was itself false -- only 1 of 5 had actually been moved, caught
+independently by 2 of the 3 models and confirmed via an automated
+scanner rather than manual re-reading. It also found and corrected the
+root cause of `#62` (one of its two "missing" scripts was a genuine,
+accidentally-dropped-during-extraction file, now restored and verified
+locally; the other was confirmed as an intentional, disclosed,
+consumer-vendored exception, not a bug), an expression-injection
+anti-pattern in `release.yml` (reproduced as a real bash syntax error
+using live CHANGELOG content), and filed 3 new issues (`#68`, `#69`,
+`#70`) -- see `v0.3.28`'s `CHANGELOG.md` entry. Every pass this session
+has run has found at least one real defect the prior pass's own fixes
+either missed or introduced; the standing rule remains in effect: run a
+dedicated verification pass after every semantic-audit fix round.
 
 ## Current gate status (as of the version above)
 
