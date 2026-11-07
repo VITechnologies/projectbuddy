@@ -298,11 +298,49 @@ total tests, the same 3 named waivers, `vipmPresence: false`.
   cross-reference) -- resolving the round-2 review's self-containment
   finding concretely, with real evidence, rather than by wording alone.
 
+## Addendum (2026-11-07, `#94` independent verification review + fix round)
+
+Per this engine's standing practice of a mandatory second,
+verification-framed pass after any implementation round: an independent
+3-model (Claude Opus, GPT-6-astra, Gemini-4-argon) review of Phase 2's
+actual code found real defects (`#94`, fixed via `#97`) -- the prior
+Addendum's "no `Xvfb`/`DISPLAY` at all" claim above is corrected by this
+Addendum, not rewritten in place: a direct process-tree inspection shows
+LabVIEW spawns its own internal `Xvfb :99` virtual framebuffer when none
+is externally provided. The accurate claim is that this engine's own
+deployment needs no *externally-provided* Xvfb/DISPLAY setup -- not that
+no virtual framebuffer exists anywhere in the process tree.
+
+Other real defects found and fixed: a Linux VIPM-detection check that
+looked at the wrong (Windows-shaped, non-existent-on-Linux) paths; no
+report-completeness check (a truncated or skipped-test run could
+previously pass); `gate-result.json` missing this engine's own
+release-candidate commit, despite this ADR's own Decision requiring both
+commits recorded with every gate result; `suite_commit` accepted
+unvalidated as a mutable ref; an inaccurate `installMethod` manifest
+value on Linux; and the two Linux waivers added without the new ADR this
+ADR's own round-2 Addendum requires (closed by `ADR-0004`).
+
+Re-verified after the fix round with fresh, real `workflow_dispatch`
+runs on upstream `VITechnologies/projectbuddy` for both platforms:
+Linux (run
+[42375127600](https://github.com/VITechnologies/projectbuddy/actions/runs/42375127600))
+and Windows (run
+[42375129680](https://github.com/VITechnologies/projectbuddy/actions/runs/42375129680))
+-- both `PASS`, both now recording a matching `engineCommit`, with the
+same test counts and waiver lists as before the fix round, confirming
+the fixes corrected the identified gaps without changing the underlying,
+already-proven gate behavior.
+
 ## Related
 
 - `ADR-0002` (superseded by this decision; left unedited, Status updated)
+- `ADR-0004` (formally authorizes the two Linux-specific waivers this
+  Addendum's fix round found missing a required new ADR for)
 - `#87` (post-release implementation milestone; re-scoped per this ADR's
   phased approach)
 - `#62` (reopened; this decision does not resolve it)
+- `#94` (independent verification review), `#95`/`#96` (per-waiver
+  follow-up issues), `#97` (the fix round this Addendum documents)
 - `ni/labview-icon-editor#575` (reference design; open/unmerged at the
   time of both `ADR-0002` and this ADR)
