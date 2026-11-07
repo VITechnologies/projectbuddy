@@ -101,6 +101,17 @@ ssh_options=(-p "$SSH_PORT" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="
 scp_options=(-P "$SSH_PORT" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_KNOWN_HOSTS")
 remote="$GUEST_USER@$SSH_HOST"
 
+askpass_dir="$(mktemp -d)"
+askpass="$askpass_dir/askpass.sh"
+trap 'rm -rf "$askpass_dir"' EXIT
+cat >"$askpass" <<'EOF'
+#!/usr/bin/env bash
+cat "$SANDBOX_PASSWORD_FILE"
+EOF
+chmod 700 "$askpass"
+export DISPLAY=:0 SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force
+export SANDBOX_PASSWORD_FILE="$GUEST_PASSWORD_FILE"
+
 setsid -w ssh "${ssh_options[@]}" "$remote" 'rm -rf /tmp/sandbox-runner-registration && install -d -m 700 /tmp/sandbox-runner-registration'
 setsid -w scp "${scp_options[@]}" \
     "$SCRIPT_DIR/install-actions-runner.sh" \
