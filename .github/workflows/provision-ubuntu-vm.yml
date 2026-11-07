@@ -62,12 +62,12 @@ on:
         type: string
         default: '2222'
       guest_full_name:
-        description: Full display name for the guest's local account (the build-virtualbox.sh/.ps1 engine scripts require this explicitly -- no built-in default).
+        description: Full display name for the guest's local account (the build-virtualbox.sh/.ps1 engine scripts require this explicitly with no built-in default -- this workflow input itself has a generic placeholder default, but unlike provision-windows-labview-vm.yml's equivalent field, is marked required here).
         required: true
         type: string
         default: 'VM Builder'
       guest_hostname:
-        description: Guest OS hostname (the build-virtualbox.sh/.ps1 engine scripts require this explicitly -- no built-in default).
+        description: Guest OS hostname (the build-virtualbox.sh/.ps1 engine scripts require this explicitly with no built-in default -- this workflow input itself has a generic placeholder default, but unlike provision-windows-labview-vm.yml's equivalent field, is marked required here).
         required: true
         type: string
         default: 'vm-builder'
@@ -585,9 +585,9 @@ jobs:
       # and the hardcoded `vi_technologies_lib_super_network_streams` package
       # name/version are deliberately consumer-local -- like
       # `provision-ubuntu-vm.yml` itself, each consumer vendors its own copy
-      # of this workflow (see docs/projectbuddy-consumption.md) and supplies
-      # its own real `build-vip-package.sh` + package identity here, the same
-      # way `add-project.yml` documents consumer-vendored validators. This
+      # of this workflow (see README.md's "Consumption model" section) and
+      # supplies its own real `build-vip-package.sh` + package identity here,
+      # the same way `add-project.yml` documents consumer-vendored validators. This
       # engine repo's own copy of this phase cannot succeed (the script does
       # not exist here by design) -- see #62 for the full history.
       - name: Build Verified VIP on Linux Appliance

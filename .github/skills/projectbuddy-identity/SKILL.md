@@ -1,6 +1,6 @@
 ---
 name: projectbuddy-identity
-description: 'Orient on what ProjectBuddy is: a public, project-agnostic engine (maintained by VI Technologies) for provisioning self-hosted Windows/Ubuntu LabVIEW build VMs, registering them as GitHub Actions self-hosted runners, and running the native SBOM reporting pipeline. Use when orienting a new agent/session on this repo, when a request involves VM lifecycle (create-vm/teardown/enable-vrde), runner registration, or SBOM pipeline execution, or when deciding whether a change belongs here (public, project-agnostic) versus a downstream consumer repo (private, project-specific).'
+description: 'Orient on what ProjectBuddy is: a public, project-agnostic engine (maintained by VI Technologies) for provisioning self-hosted Windows/Ubuntu LabVIEW build VMs, registering them as GitHub Actions self-hosted runners, and running the native SBOM reporting pipeline. Use when orienting a new agent/session on this repo, when a request involves VM lifecycle (validate/create-vm/install-vipm/install-labview/register-runner), runner registration, or SBOM pipeline execution, or when deciding whether a change belongs here (public, project-agnostic) versus a downstream consumer repo (private, project-specific).'
 ---
 
 # ProjectBuddy identity
@@ -12,7 +12,9 @@ ProjectBuddy is a **public, project-agnostic engine** for:
   under `vm/ubuntu-labview/`),
 - registering those VMs as GitHub Actions self-hosted runners, and
 - running the native (non-container) SBOM build/scan/report pipeline
-  (`Run-Pipeline.ps1` / `Run-Pipeline.sh`, `Build-Sbom.ps1`) that those
+  (`Run-Pipeline.ps1`, `Build-Sbom.ps1` -- Windows only; `Run-Pipeline.sh`
+  is a separate, unrelated Linux LabVIEWCLI MassCompile/VI Analyzer tool
+  for NI's own example VIs, not a SBOM pipeline) that those
   runners execute.
 
 It ships with **zero pre-committed project configs, VI
@@ -26,9 +28,16 @@ upstream.
 `VITechnologies/SandboxSBOMReporting` is the primary private consumer: it
 supplies its own real project configuration and infrastructure state, and
 consumes this engine's reusable workflows/scripts as a versioned, pinned
-dependency (`uses: VITechnologies/projectbuddy/.github/workflows/<name>.yml@<tag>`
-for workflows; a second pinned `actions/checkout` for directly-invoked
-scripts). Upgrades are deliberate, reviewed version-bump commits -- never a
+dependency -- `uses: VITechnologies/projectbuddy/.github/workflows/<name>.yml@<commit-sha> # <tag>`
+(pinned to the exact release commit SHA with the tag as a trailing
+comment for readability -- not the tag alone) for the one genuinely
+`workflow_call`-consumable workflow (`toolchain-smoke-test.yml`); a
+second pinned `actions/checkout` for directly-invoked scripts;
+`workflow_dispatch`-only workflows (`add-project.yml`,
+`provision-windows-labview-vm.yml`, `provision-ubuntu-vm.yml`,
+`vm-fleet-status.yml`) cannot be pinned via `uses:@sha` at all -- the
+consumer vendors its own copy of these instead, accepting drift until a
+deliberate re-sync (`#48`). Upgrades are deliberate, reviewed version-bump commits -- never a
 floating branch or `latest`. **Never the other way around**: no
 SandboxSBOMReporting-specific identifiers, credentials, or private
 configuration should ever flow into this engine repo.
@@ -47,11 +56,13 @@ to `VITechnologies/projectbuddy` once stable.
 - `Add-Project.ps1` -- registers a new project via the `add-project.yml`
   workflow (validates `pipelineConfig` + VIPM TOML, upserts
   `PROJECTS_OVERRIDE`/`VIPM_TOML_CONFIGS`).
-- `Run-Pipeline.ps1` / `Run-Pipeline.sh` -- native SBOM pipeline entry
-  points consumed by activated runners.
+- `Run-Pipeline.ps1` -- the native SBOM pipeline entry point consumed by
+  activated Windows runners (no native Linux equivalent exists;
+  `Run-Pipeline.sh` is a separate, unrelated LabVIEWCLI tool).
 - `.github/workflows/provision-windows-labview-vm.yml` -- the main VM
   lifecycle workflow (`validate`/`create-vm`/`install-vipm`/
-  `install-labview`/`register-runner`/`teardown`/`enable-vrde` phases).
+  `install-labview`/`register-runner` phases -- exactly these 5, no
+  `teardown`/`enable-vrde` phase exists).
 - [NSIS host/guest installer patterns](../nsis-host-installers/SKILL.md) --
   companion skill for the `.nsi`-based bootstrap installers this engine
   builds and runs.
