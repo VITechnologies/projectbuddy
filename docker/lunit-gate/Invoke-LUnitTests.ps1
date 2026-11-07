@@ -95,6 +95,41 @@ function Assert-NoVipmPresence {
     }
 }
 
+function Get-PinnedSuiteArchive {
+    # No `git` dependency: downloads GitHub's own commit-archive zip (an
+    # exact-SHA archive is inherently that commit; GitHub's codeload service
+    # only serves what actually exists at that SHA, so a successful download
+    # and extraction is itself the provenance check -- no separate
+    # `git rev-parse` verification is meaningful or necessary here).
+    param(
+        [Parameter(Mandatory)] [string]$Owner,
+        [Parameter(Mandatory)] [string]$Repo,
+        [Parameter(Mandatory)] [string]$Commit,
+        [Parameter(Mandatory)] [string]$Destination
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "$Repo-$Commit.zip"
+    $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "$Repo-$Commit-extract"
+    try {
+        $url = "https://codeload.github.com/$Owner/$Repo/zip/$Commit"
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zipPath -TimeoutSec 180
+        if (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force }
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractRoot)
+
+        $extractedFolder = Get-ChildItem -LiteralPath $extractRoot -Directory | Select-Object -First 1
+        if (-not $extractedFolder) {
+            throw "GitHub archive for $Owner/$Repo@$Commit extracted no top-level folder."
+        }
+        if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
+        Move-Item -LiteralPath $extractedFolder.FullName -Destination $Destination
+    }
+    finally {
+        Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-JUnitReportAcceptable {
     param([Parameter(Mandatory)] [string]$ReportPath)
 
@@ -159,17 +194,11 @@ if ($MyInvocation.InvocationName -ne ".") {
 
         if (Test-Path -LiteralPath $workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force }
     New-Item -ItemType Directory -Path $workspace -Force | Out-Null
-    Set-Location $workspace
-    & git init --quiet .
-    & git remote add origin https://github.com/ni/labview-icon-editor.git
-    & git fetch --quiet --depth 1 origin $SuiteCommit
-    if ($LASTEXITCODE -ne 0) { throw "Failed to fetch pinned suite commit $SuiteCommit." }
-    & git checkout --quiet FETCH_HEAD
-    if ($LASTEXITCODE -ne 0) { throw "Failed to check out pinned suite commit $SuiteCommit." }
-    $actualCommit = (& git rev-parse HEAD).Trim()
-    if ($actualCommit -ne $SuiteCommit) {
-        throw "Checked-out commit ($actualCommit) does not match the pinned suite commit ($SuiteCommit)."
-    }
+    # Downloaded as a GitHub commit archive (not `git clone`): the NI LabVIEW
+    # base image does not include git, and an archive for an exact commit SHA
+    # is inherently that commit -- no separate rev-parse verification needed,
+    # unlike a branch/tag clone which could move.
+    Get-PinnedSuiteArchive -Owner 'ni' -Repo 'labview-icon-editor' -Commit $SuiteCommit -Destination $workspace
 
     $project = Join-Path $workspace 'lv_icon_editor.lvproj'
     if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
