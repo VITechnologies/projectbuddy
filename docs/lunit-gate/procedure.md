@@ -1,7 +1,8 @@
-# LUnit Release Gate Procedure (ADR-0003, Phase 1: Windows)
+# LUnit Release Gate Procedure (ADR-0003: Windows + Linux)
 
-- Status: Active (Phase 1 implementation; dual-platform gate not yet in
-  effect -- see `REQ-033`)
+- Status: Active (Phase 1 and Phase 2 implemented; dual-platform gate
+  not yet in effect pending live-dispatch proof of Phase 2 -- see
+  `REQ-033`)
 - Last substantive update: 2026-11-07
 - Owner: svelderrainruiz
 
@@ -27,10 +28,13 @@ different purpose) or the Windows/Ubuntu LabVIEW VM families (`#62`).
   (`docker/lunit-gate/vagrant-nsis-test/`): a genuine pass producing
   exactly 10 test cases with exactly the one expected named-upstream
   failure, before ever being wired into CI.
-- **Does not prove**: anything about the Linux family (`REQ-035`/`REQ-036`,
-  Phase 2, not yet attempted), or `#62`'s persistent-VM
-  `complete-activation`/`package-build` phases (reopened, separately
-  tracked, unrelated to this gate).
+- **Does not prove (yet)**: Phase 2's `workflow_dispatch` live-dispatch
+  proof on CI itself -- Phase 2 (below) is confirmed via direct local
+  Docker testing on this engine's own host, matching Phase 1's own
+  "validate locally first" discipline, but a real CI run is still
+  pending as of this writing. Also outside this gate's scope: `#62`'s
+  persistent-VM `complete-activation`/`package-build` phases (reopened,
+  separately tracked, unrelated to this gate).
 
 ## Why NSIS, not raw PowerShell + .NET ZipFile
 
@@ -142,6 +146,67 @@ no-VIPM-presence check will correctly reject it if run there directly;
 dot-source the script and call its functions individually (bypassing only
 that one guard) to validate the suite-download/LabVIEWCLI mechanics
 against this box instead.
+
+## Phase 2: Linux (`REQ-035`/`REQ-036`)
+
+Implements the Linux feasibility spike and execution requirements. Unlike
+Windows, Linux containers run **natively** on this engine's own Linux
+build host, so iteration here is direct local Docker testing rather than
+a separate VM/Vagrant harness.
+
+### Findings
+
+- **Feasible, confirmed.** `LabVIEWCLI`'s `LUnit` operation runs to
+  completion against the pinned Linux `nationalinstruments/labview`
+  image with **no `Xvfb`/`DISPLAY` required at all** -- LabVIEW's VI
+  Server becomes ready in seconds with no virtual framebuffer. This
+  resolves the headless-display risk `ADR-0003`'s original Decision
+  raised as open.
+- **No NSIS-equivalent installer needed.** Neither Windows-container bug
+  that drove Phase 1's NSIS migration (`MAX_PATH`, the SMB-backed bind
+  mount's `Move-Item` failure) applies to Linux; `linux.Dockerfile`
+  deploys the staged, SHA-256-verified package files with a plain
+  `COPY`.
+- **Three named waivers, not one.** Beyond the Windows-shared
+  `Test Write Read Library Icon Data.vi`, two Linux-specific test
+  failures were found and confirmed via direct inspection of each
+  failure's exact assertion diff (not assumption): `Test Window
+  Position.vi` (every window-bounds assertion off by a consistent
+  1-pixel offset -- a Linux-window-manager-vs-Windows rendering
+  difference) and `Test INI Settings.vi` (expects the Windows-only
+  default font `"Small Fonts"`; Linux LabVIEW's real default is
+  `"LabVIEW Application"`). Both are platform differences in the test's
+  hardcoded expectations, not functional defects in this engine's
+  deployment. See `ADR-0003`'s Phase-2 Addendum and the wiki SRS's
+  `REQ-036` for the full reasoning.
+
+### Components
+
+| File | Responsibility |
+| --- | --- |
+| `docker/lunit-gate/linux.Dockerfile` | Builds the ephemeral image from a digest-pinned `nationalinstruments/labview` Linux base. Uses the JSON-array `COPY ["LUnit CLI", ...]` form for the space-containing package directory name (a plain backslash-escaped `COPY` does not parse the same way as shell escaping in a Linux Dockerfile). |
+| `docker/lunit-gate/invoke_lunit_tests_linux.py` | Linux equivalent of `Invoke-LUnitTests.ps1` (Python, matching this repo's existing Linux-container convention): downloads the pinned suite archive, starts LabVIEW headless, runs `LabVIEWCLI -OperationName LUnit`, validates the resulting `lunit.xml` against its own three-entry `ALLOWED_WAIVER_TEST_NAMES`. `validate_junit_report` is the pure, offline-testable policy function (`scripts/tests/test_invoke_lunit_tests_linux.py`). |
+| `docker/lunit-gate/Build-LUnitLinuxImage.ps1` | Host-side orchestrator: reuses `Get-VerifiedLUnitPackageStaging.ps1` unchanged (already cross-platform), stages the package files and `invoke_lunit_tests_linux.py` into a clean build context, then builds the image. |
+| `.github/workflows/lunit-gate-linux.yml` | `workflow_dispatch`, `runs-on: ubuntu-latest` -- builds the image, runs the container, validates the dependency manifest has no VIPM, runs the gate, uploads results. |
+
+### Running it
+
+```
+gh workflow run lunit-gate-linux.yml --repo VITechnologies/projectbuddy --ref main
+```
+
+Same `suite_commit` input and `lunit-gate-linux-results-<run-id>` artifact
+convention as the Windows gate.
+
+### Fast local iteration (before touching CI)
+
+Linux containers run natively on this build host, so there is no
+separate VM harness -- iterate directly against the built image:
+
+```
+pwsh -NoProfile -File docker/lunit-gate/Build-LUnitLinuxImage.ps1 -Image lunit-gate-linux:local
+docker run --rm lunit-gate-linux:local python3 /lunit-gate/invoke_lunit_tests_linux.py --suite-commit d9eac771ccac0ed92bde81a031fe2f4ebe62c845 --results-directory /lunit-gate-results
+```
 
 ## Related
 
