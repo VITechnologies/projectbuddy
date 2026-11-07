@@ -26,7 +26,9 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 
 - Scheme: `vX.Y.Z` (SemVer), tagged directly on `main`.
 - Tag trigger: manual, after a `release/vX.Y.Z` branch (see below) has been
-  promoted to `main` and its merge-back to `develop` confirmed (`docs/release/release-procedure.md`).
+  promoted to `main` and its merge-back to `develop` confirmed, or
+  confirmed as a legitimate no-op if `develop` and `main` were already
+  content-identical (`docs/release/release-procedure.md`).
 - Release branch rule: `release/vX.Y.Z` branches are cut from `develop`,
   merged to `main` first, then merged back into `develop`, then deleted.
 
@@ -45,8 +47,11 @@ the GitFlow branch governance already adopted in `ADR-0001`.
   (identical content, published alongside the immutable tag).
 - Release record owner: the operator (svelderrainruiz), as the sole
   maintainer authorizing each release/hotfix promotion.
-- Audit trail: every release's exact promoted commit is independently
+- Audit trail: every release since GitFlow adoption (`ADR-0001`,
+  `v0.3.9` onward) has its exact promoted commit independently
   verifiable via `git log --oneline` on `main` at that tag, cross-referenced
   against the PR history for the `release/*`/`hotfix/*` branch that
   produced it (GitHub's PR merge history is retained even after the source
-  branch is deleted).
+  branch is deleted). Earlier releases (pre-`v0.3.9`) were tagged directly
+  under the prior trunk-based/release-tag model (`ADR-0001`) and do not
+  have this same `release/*` branch ancestry.

@@ -206,6 +206,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$MEDIA_PATH" && -f "$MEDIA_PATH" ]] || { echo "Installer ISO not found: $MEDIA_PATH" >&2; exit 2; }
+          # Trap installed before the credential file is created (not after)
+          # -- see the create-vm step's comment for why this ordering matters.
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           # Needed unconditionally -- the post-restart wait-ready loop below uses it
           # regardless of whether the VM was already running (and thus needing a
           # shutdown first) when this step started. Confirmed live: a VM that was
@@ -214,9 +217,6 @@ jobs:
           # and wait-ready failed with FileNotFoundError instead of a WinRM error.
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
-          # Trap, not an end-of-step cleanup line -- see the create-vm step's
-          # comment above for why.
-          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           state="$(VBoxManage showvminfo "$VM_NAME" --machinereadable | sed -n 's/^VMState="\(.*\)"$/\1/p')"
           if [[ "$state" == running ]]; then
             # acpipowerbutton has proven unreliable against this guest (WinRM stays
@@ -292,9 +292,9 @@ jobs:
           GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
         run: |
           set -euo pipefail
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
-          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           python3 -m venv "${{ runner.temp }}/winrm-venv"
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
@@ -308,9 +308,9 @@ jobs:
           GUEST_PASSWORD: ${{ secrets.WINDOWS_LABVIEW_VM_GUEST_PASSWORD }}
         run: |
           set -euo pipefail
+          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
           printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
-          trap 'shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"' EXIT
           python3 -m venv "${{ runner.temp }}/winrm-venv"
           "${{ runner.temp }}/winrm-venv/bin/pip" install --quiet pywinrm
           "${{ runner.temp }}/winrm-venv/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
@@ -345,14 +345,14 @@ jobs:
             echo "target_repo, runner_name, runner_labels, and dedicated_service_account_name are all required for register-runner" >&2
             exit 2
           }
-          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
-          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
-          install -m 0600 /dev/null "$PAT_FILE"
-          printf '%s' "$RUNNER_REGISTRATION_PAT" > "$PAT_FILE"
           trap '
             shred -u "$WINRM_PASSWORD_FILE" 2>/dev/null || rm -f "$WINRM_PASSWORD_FILE"
             shred -u "$PAT_FILE" 2>/dev/null || rm -f "$PAT_FILE"
           ' EXIT
+          install -m 0600 /dev/null "$WINRM_PASSWORD_FILE"
+          printf '%s' "$GUEST_PASSWORD" > "$WINRM_PASSWORD_FILE"
+          install -m 0600 /dev/null "$PAT_FILE"
+          printf '%s' "$RUNNER_REGISTRATION_PAT" > "$PAT_FILE"
           runner_filename="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Filename'])")"
           runner_sha256="$(python3 -c "import json; print(json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']['winX64Sha256'])")"
           runner_url="$(python3 -c "import json; m = json.load(open('vm/windows-labview/provisioning-manifest.json'))['actionsRunner']; print(m['downloadUrlTemplate'].format(version=m['version'], winX64Filename=m['winX64Filename']))")"

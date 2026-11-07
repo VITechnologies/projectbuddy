@@ -25,7 +25,10 @@ $ErrorActionPreference = "Stop"
 . ([System.IO.Path]::Combine($PSScriptRoot, "internal", "Pipeline.Stages.ps1"))
 
 if (-not $IsWindows) {
-    throw "Run-Pipeline.ps1 supports Windows only. On Linux, use Run-Pipeline.sh."
+    # Run-Pipeline.sh is NOT a Linux equivalent of this SBOM pipeline -- it is
+    # a separate, unrelated LabVIEWCLI MassCompile/VI Analyzer tool for NI's
+    # own example VIs. There is currently no native Linux SBOM pipeline.
+    throw "Run-Pipeline.ps1 (the native SBOM pipeline) supports Windows only. There is no native Linux SBOM pipeline in this repo."
 }
 if ($env:VIPM_COMMUNITY_EDITION -eq "1") {
     throw "This pipeline requires VIPM Pro. Unset VIPM_COMMUNITY_EDITION and activate VIPM Pro."
