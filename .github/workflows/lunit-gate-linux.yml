@@ -1,0 +1,88 @@
+name: LUnit Gate (Linux, ADR-0003 Phase 2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite_commit:
+        description: >-
+          Pinned ni/labview-icon-editor commit SHA to clone and test
+          against. Changing this is a deliberate pin bump (see
+          docs/lunit-gate/procedure.md), not a default to drift silently.
+        required: true
+        type: string
+        default: d9eac771ccac0ed92bde81a031fe2f4ebe62c845
+
+permissions:
+  contents: read
+
+env:
+  LABVIEW_IMAGE: projectbuddy-lunit-linux:${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  lunit-gate-linux:
+    name: Run LUnit gate (Linux container)
+    # Per ADR-0003's explicit runner-class decision: GitHub-hosted, not
+    # this engine's self-hosted fleet. PowerShell Core ships pre-installed
+    # on ubuntu-latest, so Build-LUnitLinuxImage.ps1 runs directly here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Build LUnit gate Linux image
+        timeout-minutes: 20
+        run: |
+          & ./docker/lunit-gate/Build-LUnitLinuxImage.ps1 -Image $env:LABVIEW_IMAGE
+
+      - name: Read installed dependency manifest
+        run: |
+          New-Item -ItemType Directory -Path lunit-gate-results -Force | Out-Null
+          docker create --name lunit-gate-linux-inspect $env:LABVIEW_IMAGE true
+          docker cp lunit-gate-linux-inspect:/lunit-gate/dependency-manifest.json lunit-gate-results/dependency-manifest.json
+          docker rm -f lunit-gate-linux-inspect
+          $manifest = Get-Content -Raw lunit-gate-results/dependency-manifest.json | ConvertFrom-Json
+          if ($manifest.vipmUsed -ne $false) {
+            throw 'Dependency manifest records vipmUsed != false -- REQ-036 requires no VIPM installation anywhere in this container.'
+          }
+          Write-Host "Confirmed: no VIPM used. Packages: $($manifest.packages | ConvertTo-Json -Compress)"
+
+      - name: Run LUnit gate against the pinned suite commit
+        timeout-minutes: 20
+        run: |
+          docker run --name lunit-gate-linux-run $env:LABVIEW_IMAGE `
+            python3 /lunit-gate/invoke_lunit_tests_linux.py --suite-commit '${{ inputs.suite_commit }}' --results-directory /lunit-gate-results
+          $runExit = $LASTEXITCODE
+          docker cp lunit-gate-linux-run:/lunit-gate-results/. lunit-gate-results/
+          docker rm -f lunit-gate-linux-run
+          if ($runExit -ne 0) { throw 'LUnit gate FAILED; see lunit.xml and gate-result.json in the uploaded artifact.' }
+
+      - name: Summarize gate result
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resultPath = 'lunit-gate-results/gate-result.json'
+          '## LUnit Gate Result (Linux, ADR-0003 Phase 2)' >> $env:GITHUB_STEP_SUMMARY
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            'No gate-result.json was produced. Download the lunit-gate-linux-results artifact and check lunit.xml and the LabVIEW logs.' >> $env:GITHUB_STEP_SUMMARY
+            return
+          }
+          $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
+          "- Outcome: $($result.outcome)" >> $env:GITHUB_STEP_SUMMARY
+          "- Pinned suite commit: $($result.suiteCommit)" >> $env:GITHUB_STEP_SUMMARY
+          "- Total test cases: $($result.totalTests)" >> $env:GITHUB_STEP_SUMMARY
+          "- Named waivers applied: $($result.waivedTests -join ', ')" >> $env:GITHUB_STEP_SUMMARY
+          "- VIPM present: $($result.vipmPresence)" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload LUnit gate results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lunit-gate-linux-results-${{ github.run_id }}
+          path: lunit-gate-results/
+          if-no-files-found: warn
+          retention-days: 90

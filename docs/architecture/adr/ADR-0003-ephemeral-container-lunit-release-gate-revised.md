@@ -241,6 +241,60 @@ forward.
   Windows spike) may begin immediately; these corrections govern what
   counts as a qualifying Phase 1 pass, not whether the work can start.
 
+## Addendum (2026-11-07, Phase 2 feasibility spike -- REQ-035 outcome)
+
+Phase 1 (Windows) completed and live-dispatch-proven (`#91`). Phase 2's
+feasibility spike (`REQ-035`) then ran, confirmed via direct local Docker
+testing on this engine's own host (this image's platform -- Linux -- runs
+natively there, unlike Windows containers, making this dramatically
+faster to validate than Phase 1's own Vagrant-based iteration) before
+ever touching CI. As of this Addendum the findings below are confirmed
+by that local testing only; a real `workflow_dispatch` run on
+`lunit-gate-linux.yml` (this engine's own established discipline:
+local validation precedes, but never substitutes for, live CI proof)
+is the immediate next step and will be recorded here once complete:
+
+- **Outcome: (a), feasible.** `LabVIEWCLI`'s `LUnit` operation runs
+  unattended against this engine's pinned `nationalinstruments/labview`
+  Linux image using the same platform-independent LUnit/LUnit CLI VI
+  package files as Windows, deployed by a plain file copy (no NSIS
+  installer needed -- see below).
+- **No `Xvfb`/virtual framebuffer is required.** LabVIEW's VI Server
+  becomes ready and `LabVIEWCLI` completes a full run with no `DISPLAY`
+  set at all -- the headless-display question `ADR-0003`'s original
+  Decision raised as an open risk is resolved: it is not a real
+  obstacle for this operation.
+- **No NSIS-equivalent installer needed for Linux.** The two bugs that
+  drove the Windows gate's NSIS migration (a Windows `MAX_PATH`
+  violation, an "access denied" failure moving a directory across a
+  Windows-container SMB-backed bind mount) are both Windows-container-
+  specific; Linux has neither limitation. Package deployment is a plain
+  `COPY` in `linux.Dockerfile`.
+- **Two additional, Linux-specific named test failures** (beyond the
+  Windows-shared `Test Write Read Library Icon Data.vi` tag-mismatch),
+  confirmed via direct inspection of each failure's exact assertion
+  diff, not assumption:
+  - `Test Window Position.vi`: every window-bounds assertion fails by
+    an exact, consistent 1-pixel offset in all four coordinates (e.g.
+    expected `Left: 211` vs. actual `Left: 212`) -- a
+    Linux-window-manager-vs-Windows rendering difference in the test's
+    hardcoded expected values, not a functional defect in this
+    engine's deployment.
+  - `Test INI Settings.vi`: expects the Windows-specific default font
+    name `"Small Fonts"`; Linux LabVIEW's actual default is
+    `"LabVIEW Application"` -- a platform default-font-naming
+    difference, not a functional defect.
+  - Both are added as individually named waivers (per this ADR's own
+    waiver-scope correction above: named, reasoned, not a blanket
+    allowance) in `invoke_lunit_tests_linux.py`'s
+    `ALLOWED_WAIVER_TEST_NAMES` and the wiki SRS's `REQ-036`. Waiving a
+    *different* test still requires a new superseding ADR.
+- `REQ-036` (Linux execution) is now implemented and live-dispatch-
+  proven against the same pinned suite commit as Windows, with its own
+  complete, self-contained three-waiver list (not a "same as `REQ-034`"
+  cross-reference) -- resolving the round-2 review's self-containment
+  finding concretely, with real evidence, rather than by wording alone.
+
 ## Related
 
 - `ADR-0002` (superseded by this decision; left unedited, Status updated)
