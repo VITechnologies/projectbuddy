@@ -1,6 +1,14 @@
 # ADR-0002: Adopt Ephemeral-Container LUnit Test Execution as a Release Gate
 
-- Status: Accepted
+- Status: **Superseded by `ADR-0003`** (a 3-model pre-implementation
+  consensus review found a factual overclaim, an internal contradiction
+  on VIPM secrets, an undecided runner-class choice, and an unproven
+  Linux-feasibility assumption treated as a release blocker -- see
+  `ADR-0003-ephemeral-container-lunit-release-gate-revised.md` for the
+  full review findings and the corrected decision. This ADR's original
+  Decision/Consequences text below is left unedited, per this project's
+  Decision Record convention, as the historical record of what was first
+  proposed.)
 - Date: 2026-11-07
 - Deciders: svelderrainruiz (operator)
 
