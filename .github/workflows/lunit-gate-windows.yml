@@ -1,0 +1,111 @@
+name: LUnit Gate (Windows, ADR-0003 Phase 1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite_commit:
+        description: >-
+          Pinned ni/labview-icon-editor commit SHA to clone and test
+          against. Changing this is a deliberate pin bump (see
+          docs/lunit-gate/procedure.md), not a default to drift silently.
+        required: true
+        type: string
+        default: d9eac771ccac0ed92bde81a031fe2f4ebe62c845
+
+permissions:
+  contents: read
+
+env:
+  LVIE_CONTAINER_NAME: projectbuddy-lunit-windows-${{ github.run_id }}-${{ github.run_attempt }}
+  LABVIEW_IMAGE: projectbuddy-lunit-windows:${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  lunit-gate-windows:
+    name: Run LUnit gate (Windows container)
+    # Per ADR-0003's explicit runner-class decision: GitHub-hosted, not this
+    # engine's self-hosted fleet, matching ni/labview-icon-editor#575's own
+    # choice and avoiding long-lived-infrastructure risk (this session's
+    # VBoxSVC finding).
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Validate Docker is in Windows-container mode
+        run: |
+          $os = docker info --format '{{.OSType}}'
+          if ($LASTEXITCODE -ne 0 -or $os -ne 'windows') {
+            throw 'A running Docker engine in Windows-container mode is required.'
+          }
+
+      - name: Build LUnit gate image
+        timeout-minutes: 25
+        run: |
+          & .\docker\lunit-gate\Build-LUnitWindowsImage.ps1 -Image $env:LABVIEW_IMAGE
+
+      - name: Start container
+        run: |
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\lunit-gate-results" -Force | Out-Null
+          docker create --name $env:LVIE_CONTAINER_NAME --user ContainerAdministrator `
+            --mount "type=bind,source=$env:GITHUB_WORKSPACE,target=C:\workspace" `
+            --entrypoint powershell.exe $env:LABVIEW_IMAGE `
+            -NoProfile -Command "Start-Sleep -Seconds 3600"
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to create the LUnit gate container.' }
+          'LVIE_CONTAINER_CREATED=true' >> $env:GITHUB_ENV
+          docker start $env:LVIE_CONTAINER_NAME
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to start the LUnit gate container.' }
+
+      - name: Read installed dependency manifest
+        run: |
+          docker cp "${env:LVIE_CONTAINER_NAME}:C:\lunit-gate\dependency-manifest.json" "$env:GITHUB_WORKSPACE\lunit-gate-results\dependency-manifest.json"
+          if ($LASTEXITCODE -ne 0) { throw 'The image is missing its required dependency manifest -- REQ-034 evidence.' }
+          $manifest = Get-Content -Raw "$env:GITHUB_WORKSPACE\lunit-gate-results\dependency-manifest.json" | ConvertFrom-Json
+          if ($manifest.vipmUsed -ne $false) {
+            throw 'Dependency manifest records vipmUsed != false -- REQ-034 requires no VIPM installation anywhere in this container.'
+          }
+          Write-Host "Confirmed: no VIPM used. Packages: $($manifest.packages | ConvertTo-Json -Compress)"
+
+      - name: Run LUnit gate against the pinned suite commit
+        timeout-minutes: 20
+        run: |
+          docker exec $env:LVIE_CONTAINER_NAME powershell.exe -NoProfile `
+            -File C:\workspace\docker\lunit-gate\Invoke-LUnitTests.ps1 `
+            -SuiteCommit '${{ inputs.suite_commit }}' `
+            -ResultsDirectory C:\workspace\lunit-gate-results
+          if ($LASTEXITCODE -ne 0) { throw 'LUnit gate FAILED; see lunit.xml and gate-result.json in the uploaded artifact.' }
+
+      - name: Summarize gate result
+        if: always() && env.LVIE_CONTAINER_CREATED == 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resultPath = Join-Path $env:GITHUB_WORKSPACE 'lunit-gate-results\gate-result.json'
+          '## LUnit Gate Result (Windows, ADR-0003 Phase 1)' >> $env:GITHUB_STEP_SUMMARY
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            'No gate-result.json was produced. Download the lunit-gate-windows-results artifact and check lunit.xml and the LabVIEW logs.' >> $env:GITHUB_STEP_SUMMARY
+            return
+          }
+          $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
+          "- Outcome: $($result.outcome)" >> $env:GITHUB_STEP_SUMMARY
+          "- Pinned suite commit: $($result.suiteCommit)" >> $env:GITHUB_STEP_SUMMARY
+          "- Total test cases: $($result.totalTests)" >> $env:GITHUB_STEP_SUMMARY
+          "- Named waivers applied: $($result.waivedTests -join ', ')" >> $env:GITHUB_STEP_SUMMARY
+          "- VIPM present: $($result.vipmPresence)" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload LUnit gate results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lunit-gate-windows-results-${{ github.run_id }}
+          path: lunit-gate-results/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Remove container
+        if: always() && env.LVIE_CONTAINER_CREATED == 'true'
+        run: |
+          docker rm -f $env:LVIE_CONTAINER_NAME

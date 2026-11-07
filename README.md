@@ -133,6 +133,19 @@ release-dependency attestation-verification chain, and the deliberate
 native-vs-container difference in whether Grype's own findings gate the
 run.
 
+### LUnit release gate (`docker/lunit-gate/`)
+
+An ephemeral, no-VIPM, GitHub-hosted-runner container (separate from the
+SBOM pipeline's own containers above) that runs a pinned commit of
+`ni/labview-icon-editor`'s real LUnit test suite via native `LabVIEWCLI`,
+proving this engine can execute genuine, unattended LabVIEW automated
+tests without depending on persistent-VM GUI activation. Phase 1
+(Windows) only so far; Phase 2 (Linux feasibility) not yet attempted. See
+[`docs/lunit-gate/procedure.md`](docs/lunit-gate/procedure.md) and
+`docs/architecture/adr/ADR-0003-ephemeral-container-lunit-release-gate-revised.md`
+for the full procedure, the SHA-256 package-pinning provenance, and the
+named-waiver policy.
+
 ### Runner/registration helpers (root-level)
 
 `Register-WindowsRunner.ps1` and `Register-WslRunnerKeepAlive.ps1` plan or
