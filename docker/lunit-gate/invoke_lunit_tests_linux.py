@@ -45,6 +45,7 @@ LABVIEW_EXE = LABVIEW_ROOT / "labview"
 CLI_EXE = "/usr/local/bin/LabVIEWCLI"
 WORKSPACE = Path("/lunit-suite-under-test")
 
+# CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
 # Per ADR-0003's round-2 Addendum (Windows) plus this Phase-2 spike's own
 # findings (Linux): each waiver here is individually named and reasoned,
 # not a blanket allowance. A different/new waiver requires a new
@@ -160,7 +161,8 @@ def start_labview_headless(project: Path, results_dir: Path) -> subprocess.Popen
     raise RuntimeError("LabVIEW VI Server did not become ready on port 3363 within 180 seconds.")
 
 
-# The pinned suite commit's real test-case count (ni/labview-icon-editor
+# CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
+# the pinned suite commit's real test-case count (ni/labview-icon-editor
 # @ d9eac771ccac0ed92bde81a031fe2f4ebe62c845, 5 test classes). Per #94's
 # review: without this check, a report missing or skipping test cases
 # (e.g. a truncated run) could still report "PASS" with zero failures
@@ -275,6 +277,8 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     assert_no_vipm_presence()
 
+    # CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
+    # the suite's owner/repo and its project file's path within that repo.
     get_pinned_suite_archive("ni", "labview-icon-editor", args.suite_commit, WORKSPACE)
     project = WORKSPACE / "lv_icon_editor.lvproj"
     if not project.exists():
