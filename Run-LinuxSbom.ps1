@@ -64,7 +64,7 @@ param(
     # its own engine-root files even when $WorkspaceRoot is a different,
     # real consumer repository. Defaults to $PSScriptRoot so existing
     # invocations are unaffected; a consumer invoking this script from a
-    # pinned external checkout (see docs/projectbuddy-consumption.md) must
+    # pinned external checkout (see README.md's "Consumption model" section) must
     # pass the real repo root here.
     [string]$WorkspaceRoot = $PSScriptRoot
 )
