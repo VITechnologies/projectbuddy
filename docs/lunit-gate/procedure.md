@@ -100,13 +100,17 @@ existing upgrade-path convention (`README.md`'s "Upgrade path" bullet,
 
 ## The named-waiver policy
 
-Per `ADR-0003`'s round-2 Addendum: the **only** test case permitted to
-fail or error without blocking the gate is `Test Write Read Library Icon
-Data.vi` (a known, disclosed upstream `NI.Lib.VIIconTemplate`/
+Per `ADR-0003`'s round-2 Addendum: the single waiver permitted for the
+**Windows** gate without a further decision is `Test Write Read Library
+Icon Data.vi` (a known, disclosed upstream `NI.Lib.VIIconTemplate`/
 `NI_IconEditor` tag-mismatch, per `ni/labview-icon-editor#575`'s own
-description). Any other test's failure or error blocks the gate. Waiving
-a different test requires a new superseding ADR, not an edit to
-`Invoke-LUnitTests.ps1`'s `$script:AllowedWaiverTestName`.
+description). The **Linux** gate has its own, separate three-entry
+waiver list, formally authorized by `ADR-0004` (see Phase 2 below) --
+not the same single-entry list as Windows. Any other test's failure,
+error, or skip blocks the gate on either platform. Waiving a different
+test requires a new superseding ADR, not an edit to
+`Invoke-LUnitTests.ps1`'s `$script:AllowedWaiverTestName` or
+`invoke_lunit_tests_linux.py`'s `ALLOWED_WAIVER_TEST_NAMES`.
 
 ## Running it
 
@@ -157,27 +161,82 @@ a separate VM/Vagrant harness.
 
 - **Feasible, confirmed.** `LabVIEWCLI`'s `LUnit` operation runs to
   completion against the pinned Linux `nationalinstruments/labview`
-  image with **no `Xvfb`/`DISPLAY` required at all** -- LabVIEW's VI
-  Server becomes ready in seconds with no virtual framebuffer. This
-  resolves the headless-display risk `ADR-0003`'s original Decision
-  raised as open.
+  image with **no externally-provided `Xvfb`/`DISPLAY` setup needed** --
+  LabVIEW itself spawns its own internal `Xvfb :99` virtual framebuffer
+  when none is provided, confirmed via a direct process-tree inspection
+  (`#94`'s independent verification review, correcting this section's
+  earlier "no virtual framebuffer at all" overclaim). This resolves the
+  headless-display risk `ADR-0003`'s original Decision raised as open:
+  this engine's own deployment never needs to manage a display itself.
 - **No NSIS-equivalent installer needed.** Neither Windows-container bug
   that drove Phase 1's NSIS migration (`MAX_PATH`, the SMB-backed bind
   mount's `Move-Item` failure) applies to Linux; `linux.Dockerfile`
   deploys the staged, SHA-256-verified package files with a plain
   `COPY`.
-- **Three named waivers, not one.** Beyond the Windows-shared
-  `Test Write Read Library Icon Data.vi`, two Linux-specific test
-  failures were found and confirmed via direct inspection of each
-  failure's exact assertion diff (not assumption): `Test Window
-  Position.vi` (every window-bounds assertion off by a consistent
-  1-pixel offset -- a Linux-window-manager-vs-Windows rendering
-  difference) and `Test INI Settings.vi` (expects the Windows-only
-  default font `"Small Fonts"`; Linux LabVIEW's real default is
-  `"LabVIEW Application"`). Both are platform differences in the test's
-  hardcoded expectations, not functional defects in this engine's
-  deployment. See `ADR-0003`'s Phase-2 Addendum and the wiki SRS's
+- **Three named waivers, not one, formally authorized by `ADR-0004`.**
+  Beyond the Windows-shared `Test Write Read Library Icon Data.vi`, two
+  Linux-specific test failures were found and confirmed via direct
+  inspection of each failure's exact assertion diff (not assumption):
+  `Test Window Position.vi` (7 of 8 window-bounds assertions off by a
+  consistent 1-pixel offset -- a Linux-window-manager-vs-Windows
+  rendering difference; `#95`) and `Test INI Settings.vi` (both of its 2
+  assertions expect Windows-only default font names, `"Small Fonts"`/
+  `"Calibri"`; Linux LabVIEW's real default is `"LabVIEW Application"`;
+  `#96`). Both are platform differences in the test's hardcoded
+  expectations, not functional defects in this engine's deployment. See
+  `ADR-0003`'s Phase-2 Addendum, `ADR-0004`, and the wiki SRS's
   `REQ-036` for the full reasoning.
+
+### Independent verification review (`#94`)
+
+Per this engine's standing practice of a mandatory second,
+verification-framed pass after any implementation round: an independent
+3-model (Claude Opus, GPT-6-astra, Gemini-4-argon) review of Phase 2's
+actual code (not just its design) found and this engine fixed several
+real defects, none of which invalidated the real CI PASS results
+themselves:
+
+- **VIPM detection checked the wrong Linux paths.** The original
+  `assert_no_vipm_presence()` checked Windows-shaped paths that do not
+  exist on Linux (`/usr/local/natinst/VIPM`, `/root/.config/JKI/VIPM`);
+  a real Linux JKI VIPM install (confirmed against this repo's own
+  `sandbox-sbom-linux:latest` image) lives at `/usr/local/jki/vipm` and
+  `/usr/local/bin/vipm` instead, and would have silently passed the old
+  check. Fixed to check the real paths plus `shutil.which("vipm")`.
+- **No report-completeness check.** A truncated run, or a report with
+  `<skipped/>` test cases, could previously pass with `PASS` as long as
+  none of the cases *present* failed. Fixed: `validate_junit_report`
+  (Linux) and `Test-JUnitReportAcceptable` (Windows) now both require
+  exactly the pinned suite's 10 test cases, and treat any non-"Passed"/
+  "Failed" status (e.g. skipped) as blocking regardless of waiver name.
+- **Missing engine commit.** `ADR-0003`/`REQ-033` require this engine's
+  own release-candidate commit recorded alongside the external suite
+  commit "with every gate result" -- neither platform's `gate-result.json`
+  did this. Fixed: both now record an `engineCommit` field (from
+  `$env:GITHUB_SHA`/`$GITHUB_SHA` by default).
+- **`suite_commit` accepted unvalidated.** A mutable ref (e.g. a branch
+  name) could enter what `REQ-034`/`REQ-036` require to be a pinned-commit
+  execution. Fixed: both platforms now reject any `--suite-commit`/
+  `-SuiteCommit` that isn't a full 40-character lowercase-hex SHA, and
+  both workflows now pass it through an `env:` block rather than
+  splicing it directly into the PowerShell source (a GitHub Actions
+  `workflow_dispatch` string-input injection risk).
+- **Wrong `installMethod` manifest value on Linux.** The shared
+  `Get-VerifiedLUnitPackageStaging.ps1` hardcoded `'sha256-verified-
+  nsis-installer'` even when called for Linux (which uses a plain file
+  copy, not NSIS). Fixed via a new `-InstallMethod` parameter; Windows's
+  call site is unchanged (same default), Linux's passes
+  `'sha256-verified-file-copy'`.
+- **Two Linux waivers added without the ADR this project's own rule
+  requires.** `ADR-0003`'s round-2 Addendum requires a new ADR (not a
+  quiet SRS edit) to waive any test beyond the single Windows exception,
+  with each waiver individually tracked with its own follow-up issue and
+  expiry condition. `ADR-0004` closes this gap retroactively; `#95`/`#96`
+  are the per-waiver follow-up issues.
+- **Documentation overclaim.** This section's own prior wording ("no
+  `Xvfb`/`DISPLAY` required at all") was corrected after a direct
+  process-tree inspection showed LabVIEW spawns its own internal `Xvfb`
+  -- see "Findings" above.
 
 ### Components
 

@@ -31,10 +31,20 @@
 .PARAMETER StagingDirectory
     Where to write the "LUnit" and "LUnit CLI" folders (ready for the NSIS
     installer's `File /r` instructions) and dependency-manifest.json.
+
+.PARAMETER InstallMethod
+    Recorded verbatim in dependency-manifest.json's "installMethod" field.
+    Defaults to the Windows gate's own NSIS-based deployment ("the only
+    caller until Phase 2"). Build-LUnitLinuxImage.ps1 passes a Linux-
+    accurate value -- per #94's independent verification review, which
+    found both Linux CI runs' manifests falsely claiming NSIS was used
+    when the Linux gate actually deploys the staged files with a plain
+    Docker COPY.
 #>
 [CmdletBinding()]
 param(
-    [string]$StagingDirectory
+    [string]$StagingDirectory,
+    [string]$InstallMethod = 'sha256-verified-nsis-installer'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -152,7 +162,7 @@ if ($MyInvocation.InvocationName -ne ".") {
     }
 
     [ordered]@{
-        installMethod = 'sha256-verified-nsis-installer'
+        installMethod = $InstallMethod
         vipmUsed      = $false
         packages      = @($script:LUnitPackages | ForEach-Object {
             [ordered]@{ name = $_.Name; version = $_.Version; sha256 = $_.Sha256 }

@@ -53,9 +53,17 @@ jobs:
 
       - name: Run LUnit gate against the pinned suite commit
         timeout-minutes: 20
+        env:
+          # Passed via env:, not spliced directly into the PowerShell
+          # source string, per #94's independent verification review:
+          # a workflow_dispatch string input containing PowerShell
+          # metacharacters could otherwise inject code at invocation
+          # time, before invoke_lunit_tests_linux.py's own commit-SHA
+          # validation ever runs.
+          SUITE_COMMIT_INPUT: ${{ inputs.suite_commit }}
         run: |
-          docker run --name lunit-gate-linux-run $env:LABVIEW_IMAGE `
-            python3 /lunit-gate/invoke_lunit_tests_linux.py --suite-commit '${{ inputs.suite_commit }}' --results-directory /lunit-gate-results
+          docker run --name lunit-gate-linux-run -e SUITE_COMMIT_INPUT=$env:SUITE_COMMIT_INPUT -e GITHUB_SHA=$env:GITHUB_SHA $env:LABVIEW_IMAGE `
+            python3 /lunit-gate/invoke_lunit_tests_linux.py --suite-commit "$env:SUITE_COMMIT_INPUT" --results-directory /lunit-gate-results
           $runExit = $LASTEXITCODE
           docker cp lunit-gate-linux-run:/lunit-gate-results/. lunit-gate-results/
           docker rm -f lunit-gate-linux-run
