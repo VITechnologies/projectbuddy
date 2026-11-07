@@ -6,7 +6,8 @@
     Builds docker/linux-sbom (NI's official LabVIEW Linux image + VIPM CLI +
     Grype) with the local Docker engine, for example Docker Desktop in Linux
     containers mode, then runs the container pipeline against this repository
-    mounted at /workspace. The VIT Super Network Streams sample is the default.
+    mounted at /workspace. No project is selected by default -- see
+    -ConfigName/-VipmTomlPath below.
 
     Every run pulls -LabVIEWImage (default nationalinstruments/labview:latest-linux),
     resolves it to a digest, and rebuilds the image without cache from that

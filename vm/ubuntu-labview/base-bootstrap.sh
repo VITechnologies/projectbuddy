@@ -3,7 +3,7 @@ set -euo pipefail
 
 VM_NAME='@@VM_NAME@@'
 VM_UUID='@@VM_UUID@@'
-RECEIPT_DIR=/var/lib/sandbox-sbom-reporting
+RECEIPT_DIR=/var/lib/projectbuddy
 STATE="$RECEIPT_DIR/base-bootstrap-state.json"
 RECEIPT="$RECEIPT_DIR/base-bootstrap-receipt.json"
 FINALIZER=/usr/local/sbin/sandbox-base-bootstrap-finalize
@@ -67,10 +67,10 @@ cat > "$FINALIZER" <<'FINALIZER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE=/var/lib/sandbox-sbom-reporting/base-bootstrap-state.json
-RECEIPT=/var/lib/sandbox-sbom-reporting/base-bootstrap-receipt.json
+STATE=/var/lib/projectbuddy/base-bootstrap-state.json
+RECEIPT=/var/lib/projectbuddy/base-bootstrap-receipt.json
 SSH_HOST_KEY=/etc/ssh/ssh_host_ed25519_key.pub
-SSH_FINGERPRINT_PROPERTY=/SandboxSBOMReporting/SshHostEd25519Fingerprint
+SSH_FINGERPRINT_PROPERTY=/ProjectBuddy/SshHostEd25519Fingerprint
 [[ -r "$STATE" ]]
 
 ssh_active="$(systemctl is-active ssh.service 2>/dev/null || true)"
@@ -110,7 +110,7 @@ checks = {
 }
 failures.extend(message for message, passed in checks.items() if not passed)
 receipt = {
-    "schema": "sandbox-sbom-reporting/ubuntu-base-bootstrap@2",
+    "schema": "projectbuddy/ubuntu-base-bootstrap@2",
     "os": state["os"],
     "vm": state["vm"],
     "tools": {

@@ -176,7 +176,7 @@ jobs:
           $safeInfo = $vmInfo | Where-Object {
               $_ -match '^(UUID|VMState|VMStateChangeTime|CfgFile|SnapFldr|CurrentSnapshotName|CurrentSnapshotUUID|GuestOSType|GuestAdditionsVersion|GuestAdditionsRunLevel)='
           }
-          $sandboxProperties = & $vboxPath guestproperty enumerate $env:INPUT_VM_NAME --patterns '/SandboxSBOMReporting/*'
+          $engineProperties = & $vboxPath guestproperty enumerate $env:INPUT_VM_NAME --patterns '/ProjectBuddy/*'
           $osProperties = & $vboxPath guestproperty enumerate $env:INPUT_VM_NAME --patterns '/VirtualBox/GuestInfo/OS/*'
           $snapshots = & $vboxPath snapshot $env:INPUT_VM_NAME list --machinereadable 2>&1
             if ($LASTEXITCODE -ne 0 -and ($snapshots -join "`n").Trim() -ne 'This machine does not have any snapshots') {
@@ -212,7 +212,7 @@ jobs:
               '=== VM info ==='
               $safeInfo
               '=== Sandbox guest properties ==='
-              $sandboxProperties
+              $engineProperties
               '=== Guest OS properties ==='
               $osProperties
               '=== Snapshot inventory ==='
@@ -456,7 +456,7 @@ jobs:
           private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-provision.XXXXXX")"
           password_file="$private_root/guest-password"
           known_hosts="$private_root/known-hosts"
-          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/evidence/$INPUT_VM_NAME"
+          evidence_directory="$HOME/.local/state/projectbuddy/evidence/$INPUT_VM_NAME"
           artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-public-receipts"
           cleanup() {
             unset GUEST_PASSWORD
@@ -525,7 +525,7 @@ jobs:
           password_file="$private_root/guest-password"
           vipm_env_file="$private_root/vipm.env"
           known_hosts="$private_root/known-hosts"
-          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/evidence/$INPUT_VM_NAME"
+          evidence_directory="$HOME/.local/state/projectbuddy/evidence/$INPUT_VM_NAME"
           artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-activation-receipt"
           cleanup() {
             unset GUEST_PASSWORD VIPM_SERIAL_NUMBER VIPM_FULL_NAME VIPM_EMAIL
@@ -604,7 +604,7 @@ jobs:
           set -euo pipefail
           private_root="$(mktemp -d "$RUNNER_TEMP/sandbox-sbom-package.XXXXXX")"
           password_file="$private_root/guest-password"
-          evidence_directory="$HOME/.local/state/sandbox-sbom-reporting/package-runs/$INPUT_VM_NAME-$GITHUB_RUN_ID"
+          evidence_directory="$HOME/.local/state/projectbuddy/package-runs/$INPUT_VM_NAME-$GITHUB_RUN_ID"
           artifact_directory="$RUNNER_TEMP/$INPUT_VM_NAME-package-proof"
           cleanup() {
             unset GUEST_PASSWORD

@@ -6,8 +6,8 @@
     Builds docker/windows-sbom (NI's official LabVIEW Windows image + VIPM CLI,
     PowerShell 7, Git, Subversion and Grype) with the local Docker engine, for
     example Docker Desktop in Windows containers mode, then runs the container
-    pipeline against this repository mounted at C:\workspace. The VIT Super
-    Network Streams sample is the default.
+    pipeline against this repository mounted at C:\workspace. No project is
+    selected by default -- see -ConfigName/-VipmTomlPath below.
 
     Every run pulls -LabVIEWImage (default nationalinstruments/labview:latest-windows),
     resolves it to a digest, and rebuilds the image without cache from that

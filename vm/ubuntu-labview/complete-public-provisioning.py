@@ -14,7 +14,7 @@ import time
 import uuid
 
 
-FINGERPRINT_PROPERTY = "/SandboxSBOMReporting/SshHostEd25519Fingerprint"
+FINGERPRINT_PROPERTY = "/ProjectBuddy/SshHostEd25519Fingerprint"
 FINGERPRINT_PATTERN = re.compile(r"SHA256:[A-Za-z0-9+/]{20,}={0,2}")
 NAME_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 REMOTE_DIRECTORY = "/tmp/sandbox-public-provisioning"
@@ -279,8 +279,8 @@ def main() -> int:
         return fail("VM-bound SSH host-key enrollment failed")
     print("public provisioning progress: phase=ssh-enrollment status=complete", flush=True)
 
-    remote_base_receipt = "/var/lib/sandbox-sbom-reporting/base-bootstrap-receipt.json"
-    remote_public_receipt = "/var/lib/sandbox-sbom-reporting/public-provisioning-receipt.json"
+    remote_base_receipt = "/var/lib/projectbuddy/base-bootstrap-receipt.json"
+    remote_public_receipt = "/var/lib/projectbuddy/public-provisioning-receipt.json"
 
     if not base_receipt.exists():
         copy_base = subprocess.run(guest_command(
@@ -439,7 +439,7 @@ def main() -> int:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
     checkpoint = {
-        "schema": "sandbox-sbom-reporting/ubuntu-public-appliance@1",
+        "schema": "projectbuddy/ubuntu-public-appliance@1",
         "vm": {"name": arguments.vm_name, "uuid": expected_uuid},
         "snapshot": {"name": arguments.snapshot_name, "uuid": snapshot_uuid},
         "sources": {

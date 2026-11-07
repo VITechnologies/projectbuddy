@@ -36,7 +36,7 @@ def main() -> int:
         if not condition:
             errors.append(message)
 
-    require(receipt.get("schema") == "sandbox-sbom-reporting/ubuntu-base-bootstrap@2", "unexpected schema")
+    require(receipt.get("schema") == "projectbuddy/ubuntu-base-bootstrap@2", "unexpected schema")
     require(receipt.get("os") == {"distribution": "ubuntu", "version": "24.04", "codename": "noble"}, "unexpected guest OS")
     require(receipt.get("outcome") == "PASS", "outcome is not PASS")
     require(receipt.get("failures") == [], "receipt contains failures")

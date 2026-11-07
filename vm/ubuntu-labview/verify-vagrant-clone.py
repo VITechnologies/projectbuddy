@@ -127,7 +127,7 @@ def main() -> int:
         expected_fingerprint = base_receipt["sshHostKey"]["fingerprint"]
         if not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", expected_fingerprint):
             raise ValueError("base receipt SSH fingerprint is invalid")
-        if box_receipt.get("schema") != "sandbox-sbom-reporting/ubuntu-vagrant-box@1" or box_receipt.get("outcome") != "PASS":
+        if box_receipt.get("schema") != "projectbuddy/ubuntu-vagrant-box@1" or box_receipt.get("outcome") != "PASS":
             raise ValueError("box receipt is not a passing governed receipt")
         source_vm_uuid = str(uuid.UUID(box_receipt.get("source", {}).get("vm", {}).get("uuid", "")))
         if expected_vm_uuid == source_vm_uuid:
@@ -270,7 +270,7 @@ def main() -> int:
             raise RuntimeError("clone captures do not share one boot ID")
 
         receipt = {
-            "schema": "sandbox-sbom-reporting/ubuntu-vagrant-clone@1",
+            "schema": "projectbuddy/ubuntu-vagrant-clone@1",
             "sourceBox": {
                 "receiptSha256": digest(arguments.box_receipt),
                 "boxSha256": box_receipt["box"]["sha256"],

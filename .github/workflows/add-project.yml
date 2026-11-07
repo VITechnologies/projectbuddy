@@ -49,7 +49,7 @@ jobs:
           import tomllib
 
           DOCS = (f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/blob/{os.environ['GITHUB_SHA']}"
-                  "/docs/configuration-schema.md#adding-projects-with-the-manual-workflow")
+                  "/Add-Project.ps1")
           repo = os.environ["GITHUB_REPOSITORY"]
           summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8")
 

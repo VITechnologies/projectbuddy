@@ -40,7 +40,7 @@ def value(*keys):
         current = current[key]
     return current
 
-require(manifest.get("schema") == "sandbox-sbom-reporting/ubuntu-labview-provisioning@1", "unsupported manifest schema")
+require(manifest.get("schema") == "projectbuddy/ubuntu-labview-provisioning@1", "unsupported manifest schema")
 require(value("os", "distribution") == "ubuntu", "guest distribution must be ubuntu")
 require(value("os", "version") == "24.04", "guest version must be 24.04")
 require(value("os", "codename") == "noble", "guest codename must be noble")
@@ -233,7 +233,7 @@ for package_root in vi.lib user.lib examples menus; do
   }
 done
 
-receipt_dir=/var/lib/sandbox-sbom-reporting
+receipt_dir=/var/lib/projectbuddy
 base_state="$receipt_dir/base-bootstrap-state.json"
 receipt="$receipt_dir/public-provisioning-receipt.json"
 [[ -r "$base_state" ]] || { echo "base bootstrap identity state is missing" >&2; exit 8; }
@@ -255,7 +255,7 @@ from datetime import datetime, timezone
 with open(state_path, encoding="utf-8") as handle:
     state = json.load(handle)
 receipt = {
-    "schema": "sandbox-sbom-reporting/ubuntu-public-provisioning@1",
+    "schema": "projectbuddy/ubuntu-public-provisioning@1",
     "manifestSha256": manifest_sha256,
     "vm": state["vm"],
     "os": {"distribution": "ubuntu", "version": os_version, "codename": os_codename},

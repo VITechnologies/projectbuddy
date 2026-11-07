@@ -9,7 +9,7 @@ import sys
 import uuid
 
 
-FINGERPRINT_PROPERTY = "/SandboxSBOMReporting/SshHostEd25519Fingerprint"
+FINGERPRINT_PROPERTY = "/ProjectBuddy/SshHostEd25519Fingerprint"
 FINGERPRINT_PATTERN = re.compile(r"SHA256:[A-Za-z0-9+/]{20,}={0,2}")
 VM_NAME_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 

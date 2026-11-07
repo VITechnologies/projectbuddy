@@ -164,10 +164,19 @@ $bodyFile = New-TemporaryFile
 try {
     Set-Content -LiteralPath $bodyFile -Value $body -NoNewline -Encoding utf8
 
-    $existingJson = & gh issue list --repo $Repo --state open --search "`"$marker`" in:body" --json number,url 2>$null
-    $existing = @()
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingJson)) {
-        $existing = $existingJson | ConvertFrom-Json
+    $existingJson = & gh issue list --repo $Repo --state open --search "`"$marker`" in:body" --json number,url,body 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "gh issue list search failed (exit $LASTEXITCODE): $existingJson -- falling through to create a new issue. This may create a duplicate if a matching escalation already exists; check $Repo manually if that matters here."
+        $existing = @()
+    } else {
+        # GitHub's issue/code search is tokenized and eventually consistent
+        # -- it can return a false match (or, after a very recent prior
+        # create, a false miss). Re-verify client-side that the exact
+        # marker string is actually present in each candidate's real body
+        # before treating it as "the" existing escalation, rather than
+        # trusting the search index alone.
+        $candidates = if ([string]::IsNullOrWhiteSpace($existingJson)) { @() } else { $existingJson | ConvertFrom-Json }
+        $existing = @($candidates | Where-Object { $_.body -and $_.body.Contains($marker) })
     }
 
     if ($existing -and $existing.Count -gt 0) {

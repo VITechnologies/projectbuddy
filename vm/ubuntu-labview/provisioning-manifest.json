@@ -1,5 +1,5 @@
 {
-  "schema": "sandbox-sbom-reporting/ubuntu-labview-provisioning@1",
+  "schema": "projectbuddy/ubuntu-labview-provisioning@1",
   "os": {
     "distribution": "ubuntu",
     "version": "24.04",

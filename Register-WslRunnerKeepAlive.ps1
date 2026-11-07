@@ -4,7 +4,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$DistroName = "Ubuntu",
     [ValidatePattern('^[^\\/:*?"<>|]+$')]
-    [string]$ShortcutName = "SandboxSBOMReporting WSL Runner KeepAlive",
+    [string]$ShortcutName = "ProjectBuddy WSL Runner KeepAlive",
     [switch]$Run
 )
 

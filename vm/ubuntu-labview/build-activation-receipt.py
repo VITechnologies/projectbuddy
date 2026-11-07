@@ -124,7 +124,7 @@ def main() -> int:
     answer = re.search(r"Operation output:\s*(-?\d+)\s+RunVI operation succeeded\.", output)
     actual_output = int(answer.group(1)) if answer else None
     receipt = {
-        "schema": "sandbox-sbom-reporting/ubuntu-activation@1",
+        "schema": "projectbuddy/ubuntu-activation@1",
         "evidenceSha256": source_hashes,
         "os": runtime.get("os"),
         "vm": {

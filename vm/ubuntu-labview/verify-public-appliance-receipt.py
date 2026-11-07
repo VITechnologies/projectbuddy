@@ -49,7 +49,7 @@ def main() -> int:
         if not condition:
             errors.append(message)
 
-    require(receipt.get("schema") == "sandbox-sbom-reporting/ubuntu-public-appliance@1", "unexpected schema")
+    require(receipt.get("schema") == "projectbuddy/ubuntu-public-appliance@1", "unexpected schema")
     require(receipt.get("outcome") == "PASS", "outcome is not PASS")
     require(receipt.get("vm") == {"name": arguments.vm_name, "uuid": expected_vm_uuid}, "VM identity mismatch")
     require(

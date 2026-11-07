@@ -11,10 +11,12 @@
     technical issues into whichever consumer repo happened to drive the
     work instead of their own tracker.
 
-    This script only ever enables Issues -- it never disables it or touches
-    any other repository setting (wiki, projects, etc.), and is a no-op if
-    Issues is already enabled. Project-agnostic: the target repo is always
-    an explicit input.
+    This script only ever enables Issues -- it never disables it. It also
+    idempotently seeds one label (see -Label) once Issues is enabled, so a
+    freshly-enabled repo is immediately ready to receive first-class human
+    escalations; it touches no other repository setting (wiki, projects,
+    etc.), and is a no-op if Issues is already enabled. Project-agnostic:
+    the target repo is always an explicit input.
 
 .PARAMETER Repo
     Target repository in "owner/name" form.
@@ -62,7 +64,13 @@ if ($current -eq "true") {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($Label)) {
-    & gh label create $Label --repo $Repo --color "B60205" --description "Blocked on a human decision; not resolvable by further automated iteration" 2>$null
-    $null = $LASTEXITCODE # swallow non-zero from "already exists" without masking earlier checks
+    # --force makes this idempotent (updates color/description if the label
+    # already exists) so a non-zero exit here is always a genuine failure,
+    # never masked by an "already exists" false negative.
+    $labelOutput = & gh label create $Label --repo $Repo --color "B60205" --force `
+        --description "Blocked on a human decision; not resolvable by further automated iteration" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create/update label '$Label' on $Repo`: $labelOutput"
+    }
     Write-Output "Ensured label '$Label' exists on $Repo."
 }

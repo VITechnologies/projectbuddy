@@ -1,5 +1,9 @@
 # Configuration Management Plan
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 Satisfies `repo-standards-review`'s CM gate (`VITechnologies/projectbuddy#6`):
 baseline rule, change control, and status accounting evidence, alongside
 the GitFlow branch governance already adopted in `ADR-0001`.
@@ -20,7 +24,7 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 | `develop` | Code | Operator | Integration branch; never released from directly |
 | Release notes | Document | Operator | One per tag, generated from `CHANGELOG.md`'s matching entry (historical exceptions: `v0.2.2`/`v0.3.0` are tagged with no matching `CHANGELOG.md` entry; `v0.3.7`/`v0.3.8`/`v0.3.11`/`v0.3.12` have `CHANGELOG.md` entries but were never tagged/released -- all predate this CM plan's introduction) |
 | `docs/architecture/standards-compliance.md` | Document | Operator | Versioned with repo; stamp updated only after human review |
-| Wiki (SRS/RTM/Architecture Packet) | Document | Operator | Versioned via the wiki's own git history (`branch-then-push`, see [the wiki Home page](https://github.com/VITechnologies/projectbuddy/wiki)) |
+| Wiki (SRS/RTM/Architecture Packet) | Document | Operator | Versioned via the wiki's own git history (direct pushes to `master` in practice -- confirmed zero branches used to date; see [the wiki Home page](https://github.com/VITechnologies/projectbuddy/wiki)); tagged `vX.Y.Z` to match the main-repo release it was current for, as of `v0.3.31` onward (earlier releases' wiki states are identifiable only by commit timestamp, not a tag) |
 
 ## Versioning
 
@@ -36,7 +40,7 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 
 | Change Type | Approval | Timing |
 | --- | --- | --- |
-| Standard (new feature/fix) | Operator review of the PR before merge to `develop` -- on the solo-maintainer fork this is 0 required approvals (no second reviewer exists to approve); on upstream, branch protection requires 1 approval and passing CI, enforced via `gh pr merge --admin` for the routine, already-fully-vetted fork-sync and release/hotfix promotion PRs specifically (see `CONTRIBUTING.md`'s "Branch protection and the `--admin` merge pattern"), never as a general bypass | Any time, via `feature/*` branches |
+| Standard (new feature/fix) | Operator review of the PR before merge to `develop` -- on the solo-maintainer fork this is 0 required approvals (no second reviewer exists to approve); on upstream, branch protection requires 1 approval and passing CI, enforced via `gh pr merge --admin` for the routine, already-fully-vetted fork-sync and release/hotfix promotion PRs specifically (see `CONTRIBUTING.md`'s "Branch protection and the `--admin` merge pattern"), never as a general bypass | Any time, via `feature/*` branches (in practice, often a more specific topic-branch name serving the same role, e.g. `round6-semantic-audit-fixes`) |
 | Urgent (hotfix) | Same approval mechanism as Standard, applied to `hotfix/vX.Y.Z` -> `main` | As needed, via `hotfix/vX.Y.Z` branches cut from `main` |
 | Concession (known, accepted gap) | Operator decision, recorded as a comment or ADR | Documented at the time the gap is identified, not silently carried forward |
 

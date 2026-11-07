@@ -8,7 +8,7 @@ requirement (`VITechnologies/projectbuddy#11`).
 - Product or service: `VITechnologies/projectbuddy`
 - Repository: `VITechnologies/projectbuddy` (specs live partly in its wiki,
   see Notes below)
-- Baseline: `v0.3.30`
+- Baseline: `v0.3.31`
 - Date: 2026-11-07
 - Status: current (re-synced after each semantic-audit round; see
   `docs/architecture/standards-compliance.md` for the living
