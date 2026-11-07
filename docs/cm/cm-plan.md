@@ -20,7 +20,7 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 | `develop` | Code | Operator | Integration branch; never released from directly |
 | Release notes | Document | Operator | One per tag, generated from `CHANGELOG.md`'s matching entry |
 | `docs/architecture/standards-compliance.md` | Document | Operator | Versioned with repo; stamp updated only after human review |
-| Wiki (SRS/RTM/Architecture Packet) | Document | Operator | Versioned via the wiki's own git history (`branch-then-push`, see [[Home]] on the wiki) |
+| Wiki (SRS/RTM/Architecture Packet) | Document | Operator | Versioned via the wiki's own git history (`branch-then-push`, see [the wiki Home page](https://github.com/VITechnologies/projectbuddy/wiki)) |
 
 ## Versioning
 

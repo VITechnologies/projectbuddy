@@ -116,16 +116,17 @@ jobs:
           set -euo pipefail
           if [[ "${{ inputs.phase }}" == create-vm ]]; then
             [[ -n "${GUEST_PASSWORD:-}" ]] || { echo "WINDOWS_LABVIEW_VM_GUEST_PASSWORD secret is required for create-vm" >&2; exit 2; }
+            # Trap installed before the credential file is created (not just
+            # after writing it): rm -f/shred are safe no-ops on a file that
+            # was never created, so installing this first closes the window
+            # where the file-creation call itself could fail under set -e
+            # before any cleanup was armed (confirmed by this session's own
+            # semantic-audit cross-model review: a later round caught that
+            # writing both files before installing the trap elsewhere in this
+            # same workflow left exactly this kind of residual gap).
+            trap 'shred -u "$GUEST_PASSWORD_FILE" 2>/dev/null || rm -f "$GUEST_PASSWORD_FILE"' EXIT
             install -m 0600 /dev/null "$GUEST_PASSWORD_FILE"
             printf '%s' "$GUEST_PASSWORD" > "$GUEST_PASSWORD_FILE"
-            # A trap (not an end-of-step cleanup line) so the credential file is
-            # removed under set -e even if build-virtualbox.sh fails partway
-            # through -- an end-of-step-only cleanup line is never reached once
-            # `set -e` aborts the step on an earlier failure (confirmed by this
-            # session's own semantic-audit cross-model review: two independent
-            # models flagged the previous end-of-step-only placement as a
-            # real credential-retention gap on any ordinary failure).
-            trap 'shred -u "$GUEST_PASSWORD_FILE" 2>/dev/null || rm -f "$GUEST_PASSWORD_FILE"' EXIT
             ./vm/windows-labview/build-virtualbox.sh --run --headless
           else
             ./vm/windows-labview/build-virtualbox.sh --dry-run --headless
