@@ -101,6 +101,14 @@ function Get-PinnedSuiteArchive {
     # only serves what actually exists at that SHA, so a successful download
     # and extraction is itself the provenance check -- no separate
     # `git rev-parse` verification is meaningful or necessary here).
+    #
+    # Deliberately short temp-path components (a short token, not "$Repo-$Commit"
+    # repeated): GitHub's archive always names its own top-level folder
+    # "$Repo-$Commit" (unavoidable, upstream's own convention, ~60+ chars for a
+    # full SHA), and this suite's own deep paths (e.g.
+    # "Test\Manual Tests\Reference Files\<long filename>.md") add more on top --
+    # a first attempt that also repeated "$Repo-$Commit" in the *extraction
+    # root* hit Windows' legacy 260-char MAX_PATH during ExtractToDirectory.
     param(
         [Parameter(Mandatory)] [string]$Owner,
         [Parameter(Mandatory)] [string]$Repo,
@@ -109,8 +117,9 @@ function Get-PinnedSuiteArchive {
     )
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "$Repo-$Commit.zip"
-    $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "$Repo-$Commit-extract"
+    $shortToken = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "lg-$shortToken.zip"
+    $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "lg-$shortToken"
     try {
         $url = "https://codeload.github.com/$Owner/$Repo/zip/$Commit"
         Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zipPath -TimeoutSec 180
