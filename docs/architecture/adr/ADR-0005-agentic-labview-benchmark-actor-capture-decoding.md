@@ -112,12 +112,13 @@ release-blocking.
 - **Output**: a structured summary covering duration, frame count,
   per-resource (CPU/RAM/disk, per-disk-name) min/max/avg, the peak I/O
   event(s) with frame index and `tMs`, the `dualPacket.outcome`/
-  `driftClass` integrity result if present, and explicit anomaly flags for
-  the specific conditions this ADR's own motivating analysis found worth
-  flagging: `dhashHex` null across every frame, `capture-status.json`'s
-  `state` not indicating a natural completion, and a short, explicit
-  pointer to specific frame indices (first, peak-I/O, last) worth a
-  follow-up manual look -- not an automatic verdict about them.
+  `driftClass` integrity result, and explicit anomaly flags for the
+  source-verified conditions in the Addendum below (a `capture-status.json`
+  `state` of `failed`/`capturing` rather than `stopped`; a `dualPacket`
+  outcome other than `authoritative`; a per-frame `dhashHex` population
+  that is inconsistent across frames rather than uniform) -- plus a short,
+  explicit pointer to specific frame indices (first, peak-I/O, last) worth
+  a follow-up manual look, not an automatic verdict about them.
 - **Explicit v1 non-goal**: automatic visual/image-based analysis of the
   PNG frames (e.g. detecting "no LabVIEW window visible" without a human
   or agent looking at the image). This session's own real finding above
@@ -149,6 +150,62 @@ tracked as a follow-up, not performed by this ADR: `#102`.
   `#102` lands with a real verification run against a genuine capture
   (not only a synthetic fixture), matching this project's existing
   Planned -> Active promotion convention (`REQ-033`).
+
+## Addendum: correcting the `dhashHex`/`screen` anomaly hypothesis (2026-11-07)
+
+Before implementing `#102`, a local clone of
+`svelderrainruiz/labview-benchmark-actor` at the exact same version as the
+installed extension (`1.4.14`, clone commit `7f65a2215b95`) was inspected
+directly -- the extension's own staged `media/launch-capture.mjs` and
+`media/captureStatus.mjs`, matching `src/launch-capture.mjs`'s equivalent
+source, plus `src/capturePlatform.ts`'s `captureMetadataForPlatform`. This
+found the Context section's framing above was **not source-grounded** and
+is corrected here, per this project's standing practice of recording a
+correction as an addendum rather than silently rewriting the original
+(wrong) text:
+
+- **`capture-status.json`'s `state` field has exactly three possible
+  values**: `'capturing'` (in-flight), `'stopped'` (the *only* successful
+  terminal state -- there is no separate `'completed'` value to contrast
+  it against), and `'failed'` (an assembly error, carrying its own `error`
+  string). `"state": "stopped"` is therefore the **expected, correct**
+  value for any capture that finished successfully, manually stopped or
+  not -- it is not itself a signal of an unsettled/incomplete capture, and
+  this ADR's original "vs. a natural completion state" framing was wrong.
+- **`dhashHex` is an optional per-frame input field that the real "Capture
+  LabVIEW Launch" command (the one used for `run-1794072448721`, and the
+  only one exercised so far) never supplies.** `assembleCaptureFromDir`
+  builds each frame as `{ index, imageFile, imageBytes, ms }` with no
+  perceptual-hash computation anywhere in that call path;
+  `buildLaunchCapture` only ever carries through `f.dhashHex` if the
+  caller supplied one. A perceptual-hash/settle-fingerprint mechanism does
+  exist in this project (`experiments/mprr-capture-ring/settle-detect.mjs`),
+  but it is not wired into the live screen-recorder capture path --
+  `dhashHex: null` on every frame is the **structurally expected** output
+  of every real capture taken via this exact command, not an anomaly or a
+  sign this specific capture failed to settle.
+- **`capture.json`'s top-level `screen` field is populated only from
+  `capture-meta.json`'s optional `screenW`/`screenH` fields**
+  (`screen: meta.screenW && meta.screenH ? {...} : null`).
+  `captureMetadataForPlatform` (the function that actually builds
+  `capture-meta.json` for a real capture) never emits `screenW`/`screenH`
+  at all -- `screen: null` is therefore also structurally expected for
+  every real capture today, not a completeness signal.
+
+**Corrected anomaly design for `#102`'s implementation**: the tool shall
+not treat `dhashHex: null` or `screen: null` as anomalies at all (they are
+normal for every capture produced by the current "Capture LabVIEW Launch"
+command); it shall instead flag the genuinely source-verified conditions:
+a `capture-status.json` `state` of `'failed'` (surfacing the real `error`
+string) or `'capturing'` (a capture that appears to have never finished),
+a `dualPacket.outcome` other than `'authoritative'` (a real, documented
+frame-completeness degradation in `correlateDualStream`), and a per-frame
+`dhashHex` population that is inconsistent across frames within one
+capture (some null, some populated -- a genuine data-quality signal this
+analysis did not consider, since a uniformly-null or uniformly-populated
+result is normal either way depending on which capture command produced
+it). `dhashHex`/`screen` are still reported in the summary as plain,
+unjudged informational fields.
 
 ## Related
 
