@@ -36,7 +36,7 @@ $context = Join-Path ([IO.Path]::GetTempPath()) ('lunit-gate-linux-image-' + [gu
 New-Item -ItemType Directory -Path $context -Force | Out-Null
 try {
     $staging = Join-Path $context 'lunit-staging'
-    & (Join-Path $PSScriptRoot 'Get-VerifiedLUnitPackageStaging.ps1') -StagingDirectory $staging
+    & (Join-Path $PSScriptRoot 'Get-VerifiedLUnitPackageStaging.ps1') -StagingDirectory $staging -InstallMethod 'sha256-verified-file-copy'
     if (-not (Test-Path -LiteralPath (Join-Path $staging 'dependency-manifest.json') -PathType Leaf)) {
         throw "LUnit package staging did not produce dependency-manifest.json."
     }

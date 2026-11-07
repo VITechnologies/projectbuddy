@@ -18,17 +18,40 @@
     Changing this is a deliberate pin bump (see docs/lunit-gate/procedure.md),
     not a default to drift silently.
 
+.PARAMETER EngineCommit
+    This engine's own release-candidate commit under test, distinct from
+    SuiteCommit (REQ-033/ADR-0003: both must be recorded with every gate
+    result). Defaults to $env:GITHUB_SHA when run from a GitHub Actions
+    workflow. Added per #94's independent post-implementation verification
+    review, which found this missing from gate-result.json on both
+    platforms.
+
 .PARAMETER ResultsDirectory
     Where lunit.xml and supporting logs are written.
 #>
 [CmdletBinding()]
 param(
     [string]$SuiteCommit,
+    [string]$EngineCommit = $env:GITHUB_SHA,
     [string]$ResultsDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Per #94's independent verification review: SuiteCommit/EngineCommit were
+# previously accepted unvalidated, so a mutable ref (e.g. a branch name)
+# could silently enter what REQ-034/REQ-036 require to be a pinned-commit
+# execution.
+function Assert-CommitSha {
+    param(
+        [Parameter(Mandatory)] [string]$Value,
+        [Parameter(Mandatory)] [string]$Label
+    )
+    if ($Value -notmatch '^[0-9a-f]{40}$') {
+        throw "$Label '$Value' is not a full 40-character lowercase-hex commit SHA. REQ-034/REQ-036 require a pinned commit, not a mutable ref (e.g. a branch or tag name)."
+    }
+}
 
 # Per ADR-0003's round-2 Addendum: this is the ONLY permitted waiver, re-approved
 # at every suite-pin update or it lapses. Any other failing/erroring test blocks
@@ -140,7 +163,10 @@ function Get-PinnedSuiteArchive {
 }
 
 function Test-JUnitReportAcceptable {
-    param([Parameter(Mandatory)] [string]$ReportPath)
+    param(
+        [Parameter(Mandatory)] [string]$ReportPath,
+        [string]$EngineCommit
+    )
 
     if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         throw "No JUnit report was produced at $ReportPath."
@@ -151,6 +177,17 @@ function Test-JUnitReportAcceptable {
     if ($cases.Count -eq 0) {
         throw 'JUnit report contains zero test cases -- the pinned suite did not run.'
     }
+    # The pinned suite commit's real test-case count (ni/labview-icon-editor
+    # @ d9eac771ccac0ed92bde81a031fe2f4ebe62c845, 5 test classes). Per #94's
+    # independent verification review (found on the Linux gate, applies
+    # identically here): without this check, a report missing or skipping
+    # test cases could still report "PASS" with zero failures among
+    # whatever cases happened to run. Bumping SuiteCommit is a deliberate
+    # pin update (see docs/lunit-gate/procedure.md); revisit this count then.
+    $expectedTestCount = 10
+    if ($cases.Count -ne $expectedTestCount) {
+        throw "JUnit report contains $($cases.Count) test case(s); expected exactly $expectedTestCount for the pinned suite commit $SuiteCommit. A partial/truncated run must not pass the gate."
+    }
 
     $blocking = [System.Collections.Generic.List[string]]::new()
     $waived = [System.Collections.Generic.List[string]]::new()
@@ -160,8 +197,20 @@ function Test-JUnitReportAcceptable {
         # not pwsh.exe -- see lunit-gate-windows.yml), which predates ??.
         $problem = $case.SelectSingleNode('failure')
         if (-not $problem) { $problem = $case.SelectSingleNode('error') }
-        if (-not $problem) { continue }
         $name = $case.GetAttribute('name')
+        $status = $case.GetAttribute('status')
+        if (-not $problem -and -not $case.SelectSingleNode('skipped') -and ($status -in @('', 'Passed', 'Failed'))) {
+            continue
+        }
+        if (-not $problem) {
+            # Not a failure/error element, but also not a recognized
+            # "Passed"/"Failed" status (e.g. a <skipped/> element or a
+            # status like "Inconclusive") -- REQ-034 requires every test
+            # case to actually run, not be skipped/inconclusive, so this
+            # always blocks regardless of any waiver name match.
+            $blocking.Add("$($case.GetAttribute('classname')) :: $name -- not run (status='$status')")
+            continue
+        }
         if ($name -eq $script:AllowedWaiverTestName) {
             $waived.Add($name)
             Write-Warning "Known, named waiver (per ADR-0003): '$name' failed/errored and is being waived, not treated as blocking."
@@ -179,6 +228,12 @@ function Test-JUnitReportAcceptable {
         totalTests    = $cases.Count
         waivedTests   = @($waived)
         suiteCommit   = $SuiteCommit
+        # Per ADR-0003/REQ-033: "both must be recorded with every gate
+        # result; neither substitutes for the other" -- this engine's own
+        # release-candidate commit, distinct from suiteCommit above (the
+        # external ni/labview-icon-editor pin). #94's review found this
+        # missing.
+        engineCommit  = $EngineCommit
         vipmPresence  = $false
     }
 }
@@ -188,6 +243,12 @@ if ($MyInvocation.InvocationName -ne ".") {
         Write-Error "Pass -SuiteCommit and -ResultsDirectory."
         exit 1
     }
+    Assert-CommitSha -Value $SuiteCommit -Label '-SuiteCommit'
+    if (-not $EngineCommit) {
+        Write-Error "Pass -EngineCommit, or set `$env:GITHUB_SHA -- ADR-0003/REQ-033 requires this engine's own release-candidate commit to be recorded alongside the suite commit."
+        exit 1
+    }
+    Assert-CommitSha -Value $EngineCommit -Label '-EngineCommit'
 
     $labviewRoot = 'C:\Program Files\National Instruments\LabVIEW 2026'
     $labview = Join-Path $labviewRoot 'LabVIEW.exe'
@@ -230,7 +291,7 @@ if ($MyInvocation.InvocationName -ne ".") {
         -Path $project -ReportPath $report -LogToConsole TRUE -Headless
         if ($LASTEXITCODE -ne 0) { throw "LUnit CLI failed with exit code $LASTEXITCODE." }
 
-        $result = Test-JUnitReportAcceptable -ReportPath $report
+        $result = Test-JUnitReportAcceptable -ReportPath $report -EngineCommit $EngineCommit
         $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ResultsDirectory 'gate-result.json') -Encoding UTF8
         Write-Host "LUnit gate PASS: $($result.totalTests) test case(s), $($result.waivedTests.Count) named waiver(s)."
     }

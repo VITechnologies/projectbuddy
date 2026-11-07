@@ -72,10 +72,19 @@ jobs:
 
       - name: Run LUnit gate against the pinned suite commit
         timeout-minutes: 20
+        env:
+          # Passed via env:, not spliced directly into the PowerShell
+          # source string, per #94's independent verification review:
+          # a workflow_dispatch string input containing PowerShell
+          # metacharacters could otherwise inject code at invocation
+          # time, before Invoke-LUnitTests.ps1's own commit-SHA
+          # validation ever runs.
+          SUITE_COMMIT_INPUT: ${{ inputs.suite_commit }}
         run: |
-          docker exec $env:LVIE_CONTAINER_NAME powershell.exe -NoProfile `
+          docker exec -e SUITE_COMMIT_INPUT=$env:SUITE_COMMIT_INPUT -e GITHUB_SHA=$env:GITHUB_SHA $env:LVIE_CONTAINER_NAME powershell.exe -NoProfile `
             -File C:\workspace\docker\lunit-gate\Invoke-LUnitTests.ps1 `
-            -SuiteCommit '${{ inputs.suite_commit }}' `
+            -SuiteCommit "$env:SUITE_COMMIT_INPUT" `
+            -EngineCommit "$env:GITHUB_SHA" `
             -ResultsDirectory C:\workspace\lunit-gate-results
           if ($LASTEXITCODE -ne 0) { throw 'LUnit gate FAILED; see lunit.xml and gate-result.json in the uploaded artifact.' }
 
