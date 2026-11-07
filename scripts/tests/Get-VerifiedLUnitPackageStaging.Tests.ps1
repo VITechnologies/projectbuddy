@@ -1,19 +1,26 @@
 #requires -Version 7.0
 <#
-Real, assertion-based Pester tests for Install-LUnitPackages.ps1's
+Real, assertion-based Pester tests for Get-VerifiedLUnitPackageStaging.ps1's
 Confirm-PackageIntegrity function -- the pure, offline-testable integrity
 check this engine's REQ-034 requires (SHA-256, not MD5, with no network
 access needed to test the check itself). Builds small local fixture files
 and calls the function directly (bypassing the script's own execution
 guard, which only runs when the script is NOT dot-sourced).
 
-Run with: pwsh -NoProfile -Command "Invoke-Pester -Path scripts/tests/Install-LUnitPackages.Tests.ps1 -CI"
+Note: this script now only STAGES verified package files for later NSIS
+compilation (Install-LUnitPackages.nsi) -- it no longer deploys directly
+into a LabVIEW installation (see docker/lunit-gate/windows.Dockerfile and
+docs/lunit-gate/procedure.md for why: NSIS's own File/CreateDirectory
+instructions replaced a raw PowerShell+.NET ZipFile approach after two
+real Windows-container-specific failures).
+
+Run with: pwsh -NoProfile -Command "Invoke-Pester -Path scripts/tests/Get-VerifiedLUnitPackageStaging.Tests.ps1 -CI"
 #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot ".." ".." "docker" "lunit-gate" "Install-LUnitPackages.ps1")
+    . (Join-Path $PSScriptRoot ".." ".." "docker" "lunit-gate" "Get-VerifiedLUnitPackageStaging.ps1")
 
-    $script:FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lunit-packages-test-" + [guid]::NewGuid().ToString("N"))
+    $script:FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lunit-staging-test-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $script:FixtureRoot -Force | Out-Null
 
     function New-ZipFixture {
@@ -47,7 +54,7 @@ Describe "Confirm-PackageIntegrity" {
         { Confirm-PackageIntegrity -Path $path -ExpectedSha256 $expected -DisplayName "good.vip" } | Should -Not -Throw
     }
 
-    It "throws on a SHA-256 mismatch, refusing to deploy an unverified package" {
+    It "throws on a SHA-256 mismatch, refusing to stage an unverified package" {
         $path = Join-Path $script:FixtureRoot "tampered.vip"
         New-ZipFixture -Path $path -Content "tampered-content"
 

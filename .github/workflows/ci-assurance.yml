@@ -88,7 +88,7 @@ jobs:
     # covering all 3 documented failure classes (integrity/build, policy,
     # reporting) plus the success path -- see
     # scripts/tests/Test-SbomArtifact.Tests.ps1's own header comment.
-    # REQ-034/REQ-036 (ADR-0003): Install-LUnitPackages.Tests.ps1 and
+    # REQ-034/REQ-036 (ADR-0003): Get-VerifiedLUnitPackageStaging.Tests.ps1 and
     # Invoke-LUnitTests.Tests.ps1 cover the LUnit gate's pure, offline-
     # testable logic (SHA-256 package-integrity verification; the named-
     # waiver-only JUnit acceptance policy) -- not the real LabVIEW
@@ -111,7 +111,7 @@ jobs:
         run: |
           Import-Module Pester -RequiredVersion 6.2.0
           $config = New-PesterConfiguration
-          $config.Run.Path = @('scripts/tests/Test-SbomArtifact.Tests.ps1', 'scripts/tests/Install-VerifiedNugetPackage.Tests.ps1', 'scripts/tests/Install-LUnitPackages.Tests.ps1', 'scripts/tests/Invoke-LUnitTests.Tests.ps1')
+          $config.Run.Path = @('scripts/tests/Test-SbomArtifact.Tests.ps1', 'scripts/tests/Install-VerifiedNugetPackage.Tests.ps1', 'scripts/tests/Get-VerifiedLUnitPackageStaging.Tests.ps1', 'scripts/tests/Invoke-LUnitTests.Tests.ps1')
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config

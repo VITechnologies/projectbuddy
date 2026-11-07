@@ -8,7 +8,19 @@
 .DESCRIPTION
     Adapted from ni/labview-icon-editor#575's Tooling/Build-LUnitWindowsImage.ps1.
     Invoked by .github/workflows/lunit-gate-windows.yml on a windows-2022
-    GitHub-hosted runner (per ADR-0003's explicit runner-class decision).
+    GitHub-hosted runner (per ADR-0003's explicit runner-class decision;
+    NSIS 3.10 ships pre-installed on that runner image).
+
+    Deployment is NSIS-based (Install-LUnitPackages.nsi), not a raw
+    PowerShell+.NET ZipFile copy: this script first runs
+    Get-VerifiedLUnitPackageStaging.ps1 (SHA-256-verified download,
+    producing a flat staging directory), then compiles the installer with
+    those already-verified files bundled in via `makensis`, then builds
+    the Docker image with the compiled .exe baked in. Validated end-to-end
+    (real LabVIEW + LabVIEWCLI + the pinned ni/labview-icon-editor suite)
+    against a local Vagrant harness
+    (docker/lunit-gate/vagrant-nsis-test/) before being wired in here --
+    see docs/lunit-gate/procedure.md.
 #>
 [CmdletBinding()]
 param(
@@ -21,13 +33,23 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $context = Join-Path ([IO.Path]::GetTempPath()) ('lunit-gate-image-' + [guid]::NewGuid().ToString('N'))
+$staging = Join-Path ([IO.Path]::GetTempPath()) ('lunit-gate-staging-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $context -Force | Out-Null
 try {
-    Copy-Item (Join-Path $PSScriptRoot 'Install-LUnitPackages.ps1') $context
+    & (Join-Path $PSScriptRoot 'Get-VerifiedLUnitPackageStaging.ps1') -StagingDirectory $staging
+    if ($LASTEXITCODE -ne 0) { throw "LUnit package staging failed: $LASTEXITCODE" }
+
+    $installerExe = Join-Path $context 'Install-LUnitPackages.exe'
+    & makensis -V2 "-DLUNIT_STAGING=$staging" "-DOUT_FILE=$installerExe" (Join-Path $PSScriptRoot 'Install-LUnitPackages.nsi')
+    if ($LASTEXITCODE -ne 0) { throw "LUnit package installer compilation failed: $LASTEXITCODE" }
+    if (-not (Test-Path -LiteralPath $installerExe -PathType Leaf)) { throw "makensis did not produce $installerExe." }
+
     Copy-Item (Join-Path $PSScriptRoot 'windows.Dockerfile') (Join-Path $context 'Dockerfile')
     docker build --network $Network --tag $Image $context
     if ($LASTEXITCODE -ne 0) { throw "Required LUnit gate image build failed: $LASTEXITCODE" }
 }
 finally {
-    Remove-Item -LiteralPath $context -Recurse -Force
+    Remove-Item -LiteralPath $context -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 }
+
