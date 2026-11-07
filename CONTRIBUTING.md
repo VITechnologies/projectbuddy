@@ -1,5 +1,9 @@
 # Contributing
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 ## Definition of Done
 
 A change (PR, issue, or agent turn) is Done when all of the following are

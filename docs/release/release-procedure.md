@@ -1,5 +1,9 @@
 # Release Procedure
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 GitHub-adapted equivalent of `svelderrainruiz/repo-standards-review`'s own
 `docs/release/release-procedure.md`, using `gh`/GitHub Actions in place of
 its GitLab-specific `scripts/pipeline.py` merge-request automation. See
@@ -53,7 +57,13 @@ is covered by (not independently re-stamped).
 
 1. Create `release/vX.Y.Z` from this repo's `develop`.
 2. Stabilize the release only on the release branch (version bump,
-   `CHANGELOG.md` entry, any last-mile fixes).
+   `CHANGELOG.md` entry, any last-mile fixes). **In practice, the
+   `CHANGELOG.md` entry is usually already present on `develop` before
+   this branch is even cut** (it lands there via the fork-sync PR that
+   promotes the feature work), making this step's own addition typically
+   a no-op and `release/vX.Y.Z` frequently a zero-new-commits promotion
+   branch -- this is also why `develop` and `main` are usually already
+   content-identical by step 4 below, not a coincidence.
 3. Open and merge a pull request `release/vX.Y.Z` -> `main`.
 4. Open and merge a pull request `release/vX.Y.Z` -> `develop` (the
    merge-back), only after step 3's promotion to `main` is already merged
@@ -72,6 +82,12 @@ is covered by (not independently re-stamped).
    `main` before tagging** (see `docs/cm/cm-plan.md`'s Status Accounting
    section for a recorded, judged exception where this was done anyway
    for `v0.3.28`, and why).
+7. Tag the wiki repository (`VITechnologies/projectbuddy.wiki`) at
+   `vX.Y.Z` too, once its content for this release has been pushed --
+   this binds a specific wiki revision to the main-repo release it was
+   current for (ISO/IEC/IEEE 12207:2017 S6.3.5.2(b)/(c)), which earlier
+   releases (before `v0.3.31`) don't have; identify an earlier release's
+   wiki state only by commit timestamp instead.
 
 ## Hotfix Flow
 

@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--iterations", type=int, default=1)
-    parser.add_argument("--state-file", type=pathlib.Path, default=pathlib.Path.home() / ".local" / "state" / "sandbox-sbom-reporting" / "live-snapshot-eta.json")
+    parser.add_argument("--state-file", type=pathlib.Path, default=pathlib.Path.home() / ".local" / "state" / "projectbuddy" / "live-snapshot-eta.json")
     args = parser.parse_args()
 
     if args.target_size_bytes is not None and args.target_size_bytes <= 0:

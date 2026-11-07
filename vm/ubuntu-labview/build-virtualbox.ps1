@@ -39,7 +39,7 @@ function Stop-Build {
 function Assert-ManifestContract {
     param([pscustomobject]$Manifest)
 
-    if ($Manifest.schema -ne "sandbox-sbom-reporting/ubuntu-labview-provisioning@1" -or
+    if ($Manifest.schema -ne "projectbuddy/ubuntu-labview-provisioning@1" -or
         $Manifest.os.distribution -ne "ubuntu" -or
         $Manifest.os.version -ne "24.04" -or
         $Manifest.os.codename -ne "noble" -or

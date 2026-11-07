@@ -1,5 +1,5 @@
 {
-  "schema": "sandbox-sbom-reporting/windows-labview-provisioning@1",
+  "schema": "projectbuddy/windows-labview-provisioning@1",
   "os": {
     "distribution": "windows",
     "edition": "Pro",

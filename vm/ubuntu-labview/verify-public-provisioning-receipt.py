@@ -31,7 +31,7 @@ def main() -> int:
             errors.append(message)
 
     require(
-        receipt.get("schema") == "sandbox-sbom-reporting/ubuntu-public-provisioning@1",
+        receipt.get("schema") == "projectbuddy/ubuntu-public-provisioning@1",
         "unexpected schema",
     )
     require(receipt.get("manifestSha256") == hashlib.sha256(manifest_bytes).hexdigest(), "manifest hash mismatch")

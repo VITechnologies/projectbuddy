@@ -230,7 +230,7 @@ def main() -> int:
             capture = arguments.evidence_dir / filename
             if not capture.is_file() or digest(capture) != activation.get("evidenceSha256", {}).get(key):
                 raise ValueError(f"activation capture hash mismatch: {filename}")
-        if package_report.get("schema") != "sandbox-sbom-reporting/linux-vip-package-proof@1" or package_report.get("outcome") != "PASS":
+        if package_report.get("schema") != "projectbuddy/linux-vip-package-proof@1" or package_report.get("outcome") != "PASS":
             raise ValueError("package-build report is not a passing governed receipt")
         if package_report.get("vm") != {
             "name": arguments.vm_name, "uuid": expected_vm_uuid,
@@ -245,7 +245,7 @@ def main() -> int:
         ):
             raise ValueError("package-build report does not match the appliance contract")
         package_marker = (
-            f"sandbox-sbom-reporting/package-ready@1;activated={activated_snapshot_uuid};"
+            f"projectbuddy/package-ready@1;activated={activated_snapshot_uuid};"
             f"report={digest(arguments.package_report)};artifact={digest(arguments.package_artifact)}"
         )
         public_snapshot = public_appliance.get("snapshot", {})
@@ -347,7 +347,7 @@ def main() -> int:
         if arguments.output.stat().st_mode & 0o777 != 0o600:
             raise RuntimeError("Vagrant box output mode is not 600")
         receipt = {
-            "schema": "sandbox-sbom-reporting/ubuntu-vagrant-box@1",
+            "schema": "projectbuddy/ubuntu-vagrant-box@1",
             "source": {
                 "vm": {"name": arguments.vm_name, "uuid": expected_vm_uuid},
                 "activatedSnapshot": {"name": ACTIVATED_SNAPSHOT_NAME, "uuid": activated_snapshot_uuid},

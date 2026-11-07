@@ -101,7 +101,7 @@ try {
     }
 }
 
-$property = & $vbox.Source guestproperty get $VmName /SandboxSBOMReporting/SshHostEd25519Fingerprint
+$property = & $vbox.Source guestproperty get $VmName /ProjectBuddy/SshHostEd25519Fingerprint
 if ($LASTEXITCODE -ne 0 -or ($property -join "`n") -notmatch '^Value: SHA256:[A-Za-z0-9+/]{20,}={0,2}$') {
     throw "Bootstrap repair did not publish the VM SSH fingerprint property"
 }
