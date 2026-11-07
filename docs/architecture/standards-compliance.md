@@ -40,6 +40,18 @@ these affect the 5 required gates below -- the heuristic scanner has no
 rule that would have caught any of them, which is the entire reason the
 semantic-audit capability was built.
 
+A third, verification-focused semantic-audit pass (same 3 models,
+explicitly asked to confirm whether `v0.3.26`'s fixes actually held up,
+not just re-describe the original findings) found that most fixes were
+genuinely SOLID, but several single-pass corrections had residual gaps
+or were incomplete (a `trap` installed after, not before, a credential
+file's creation; a corrected claim left standing in the wiki Architecture
+Packet after being fixed only in `README.md`/`docs/`; an activation
+precondition described as enforced when it is actually only a documented
+convention) -- see `v0.3.27`'s `CHANGELOG.md` entry. This reinforces the
+practical value of a dedicated verification pass after any
+semantic-audit-driven fix round, not just the initial audit.
+
 ## Current gate status (as of the version above)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
@@ -58,7 +70,7 @@ recorded result.
 | REQ | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#9` (closed) |
 | ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
 | DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
-| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (91%) | not tracked |
+| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (90%) | not tracked |
 
 Overall confidence: High (100%); 0 contradictions.
 

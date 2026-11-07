@@ -16,10 +16,17 @@ root, ISO path, hostname, account name, ...) is a required
 `workflow_dispatch` input. Several carry a generic, clearly-fictional
 placeholder default (e.g. `vm_name`'s `example-windows11-labview2026-myproject`,
 `guest_full_name`'s `VM Builder`, `guest_hostname`'s `vm-builder.local`) so
-the input still renders with example syntax in the dispatch form, but none
-default to any specific fork's real identity, so a run never silently
-reuses another fork's naming or infrastructure -- an operator must still
-supply the values that matter for a real dispatch.
+the input still renders with example syntax in the dispatch form, and none
+default to any specific fork's real identity -- but **`guest_hostname`
+and `guest_full_name` are only placeholders at the workflow-dispatch
+layer, not a real per-VM-uniqueness guarantee**:
+`vm/windows-labview/batch-provision.sh` never overrides either when it
+dispatches `create-vm` for each VM in its batch (it only passes `vm_name`,
+`storage_root`, `iso_path`, `winrm_host_port`), so every VM it creates in
+a single batch run gets the exact same in-guest hostname
+(`vm-builder.local`) and full name (`VM Builder`) -- a real same-hostname
+collision risk across a batch, not just a cosmetic placeholder, tracked
+as a follow-up gap.
 
 ## Windows LabVIEW VM (`vm/windows-labview/`, `provision-windows-labview-vm.yml`)
 
@@ -139,13 +146,18 @@ constrains which guest family can be built.
   in `complete-public-provisioning.py`/`verify-public-appliance-receipt.py`)
   -- installed, but not yet activated.
 - **`complete-activation`** -- **Linux-only, and only reachable after an
-  operator console gate**: the operator interactively activates LabVIEW
+  operator console gate**: `complete-activation.sh`'s own usage text
+  requires the operator to have already interactively activated LabVIEW
   themselves (the same human-only boundary as the Windows family's
-  LabVIEW activation); VIPM activation is the one deliberate exception --
-  this phase runs it non-interactively via `activate-vipm.sh`'s
+  LabVIEW activation) before running this phase -- **this precondition is
+  a documented operator convention, not a runtime-enforced check**: the
+  phase's own call chain (`capture-activation.sh`) runs VIPM activation
+  unconditionally whenever a VIPM env file is supplied, with no check
+  that LabVIEW has actually been activated first. VIPM activation is the
+  one deliberate exception to the human-only boundary -- this phase runs
+  it non-interactively via `activate-vipm.sh`'s
   `vipm activate --direct-vipm-io` (see `REQ-032` in the wiki's Software
-  Requirements Specification), gated on the operator having already
-  completed LabVIEW's own interactive activation. The phase then
+  Requirements Specification). The phase then
   completes and verifies the activation
   *receipt* (`build-activation-receipt.py`, `finalize-activation-receipt.py`,
   `verify-activation-receipt.py`), reaching the

@@ -97,9 +97,9 @@ path. Per project, in order:
    (`Invoke-ReportedVipmBuild`). Skipped (not merely absent) when
    `build.packages` is not enabled, recorded as such on the run record.
 6. **SBOM** (`Invoke-PipelineSbomStage`) -- runs `vipm sbom` to produce a
-   CycloneDX 1.5 SBOM. `ALLOW_PACKAGE_DRIFT=1` (the default) downgrades a
-   drifted-package mismatch to a warning, recording the actually-installed
-   versions in the SBOM instead of failing.
+   CycloneDX 1.5 SBOM. Setting `ALLOW_PACKAGE_DRIFT=1` (unset/off by
+   default) downgrades a drifted-package mismatch to a warning, recording
+   the actually-installed versions in the SBOM instead of failing.
 7. **Scan** (`Invoke-PipelineScanStage`) -- runs Grype against the
    enriched SBOM. **The native pipeline does not gate on Grype's own
    findings** -- it only reports them (`gate: not-gated`); Dependency-Track's

@@ -71,12 +71,15 @@ for the full rationale.
 
 `.github/workflows/provision-windows-labview-vm.yml`,
 `provision-ubuntu-vm.yml`, and `vm-fleet-status.yml` are the corresponding
-GitHub Actions entry points, each requiring every real identity value as an
-explicit `workflow_dispatch` input. See
+GitHub Actions entry points, each taking every real identity value as an
+explicit `workflow_dispatch` input (some carry a generic, clearly
+fictional placeholder default; none default to any specific fork's real
+infrastructure). See
 [`docs/vm-provisioning/procedure.md`](docs/vm-provisioning/procedure.md)
 for the full phase-by-phase procedure (both VM families), including the
-deliberate human-only LabVIEW/VIPM activation boundary and the active
-fleet-status verification design.
+deliberate human-only LabVIEW activation boundary (VIPM activation on the
+Ubuntu-LabVIEW family is a deliberate, narrower automated exception) and
+the active fleet-status verification design.
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 

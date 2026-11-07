@@ -8,7 +8,7 @@ requirement (`VITechnologies/projectbuddy#11`).
 - Product or service: `VITechnologies/projectbuddy`
 - Repository: `VITechnologies/projectbuddy` (specs live partly in its wiki,
   see Notes below)
-- Baseline: `v0.3.25`
+- Baseline: `v0.3.27`
 - Owner: svelderrainruiz
 
 ## Information Items

@@ -45,8 +45,14 @@ for why this repo adopted GitFlow.
    `CHANGELOG.md` entry, any last-mile fixes).
 3. Open and merge a pull request `release/vX.Y.Z` -> `main`.
 4. Open and merge a pull request `release/vX.Y.Z` -> `develop` (the
-   merge-back), only after step 3's promotion to `main` is already merged.
-5. Delete `release/vX.Y.Z` once both merges are complete.
+   merge-back), only after step 3's promotion to `main` is already merged
+   -- **unless `develop` and `main` are already content-identical at this
+   point** (verify with `diff <(git show main:CHANGELOG.md) <(git show
+   develop:CHANGELOG.md)` or a full tree diff), in which case this step
+   is a legitimate no-op: skip opening the merge-back PR rather than
+   opening one GitHub would report has no commits to merge.
+5. Delete `release/vX.Y.Z` once both merges are complete (or once step 3
+   is merged and step 4 was confirmed to be a no-op).
 6. Tag `vX.Y.Z` on the resulting `main` commit and publish the GitHub
    Release as a draft first, verify all assets, then publish (immutable
    releases are enabled on this repo: once published, the tag cannot move
