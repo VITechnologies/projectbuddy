@@ -53,7 +53,8 @@ function Assert-CommitSha {
     }
 }
 
-# Per ADR-0003's round-2 Addendum: this is the ONLY permitted waiver, re-approved
+# CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
+# per ADR-0003's round-2 Addendum: this is the ONLY permitted waiver, re-approved
 # at every suite-pin update or it lapses. Any other failing/erroring test blocks
 # the gate; a different waiver requires a new superseding ADR, not an edit here.
 $script:AllowedWaiverTestName = 'Test Write Read Library Icon Data.vi'
@@ -177,7 +178,8 @@ function Test-JUnitReportAcceptable {
     if ($cases.Count -eq 0) {
         throw 'JUnit report contains zero test cases -- the pinned suite did not run.'
     }
-    # The pinned suite commit's real test-case count (ni/labview-icon-editor
+    # CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
+    # the pinned suite commit's real test-case count (ni/labview-icon-editor
     # @ d9eac771ccac0ed92bde81a031fe2f4ebe62c845, 5 test classes). Per #94's
     # independent verification review (found on the Linux gate, applies
     # identically here): without this check, a report missing or skipping
@@ -275,6 +277,8 @@ if ($MyInvocation.InvocationName -ne ".") {
     # base image does not include git, and an archive for an exact commit SHA
     # is inherently that commit -- no separate rev-parse verification needed,
     # unlike a branch/tag clone which could move.
+    # CUSTOMIZE PER PROJECT (see docs/lunit-gate/adapting-for-a-new-project.md):
+    # the suite's owner/repo and its project file's path within that repo.
     Get-PinnedSuiteArchive -Owner 'ni' -Repo 'labview-icon-editor' -Commit $SuiteCommit -Destination $workspace
 
     $project = Join-Path $workspace 'lv_icon_editor.lvproj'

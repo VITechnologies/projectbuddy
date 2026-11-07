@@ -32,8 +32,9 @@ different purpose) or the Windows/Ubuntu LabVIEW VM families (`#62`).
   containers) was validated the same way via direct local Docker
   testing instead.
 - **Does not prove**: anything about `#62`'s persistent-VM
-  `complete-activation`/`package-build` phases (reopened, separately
-  tracked, unrelated to this gate).
+  `package-build` phase, intentionally out of this generic engine's
+  scope by design (`#62`'s own `complete-activation` phase is resolved,
+  but separately, via `#100` -- unrelated to this gate's own mechanism).
 
 ## Why NSIS, not raw PowerShell + .NET ZipFile
 
@@ -270,6 +271,9 @@ docker run --rm lunit-gate-linux:local python3 /lunit-gate/invoke_lunit_tests_li
 
 - `docs/architecture/adr/ADR-0003-ephemeral-container-lunit-release-gate-revised.md`
 - `docs/architecture/adr/ADR-0002-adopt-ephemeral-container-lunit-release-gate.md` (superseded)
+- `docs/architecture/adr/ADR-0004-linux-lunit-named-waivers.md`
+- `docs/lunit-gate/adapting-for-a-new-project.md` (`#98`'s scoping of the
+  long-planned reusable-template follow-on)
 - Wiki `Software-Requirements-Specification` `REQ-033`-`REQ-036`
 - `#87` (this implementation's tracking issue)
-- `#62` (reopened; unrelated to this gate)
+- `#62` (resolved via `#100`; unrelated to this gate's own scope)
