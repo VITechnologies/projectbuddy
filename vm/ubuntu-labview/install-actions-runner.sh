@@ -122,6 +122,12 @@ registration_token="$(gh api --method POST "repos/$REPO/actions/runners/registra
 [[ -n "$registration_token" ]] || { echo "install-actions-runner: FAIL: GitHub did not return a runner registration token" >&2; exit 1; }
 
 if [[ -f "$runner_root/.runner" ]]; then
+    # A prior run's systemd service may still be installed/running --
+    # config.sh remove refuses to run ("Uninstall service first") until
+    # it is stopped and uninstalled first.
+    if [[ -f "$runner_root/svc.sh" ]] && systemctl list-units --all --no-legend 2>/dev/null | grep -q "actions\.runner\..*\.service"; then
+        (cd "$runner_root" && ./svc.sh stop || true; ./svc.sh uninstall || true)
+    fi
     sudo -u "$SERVICE_ACCOUNT" "$runner_root/config.sh" remove --token "$registration_token" || true
     registration_token="$(gh api --method POST "repos/$REPO/actions/runners/registration-token" --jq '.token')"
 fi
@@ -136,9 +142,6 @@ sudo -u "$SERVICE_ACCOUNT" env -C "$runner_root" ./config.sh \
 unset registration_token
 
 if [[ -f "$runner_root/svc.sh" ]]; then
-    if systemctl list-units --all --no-legend 2>/dev/null | grep -q "actions\.runner\..*\.service"; then
-        (cd "$runner_root" && ./svc.sh stop || true; ./svc.sh uninstall || true)
-    fi
     (cd "$runner_root" && ./svc.sh install "$SERVICE_ACCOUNT" && ./svc.sh start)
 fi
 
