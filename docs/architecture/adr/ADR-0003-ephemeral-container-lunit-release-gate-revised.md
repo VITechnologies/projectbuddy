@@ -248,11 +248,14 @@ feasibility spike (`REQ-035`) then ran, confirmed via direct local Docker
 testing on this engine's own host (this image's platform -- Linux -- runs
 natively there, unlike Windows containers, making this dramatically
 faster to validate than Phase 1's own Vagrant-based iteration) before
-ever touching CI. As of this Addendum the findings below are confirmed
-by that local testing only; a real `workflow_dispatch` run on
-`lunit-gate-linux.yml` (this engine's own established discipline:
-local validation precedes, but never substitutes for, live CI proof)
-is the immediate next step and will be recorded here once complete:
+ever touching CI, then confirmed by real `workflow_dispatch` runs on both
+the fork (`lunit-gate-linux.yml`, run
+[42372457595](https://github.com/svelderrainruiz/projectbuddy/actions/runs/42372457595))
+and, after merge (`#92`), upstream `VITechnologies/projectbuddy` itself
+(run
+[42372700928](https://github.com/VITechnologies/projectbuddy/actions/runs/42372700928)):
+all three runs (local, fork, upstream) are an exact match -- `PASS`, 10
+total tests, the same 3 named waivers, `vipmPresence: false`.
 
 - **Outcome: (a), feasible.** `LabVIEWCLI`'s `LUnit` operation runs
   unattended against this engine's pinned `nationalinstruments/labview`

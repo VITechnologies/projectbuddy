@@ -1,8 +1,8 @@
 # LUnit Release Gate Procedure (ADR-0003: Windows + Linux)
 
-- Status: Active (Phase 1 and Phase 2 implemented; dual-platform gate
-  not yet in effect pending live-dispatch proof of Phase 2 -- see
-  `REQ-033`)
+- Status: Active (Phase 1 and Phase 2 both implemented and live-dispatch-
+  proven on fork and upstream; the dual-platform gate is now in effect
+  per `REQ-033`, promoted to Active 2026-11-07)
 - Last substantive update: 2026-11-07
 - Owner: svelderrainruiz
 
@@ -18,23 +18,22 @@ different purpose) or the Windows/Ubuntu LabVIEW VM families (`#62`).
 ## What this proves, and what it does not
 
 - **Proves**: this engine's pinned `nationalinstruments/labview` Windows
-  image, with the LUnit/LUnit CLI VI packages deployed by an NSIS-built
-  installer (SHA-256-verified at staging time, no VIPM), can run a real,
+  and Linux images, with the LUnit/LUnit CLI VI packages deployed via an
+  NSIS-built installer (Windows) or a plain file copy (Linux -- no
+  NSIS-equivalent needed, see Phase 2 below), can each run a real,
   independently-maintained LabVIEW project's test suite unattended via
   native `LabVIEWCLI`, and produce a validated JUnit report --
-  live-dispatch-proven via a real `workflow_dispatch` run, not merely a
-  code review. Also validated end-to-end against a real LabVIEW
-  installation via a local Vagrant harness
-  (`docker/lunit-gate/vagrant-nsis-test/`): a genuine pass producing
-  exactly 10 test cases with exactly the one expected named-upstream
-  failure, before ever being wired into CI.
-- **Does not prove (yet)**: Phase 2's `workflow_dispatch` live-dispatch
-  proof on CI itself -- Phase 2 (below) is confirmed via direct local
-  Docker testing on this engine's own host, matching Phase 1's own
-  "validate locally first" discipline, but a real CI run is still
-  pending as of this writing. Also outside this gate's scope: `#62`'s
-  persistent-VM `complete-activation`/`package-build` phases (reopened,
-  separately tracked, unrelated to this gate).
+  live-dispatch-proven via real `workflow_dispatch` runs on both the
+  fork and upstream `VITechnologies/projectbuddy`, not merely a code
+  review or local-only test. Windows was also validated end-to-end
+  against a real LabVIEW installation via a local Vagrant harness
+  (`docker/lunit-gate/vagrant-nsis-test/`) before ever being wired into
+  CI; Linux (which runs natively on this build host, unlike Windows
+  containers) was validated the same way via direct local Docker
+  testing instead.
+- **Does not prove**: anything about `#62`'s persistent-VM
+  `complete-activation`/`package-build` phases (reopened, separately
+  tracked, unrelated to this gate).
 
 ## Why NSIS, not raw PowerShell + .NET ZipFile
 

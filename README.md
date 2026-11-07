@@ -140,9 +140,9 @@ SBOM pipeline's own containers above) that runs a pinned commit of
 `ni/labview-icon-editor`'s real LUnit test suite via native `LabVIEWCLI`,
 proving this engine can execute genuine, unattended LabVIEW automated
 tests without depending on persistent-VM GUI activation. Both Windows
-(Phase 1) and Linux (Phase 2) are implemented, each confirmed via direct
-local testing; a real CI dispatch of Phase 2 on `lunit-gate-linux.yml` is
-still pending as of this writing. See
+(Phase 1) and Linux (Phase 2) are implemented and live-dispatch-proven on
+both the fork and upstream `VITechnologies/projectbuddy` -- per `REQ-033`
+the dual-platform gate is now **Active**. See
 [`docs/lunit-gate/procedure.md`](docs/lunit-gate/procedure.md) and
 `docs/architecture/adr/ADR-0003-ephemeral-container-lunit-release-gate-revised.md`
 for the full procedure, the SHA-256 package-pinning provenance, and the
