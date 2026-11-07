@@ -138,19 +138,21 @@ identity parameters so the choice of orchestrating host OS never
 constrains which guest family can be built.
 
 **Current reachability in this engine repo** (`VITechnologies/projectbuddy#62`):
-this workflow has zero total dispatches to date. Every phase previously
-failed immediately at the unconditional "Validate Dispatch Contract" step
-because `.github/scripts/validate-vm-provisioning-dispatch.py` did not
-exist in this repo (it was dropped during the original extraction from a
-consumer fork; now restored). `package-build` specifically remains
-blocked here by design, not by a missing file: it calls
-`vm/ubuntu-labview/build-vip-package.sh`, which hardcodes a real
-VI-Technologies project and is deliberately consumer-vendored, never part
-of the generic engine (the same pattern `add-project.yml` already
-documents for validators) -- a consuming fork supplies its own copy. The
-phase descriptions below describe the *designed* behavior a properly
-configured consumer gets; not yet re-confirmed end-to-end against this
-engine's own restored dispatch path.
+`provision-public` and `complete-activation` are now both real
+`workflow_dispatch`-proven end to end (`#62`): `provision-public` reaches
+`labview2026-q3-pro-installed-preactivation` (run `42349506282`), and
+`complete-activation` reaches `labview2026-q3-pro-activated-ready` with a
+genuine, verified receipt (run `42394542555`) -- the first time either
+has succeeded via real CI dispatch in this project's history.
+`package-build` specifically remains blocked here by design, not by a
+missing file: it calls `vm/ubuntu-labview/build-vip-package.sh`, which
+hardcodes a real VI-Technologies project and is deliberately
+consumer-vendored, never part of the generic engine (the same pattern
+`add-project.yml` already documents for validators) -- a consuming fork
+supplies its own copy. The remaining phase descriptions below describe
+the *designed* behavior a properly configured consumer gets; not all of
+them are yet individually re-confirmed against this engine's own
+restored dispatch path.
 
 - **`validate`** -- dry-runs the Linux and/or Windows adapter plan plus a
   public-plan contract check (`.github/scripts/validate-vm-provisioning-dispatch.py`),
@@ -171,21 +173,32 @@ engine's own restored dispatch path.
   `labview2026-q3-pro-installed-preactivation` snapshot (`PREACTIVATION_SNAPSHOT_NAME`
   in `complete-public-provisioning.py`/`verify-public-appliance-receipt.py`)
   -- installed, but not yet activated.
-- **`complete-activation`** -- **Linux-only, and only reachable after an
-  operator console gate**: `complete-activation.sh`'s own usage text
-  requires the operator to have already interactively activated LabVIEW
-  themselves (the same human-only boundary as the Windows family's
-  LabVIEW activation) before running this phase -- **this precondition is
-  a documented operator convention, not a runtime-enforced check**: the
-  phase's own call chain (`capture-activation.sh`) runs VIPM activation
-  unconditionally whenever a VIPM env file is supplied, with no check
-  that LabVIEW has actually been activated first. VIPM activation is the
-  one deliberate exception to the human-only boundary -- this phase runs
-  it non-interactively via `activate-vipm.sh`'s
-  `vipm activate --direct-vipm-io` (see `REQ-032` in the wiki's Software
-  Requirements Specification). The phase then
-  completes and verifies the activation
-  *receipt* (`build-activation-receipt.py`, `finalize-activation-receipt.py`,
+- **`complete-activation`** -- **Linux-only**. Confirmed via real
+  `workflow_dispatch` proof (`#62`) that this phase needs **no prior
+  human-interactive LabVIEW activation at all** on this appliance --
+  unlike the Windows family, this NI Linux LabVIEW distribution requires
+  no separate LabVIEW license-activation dialog (the authenticated NI
+  package-repository access used to install it is itself the licensing
+  gate); VIPM activation (automated via `activate-vipm.sh`'s
+  `vipm activate --direct-vipm-io`, see `REQ-032`) is the only activation
+  this phase performs or needs. The phase's own usage text's earlier
+  "run only after the operator has activated LabVIEW" wording was an
+  unverified assumption carried over from the Windows family, never
+  actually true for Linux -- corrected here with real evidence, not
+  reworded speculation. What this phase *does* genuinely need, confirmed
+  live: (1) the guest's Guest Additions version matching the host's
+  (`vm/ubuntu-labview/vnc-console.sh` plus a one-time
+  `virtualbox-guest-utils-hwe`/`virtualbox-guest-x11-hwe` install get a
+  stale appliance there -- see "Interactive console access" below); (2)
+  VIPM Desktop's own installed-package database initialized at least once
+  via `xvfb-run vipm refresh` (a fresh appliance's `vipm --labview-version
+  ... list --installed` query otherwise reports `LabViewVersionNotFound`
+  even though LabVIEW is genuinely installed and runnable); (3) no stale
+  `/tmp/.X11-unix/X*` sockets or prior partial evidence files left behind
+  by an earlier failed dispatch attempt against the same disposable VM
+  (both block a clean retry with their own fail-closed checks). The phase
+  then completes and verifies the activation *receipt*
+  (`build-activation-receipt.py`, `finalize-activation-receipt.py`,
   `verify-activation-receipt.py`), reaching the
   `labview2026-q3-pro-activated-ready` snapshot (`ACTIVATED_SNAPSHOT_NAME`).
 - **`package-build`** -- the strongest end-to-end proof phase: builds a
@@ -195,6 +208,42 @@ engine's own restored dispatch path.
   CI artifact. Reaching this phase's `labview2026-q3-pro-package-ready`
   snapshot (`PACKAGE_SNAPSHOT_NAME`) is the pipeline's strongest signal
   that an appliance is genuinely production-ready, not merely "booted".
+
+### Interactive console access (`vnc-console.sh`)
+
+Ported from the Windows family's own proven `vm/windows-labview/vnc-console.sh`
+(that family's "Activate LabVIEW + VIPM" runbook step, issue `#176`) --
+Ubuntu had no equivalent console-access tooling at all until `#62`'s real
+live-dispatch proof found it was needed to validate the Guest Additions
+and GDM-greeter fixes below. `vm/ubuntu-labview/vnc-console.sh open
+<vm-name>` enables VRDE on a loopback-only port (VBoxVNC, not Oracle's
+RDP extension -- an RDP client cannot connect), sets a fresh random
+password, and launches Remmina locally if a display is available.
+Connecting remotely to the `vm-provisioner` host (no local display):
+either reconnect with `ssh -X` so Remmina renders back to your own
+screen, or tunnel the port out over SSH and point any VNC client at it.
+
+Two real, Linux-container/VM-specific bugs were found and fixed getting
+this working for the first time (`#62`):
+
+- **Stale Guest Additions** (a VM built from an older appliance image can
+  ship Guest Additions as old as `6.0.0` against a much newer host
+  VirtualBox, e.g. `7.2.6`) cause a null framebuffer over VRDE (a
+  genuinely black screen, confirmed via `VBoxManage ... screenshotpng`
+  bypassing VRDE entirely) -- Oracle's own `.run` Guest Additions
+  installer can itself fail to build its kernel module against a
+  distro-patched kernel (a real `modpost` symbol-namespace error seen
+  live); installing Ubuntu's own packaged, HWE-kernel-matched
+  `virtualbox-guest-utils-hwe`/`virtualbox-guest-x11-hwe` instead resolved
+  both the framebuffer and the build failure.
+- **GDM's default Wayland greeter does not route VRDE-injected
+  keyboard/mouse input**, even once the framebuffer itself renders
+  correctly -- uncommenting `WaylandEnable=false` in
+  `/etc/gdm3/custom.conf` and restarting `gdm` fixed this. This is likely
+  the same root cause behind this project's earlier-documented
+  Windows-family "VirtualBox GUI mode does not reliably grab
+  keyboard/mouse input under Wayland desktops" finding, though that was
+  never root-caused that specifically before.
 
 ### Receipt verification chain
 
