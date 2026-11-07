@@ -38,6 +38,7 @@ jobs:
     runs-on: ${{ fromJSON('["self-hosted","vm-provisioner","linux"]') }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has-vms: ${{ steps.set-matrix.outputs.has-vms }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build VM matrix from runner-inventory.json
@@ -50,9 +51,15 @@ jobs:
           # matrix instead of letting jq hard-fail, so the schedule trigger
           # doesn't produce a permanently-failing run in this repo itself;
           # a fork with a real inventory still gets full verification below.
+          # has-vms explicitly gates check-vm below: a strategy.matrix that
+          # evaluates to zero combinations marks the whole workflow run as
+          # a failure (confirmed live, run 42336352492), it does not just
+          # skip cleanly -- so check-vm must never even be attempted when
+          # there are no VMs, not merely be handed an empty matrix.
           if [[ ! -f vm/windows-labview/runner-inventory.json ]]; then
             echo "::notice::vm/windows-labview/runner-inventory.json is not committed (expected in this public engine repo -- forks supply their own); nothing to verify."
             echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
+            echo "has-vms=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           matrix="$(jq -c '{include: [.vms[] | {
@@ -63,9 +70,16 @@ jobs:
             statusChangedAt: (.statusChangedAt // "unknown")
           }]}' vm/windows-labview/runner-inventory.json)"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          vm_count="$(jq -c '.vms | length' vm/windows-labview/runner-inventory.json)"
+          if [[ "$vm_count" -gt 0 ]]; then
+            echo "has-vms=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-vms=false" >> "$GITHUB_OUTPUT"
+          fi
 
   check-vm:
     needs: generate-matrix
+    if: needs.generate-matrix.outputs.has-vms == 'true'
     runs-on: ${{ fromJSON('["self-hosted","vm-provisioner","linux"]') }}
     strategy:
       fail-fast: false

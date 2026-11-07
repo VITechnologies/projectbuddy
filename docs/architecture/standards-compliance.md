@@ -69,16 +69,48 @@ has run has found at least one real defect the prior pass's own fixes
 either missed or introduced; the standing rule remains in effect: run a
 dedicated verification pass after every semantic-audit fix round.
 
+A fifth pass (same 3 models, verifying `v0.3.28`) found that `v0.3.28`'s
+own `vm-fleet-status.yml` fix was itself incomplete (stopped a `jq`
+crash but left the workflow failing 100% of the time regardless, a
+GitHub Actions platform behavior around zero-entry `strategy.matrix`
+that the fix didn't account for -- independently confirmed by all 3
+models via real run-history queries, not just code reading), that the
+wiki Architecture Packet directly contradicted `v0.3.28`'s own restored-
+script fix in the same round it was made, and that `v0.3.28` itself
+introduced a documented GitFlow exception (a post-release-branch direct-
+to-`main` fix) while fixing an unrelated workflow-injection bug. Also
+found a previously-unnoticed false claim dating back to `v0.3.24`
+(a removed script's "zero consumers" claim, contradicted by a real
+consumer repo still calling it -- `#76`) and a safety check
+(`release.yml`'s duplicate-tag rejection) that had been dead code since
+that workflow's introduction, caught only by empirically re-testing the
+fix in real CI rather than trusting the code. See `v0.3.29`'s
+`CHANGELOG.md` entry and `#77` for the remaining lower-severity items.
+Every one of the 4 verification passes run so far has found at least one
+real defect the prior pass's own fixes either missed or introduced --
+the standing rule remains in full effect.
+
 ## Current gate status (as of the version above)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
 manual assertion. This is reproducible, not a one-time historical claim:
 re-run that workflow (`workflow_dispatch`, requires a
-`standards-review-local` self-hosted runner) any time to reconfirm the
-current state -- its own "Compare Stamped Version Against Latest" step
-always re-derives the answer fresh rather than relying on any past run's
-recorded result.
+`standards-review-local` self-hosted runner -- currently only registered
+on the `svelderrainruiz/projectbuddy` fork, not on
+`VITechnologies/projectbuddy` itself, so this workflow has never actually
+run upstream; the fork's `main` is byte-identical to upstream `main` at
+every release boundary, so a fork-side run is genuine evidence for the
+upstream repo's actual content) any time to reconfirm the current state
+-- it re-derives all 5 gates fresh from a `repo-standards-review` clone
+now pinned to this document's own stamped SHA (round-5 semantic-audit
+fix: it previously cloned floating `HEAD`, and only failed the run on a
+`req`/`arch` regression specifically, silently ignoring a `cm`/
+`coverage`/`doc` regression -- both now fixed). This is a distinct
+workflow from `standards-compliance-recheck.yml`, which owns the
+separate "Compare Stamped Version Against Latest" drift check (whether a
+*newer* `repo-standards-review` release exists) and does not itself
+re-run the gates.
 
 | Gate | Status | Confidence | Tracking |
 |---|---|---|---|
@@ -119,8 +151,12 @@ forking this engine can create their own private `repo-standards-review`
 instance and register their own `standards-review-local`-labeled runner the
 same way, on their own fork, to get the same living compliance check.
 Repos without such a runner (including this engine's own public upstream,
-`VITechnologies/projectbuddy`, which deliberately carries zero private
-infrastructure state) will see this job queue and auto-fail once a week
+`VITechnologies/projectbuddy`, which has no `standards-review-local`
+runner registered -- though it does have a real, online `vm-provisioner`-
+labeled self-hosted runner for VM-provisioning workflows specifically;
+"zero private infrastructure state" describes this engine's own
+*pre-committed configuration*, not every runner ever registered against
+it) will see this job queue and auto-fail once a week
 after GitHub's standard 24-hour no-runner timeout -- expected, and not an
 error requiring action there.
 

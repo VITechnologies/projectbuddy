@@ -47,7 +47,13 @@ jobs:
           cp /tmp/projectbuddy-wiki-scan/Architecture-Packet.md docs/architecture/overview.md
 
           rm -rf /tmp/repo-standards-review-scan
+          # Pinned to the exact SHA this repo's compliance stamp is assessed
+          # against (docs/architecture/standards-compliance.md) -- a floating
+          # clone here would silently let the scan drift from what the stamp
+          # claims without anyone noticing. Bump this alongside the stamp,
+          # never independently.
           git clone --quiet "https://github.com/svelderrainruiz/repo-standards-review.git" /tmp/repo-standards-review-scan
+          git -C /tmp/repo-standards-review-scan checkout --quiet ba72187ce5f745a1ffea93536cf83982b747819a # v0.2.23
 
       - name: Run Assurance Pipeline
         id: scan
@@ -68,16 +74,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           score_file=$(find /tmp/standards-scan-out -name score.json | head -1)
-          req_status=$(python3 -c "import json; print(json.load(open('$score_file'))['gates']['req']['status'])")
-          arch_status=$(python3 -c "import json; print(json.load(open('$score_file'))['gates']['arch']['status'])")
-          echo "req_status=$req_status" >> "$GITHUB_OUTPUT"
-          echo "arch_status=$arch_status" >> "$GITHUB_OUTPUT"
-          echo "REQ gate: $req_status"
-          echo "ARCH gate: $arch_status"
+          failed=""
+          for gate in req arch cm coverage doc; do
+            status="$(python3 -c "import json; print(json.load(open('$score_file'))['gates']['$gate']['status'])")"
+            echo "${gate}_status=$status" >> "$GITHUB_OUTPUT"
+            echo "$gate gate: $status"
+            [[ "$status" == "PASS" ]] || failed="$failed $gate=$status"
+          done
+          echo "failed_gates=$failed" >> "$GITHUB_OUTPUT"
 
-      - name: Fail If REQ Or ARCH Regressed
-        if: steps.scan.outputs.req_status != 'PASS' || steps.scan.outputs.arch_status != 'PASS'
+      - name: Fail If Any Required Gate Regressed
+        if: steps.scan.outputs.failed_gates != ''
         shell: bash
         run: |
-          echo "::error::REQ gate: ${{ steps.scan.outputs.req_status }}, ARCH gate: ${{ steps.scan.outputs.arch_status }} -- both were passing when this workflow was authored (VITechnologies/projectbuddy#9, #10). Check the wiki content or this scan's own copy step for a regression."
+          echo "::error::One or more required gates regressed:${{ steps.scan.outputs.failed_gates }} -- all 5 were passing when this check was last widened (VITechnologies/projectbuddy, round-5 semantic audit). Check the wiki content or this scan's own copy step for a regression."
           exit 1
