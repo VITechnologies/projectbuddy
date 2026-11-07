@@ -11,16 +11,21 @@ not a requirements document; see the wiki's
 for the governed requirements and architecture views this procedure
 implements.
 
-Both families share one discipline: every VM identity value (name, storage
-root, ISO path, hostname, account name, ...) is a required
-`workflow_dispatch` input. Several carry a generic, clearly-fictional
-placeholder default (e.g. `vm_name`'s `example-windows11-labview2026-myproject`,
-`guest_full_name`'s `VM Builder`, `guest_hostname`'s `vm-builder.local`) so
-the input still renders with example syntax in the dispatch form, and none
-default to any specific fork's real identity -- but **`guest_hostname`
-and `guest_full_name` are only placeholders at the workflow-dispatch
-layer, not a real per-VM-uniqueness guarantee**:
-`vm/windows-labview/batch-provision.sh` never overrides either when it
+Both families share the same `vm_name`/`storage_root` identity discipline
+(always `required: true`, generic placeholder defaults only, never
+defaulting to any specific fork's real identity) -- but **the two
+families currently disagree on `guest_full_name`/`guest_hostname`**:
+`provision-ubuntu-vm.yml` marks both `required: true`;
+`provision-windows-labview-vm.yml` marks both `required: false` with a
+real, silently-applicable default (`VM Builder`/`vm-builder.local`) --
+that Windows-family workflow's own input descriptions even
+self-contradict this (prose says "no built-in default... required for
+create-vm" right beside a schema that says otherwise). ISO path is a
+separate, non-identity input with a legitimate generic default in both
+families (see README.md's `Iso`/`GuestUser`/`WinRmHostPort` carve-out),
+not part of this identity-value set.
+`vm/windows-labview/batch-provision.sh` never overrides `guest_full_name`/
+`guest_hostname` when it
 dispatches `create-vm` for each VM in its batch (it only passes `vm_name`,
 `storage_root`, `iso_path`, `winrm_host_port`), so every VM it creates in
 a single batch run gets the exact same in-guest hostname

@@ -89,8 +89,9 @@ def validate_public_plan() -> None:
             # root (vm/ubuntu-labview/ lives at the top level here). A
             # consumer vendoring this script alongside its own copy of
             # provision-ubuntu-vm.yml (same pattern as add-project.yml --
-            # see docs/projectbuddy-consumption.md) adjusts this path to its
-            # own pinned engine checkout location (e.g. ".projectbuddy/vm/...").
+            # see README.md's "Consumption model" section) adjusts this path
+            # to its own pinned engine checkout location (e.g.
+            # ".projectbuddy/vm/...").
             "vm/ubuntu-labview/complete-public-provisioning.py",
             "--vm-name", vm_name,
             "--vm-uuid", "00000000-0000-4000-8000-000000000001",

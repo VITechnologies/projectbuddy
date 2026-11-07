@@ -4,7 +4,10 @@ GitHub-adapted equivalent of `svelderrainruiz/repo-standards-review`'s own
 `docs/release/release-procedure.md`, using `gh`/GitHub Actions in place of
 its GitLab-specific `scripts/pipeline.py` merge-request automation. See
 [`../architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](../architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
-for why this repo adopted GitFlow.
+for why this repo adopted GitFlow, and
+[`../architecture/standards-compliance.md`](../architecture/standards-compliance.md)
+for the one canonical `repo-standards-review` version stamp this document
+is covered by (not independently re-stamped).
 
 ## GitFlow Branch Rules (summary)
 
@@ -64,7 +67,11 @@ for why this repo adopted GitFlow.
 6. Tag `vX.Y.Z` on the resulting `main` commit and publish the GitHub
    Release as a draft first, verify all assets, then publish (immutable
    releases are enabled on this repo: once published, the tag cannot move
-   or be deleted/reused, and assets cannot change).
+   or be deleted/reused, and assets cannot change). **Tag the commit
+   actually promoted by step 3/4 -- do not land further PRs directly on
+   `main` before tagging** (see `docs/cm/cm-plan.md`'s Status Accounting
+   section for a recorded, judged exception where this was done anyway
+   for `v0.3.28`, and why).
 
 ## Hotfix Flow
 

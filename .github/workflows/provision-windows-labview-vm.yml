@@ -55,12 +55,12 @@ on:
         type: string
         default: '15985'
       guest_full_name:
-        description: Full display name for the guest's local account (the build-virtualbox.sh engine script requires this explicitly -- no built-in default); required for create-vm.
+        description: Full display name for the guest's local account (the build-virtualbox.sh engine script requires this explicitly with no built-in default -- this workflow input itself has a generic placeholder default, and is not yet required; see #69 for the same-hostname-across-a-batch risk this creates).
         required: false
         type: string
         default: 'VM Builder'
       guest_hostname:
-        description: Guest OS hostname (the build-virtualbox.sh engine script requires this explicitly -- no built-in default); required for create-vm.
+        description: Guest OS hostname (the build-virtualbox.sh engine script requires this explicitly with no built-in default -- this workflow input itself has a generic placeholder default, and is not yet required; see #69 for the same-hostname-across-a-batch risk this creates).
         required: false
         type: string
         default: 'vm-builder.local'

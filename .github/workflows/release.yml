@@ -42,7 +42,11 @@ jobs:
             echo "::error::-version must look like vX.Y.Z, got: $VERSION"
             exit 1
           fi
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+          # actions/checkout defaults to fetch-tags: false (confirmed live:
+          # `git fetch --no-tags ...`), so a local `git rev-parse` here was
+          # previously dead code -- it could never see a real remote tag.
+          # Query the remote directly instead.
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
             echo "::error::Tag $VERSION already exists. Immutable releases do not allow tag reuse, even after deletion -- pick a new version."
             exit 1
           fi
