@@ -193,6 +193,54 @@
     means this gate's "zero failures" is not absolute on day one --
     disclosed explicitly here rather than hidden in an unqualified claim.
 
+## Addendum (2026-11-07, round-2 verification review)
+
+Per `docs/information-item-map.md`'s Decision Record convention (append
+new content, never rewrite accepted Decision/Consequences text), this
+section corrects defects a second, independent 3-model review (Claude
+Opus, GPT-6-astra, Gemini-4-argon) found in this ADR's own body above --
+the original text is left unedited; these clarifications govern going
+forward.
+
+- **"Already proven upstream" (Decision, Runner class bullet) is itself
+  a residual instance of this ADR's own Defect 1** (citing
+  `ni/labview-icon-editor#575` as proven when it is open/unmerged with
+  CI explicitly disclosed as pending) -- all three models independently
+  caught this. Corrected reading: GitHub-hosted runners are chosen
+  because they are `#575`'s own reference choice and avoid this engine's
+  self-hosted-infrastructure risk, **not** because `#575`'s mechanism is
+  proven to work. Phase 1's entire purpose is establishing that
+  independently.
+- **Waiver scope, narrowed**: `REQ-034`/`REQ-036`'s Fit Criterion
+  wording ("except any individually-named, separately-tracked waiver")
+  read more broadly than this ADR's own intent. Corrected: the *only*
+  waiver permitted without a further decision is the specific, named
+  `Test Write Read Library Icon Data.vi` tag-mismatch exception, if
+  still unresolved upstream at implementation time, re-evaluated (and
+  lapsing if not re-approved) at every pin update. Any other failing
+  test blocks the gate; waiving a different test requires an explicit
+  new ADR, not a quiet SRS reinterpretation.
+- **"Pinned `nationalinstruments/labview:latest-linux`" (Phase 2) should
+  read "pinned-by-digest"**, consistent with this ADR's own Integrity
+  and pinning bullet -- `latest-linux` is a floating tag, not a pin.
+- **"Amend this ADR" (Phase 2 fallback language) means author a new
+  `ADR-NNNN`** that supersedes this one, consistent with this project's
+  own Decision Record convention stated earlier in this same ADR -- not
+  an in-place rewrite, regardless of how that language reads literally.
+- **Two distinct commits, named explicitly**: `REQ-033`'s "pinned-commit
+  LUnit JUnit report" and `REQ-034`/`REQ-036`'s "pinned-commit
+  `ni/labview-icon-editor` LUnit suite" refer to two different
+  repositories' commits -- this engine's own release-candidate commit
+  (which the workflow run must be triggered against) and the external
+  `ni/labview-icon-editor` suite's pinned SHA (which the suite content
+  itself is pinned to). Both must be recorded with every gate result;
+  neither substitutes for the other.
+- See the wiki SRS's `REQ-033`-`REQ-036` for the corresponding corrected
+  requirement text (self-contained Linux requirements, the narrowed
+  waiver, explicit commit disambiguation) -- `#87`'s Phase 1 (the
+  Windows spike) may begin immediately; these corrections govern what
+  counts as a qualifying Phase 1 pass, not whether the work can start.
+
 ## Related
 
 - `ADR-0002` (superseded by this decision; left unedited, Status updated)
