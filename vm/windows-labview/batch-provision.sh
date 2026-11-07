@@ -39,8 +39,8 @@ INVENTORY="$SCRIPT_DIR/runner-inventory.json"
 DRY_RUN=0
 # GH_REPO, STORAGE_ROOT, WIN_ISO, VIPM_INSTALLER, and LABVIEW_ISO have no
 # default -- this script is a generic engine shared by any fork; set them
-# as environment variables before running (see README.md's "SandboxSBOMReporting's
-# own configuration" section for this repo's real values). STORAGE_ROOT
+# as environment variables before running with your own fork's real,
+# consumer-specific values (never committed here). STORAGE_ROOT
 # additionally has operational history worth knowing before overriding:
 # /run/media/sergio/Data (the original storage_root) filled to 0 bytes free
 # on 2026-11-02 while building the core/launcher VMs -- see runner-inventory.json's
@@ -207,6 +207,22 @@ cleanup_vm_for_retry() {
   fi
 }
 
+# Derives a safe, batch-unique fallback guest hostname when
+# runner-inventory.json doesn't supply one explicitly (issue #69: every VM
+# in a batch previously fell back to the same literal workflow-dispatch
+# placeholder, a real same-hostname collision). Windows NetBIOS hostnames
+# are capped at 15 characters and must avoid `\/:*?"<>|` -- "vm-" (3 chars)
+# + 8 lowercase hex chars from a stable hash of $vm_name fits in exactly
+# 11 characters, well under the limit, and is deterministic (the same
+# vm_name always derives the same hostname, so re-dispatching the same VM
+# doesn't change its identity).
+derive_guest_hostname() {
+  local vm_name="$1"
+  local digest
+  digest="$(printf '%s' "$vm_name" | sha256sum | cut -c1-8)"
+  printf 'vm-%s' "$digest"
+}
+
 [[ -f "$INVENTORY" ]] || { echo "Inventory file not found: $INVENTORY (copy runner-inventory.example.json to runner-inventory.json and fill in your own real VM entries to get started)" >&2; exit 2; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 for required_var in GH_REPO STORAGE_ROOT WIN_ISO VIPM_INSTALLER LABVIEW_ISO; do
@@ -230,11 +246,12 @@ log "Queued VMs to build serially: ${QUEUED[*]}"
 # once all attempts are exhausted, so a transient failure that a retry
 # fixes never gets recorded as "failed" in the inventory at all.
 provision_vm_once() {
-  local vm_name="$1" port="$2" repo="$3" runner_name="$4" runner_labels="$5" service_account="$6"
+  local vm_name="$1" port="$2" repo="$3" runner_name="$4" runner_labels="$5" service_account="$6" guest_hostname="$7" guest_full_name="$8"
   local conclusion
 
   conclusion="$(dispatch_and_wait create-vm \
-    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "iso_path=$WIN_ISO" -f "winrm_host_port=$port")"
+    -f "vm_name=$vm_name" -f "storage_root=$STORAGE_ROOT" -f "iso_path=$WIN_ISO" -f "winrm_host_port=$port" \
+    -f "guest_hostname=$guest_hostname" -f "guest_full_name=$guest_full_name")"
   if [[ "$conclusion" != "success" ]]; then
     FAILURE_REASON="create-vm: $conclusion"; return 1
   fi
@@ -274,6 +291,15 @@ for vm_name in "${QUEUED[@]}"; do
   runner_name="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .runnerName // ""' "$INVENTORY")"
   runner_labels="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .runnerLabels // ""' "$INVENTORY")"
   service_account="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .dedicatedServiceAccount // ""' "$INVENTORY")"
+  guest_hostname="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .guestHostname // ""' "$INVENTORY")"
+  guest_full_name="$(jq -r --arg vm "$vm_name" '.vms[] | select(.vmName == $vm) | .guestFullName // ""' "$INVENTORY")"
+  if [[ -z "$guest_hostname" ]]; then
+    guest_hostname="$(derive_guest_hostname "$vm_name")"
+    log "$vm_name: no guestHostname in inventory, deriving a unique fallback: $guest_hostname"
+  fi
+  if [[ -z "$guest_full_name" ]]; then
+    guest_full_name="VM Builder ($vm_name)"
+  fi
   if [[ -z "$runner_name" || -z "$runner_labels" || -z "$service_account" ]]; then
     log "FAILED: $vm_name is missing runnerName/runnerLabels/dedicatedServiceAccount -- fill these in before queueing (register-runner needs them)."
     set_status "$vm_name" "failed" "queued without runnerName/runnerLabels/dedicatedServiceAccount"
@@ -286,7 +312,7 @@ for vm_name in "${QUEUED[@]}"; do
   FAILURE_REASON=""
   for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
     log "=== Building $vm_name (attempt $attempt of $MAX_ATTEMPTS; target repo: $repo, WinRM port: $port) ==="
-    if provision_vm_once "$vm_name" "$port" "$repo" "$runner_name" "$runner_labels" "$service_account"; then
+    if provision_vm_once "$vm_name" "$port" "$repo" "$runner_name" "$runner_labels" "$service_account" "$guest_hostname" "$guest_full_name"; then
       succeeded=1
       break
     fi

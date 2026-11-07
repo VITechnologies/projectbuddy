@@ -29,8 +29,10 @@
       VIPM_TOML_CONFIGS        JSON object of manifests keyed by project name;
                                overrides VIPM_TOML.
       OUTPUT_DIR               Report directory (default: output/windows).
-      ALLOW_PACKAGE_DRIFT      "0" makes `vipm sbom` fail when the installed NIPM package
-                               versions differ from the manifest (default: "1").
+      ALLOW_PACKAGE_DRIFT      "1" makes `vipm sbom` tolerate installed NIPM package
+                               versions that differ from the manifest (default: "0",
+                               matching the native pipeline -- strict unless explicitly
+                               opted into).
       SBOM_SOURCE              "vipm" (default) runs vipm init/lock/sbom and requires
                                VIPM Pro. "manifest" builds the base SBOM from the
                                deployed vipm.toml without VIPM (no vipm.lock merge).
@@ -1115,7 +1117,7 @@ function Invoke-Project {
             Write-SbomLog INFO "Building VI packages in dependency order: $(($packagePlan | ForEach-Object Target) -join ' -> ')."
             $packageReports = @(Invoke-PackageBuild -Plan $packagePlan -ProjectDir $projectDir -OutputDir $outputDir `
                 -QueryDir $outputDir -LabviewVersion $lvVersion -LabviewBitness $lvBitness `
-                -AllowPackageDrift ((Get-EnvValue ALLOW_PACKAGE_DRIFT "1") -ne "0"))
+                -AllowPackageDrift ((Get-EnvValue ALLOW_PACKAGE_DRIFT "0") -ne "0"))
             Set-PipelineStage -Record $Record -Name "packages" -Status completed
         }
         Set-PipelineStage -Record $Record -Name "sbom" -Status running
@@ -1131,7 +1133,7 @@ function Invoke-Project {
             Write-SbomLog INFO "Building all VIPM targets and verifying Authenticode..."
             $buildReport = Invoke-ReportedVipmBuild -Build $signedBuild -ProjectDir $projectDir -OutputDir $outputDir `
                 -LabviewVersion $lvVersion -LabviewBitness $lvBitness `
-                -AllowPackageDrift ((Get-EnvValue ALLOW_PACKAGE_DRIFT "1") -ne "0")
+                -AllowPackageDrift ((Get-EnvValue ALLOW_PACKAGE_DRIFT "0") -ne "0")
         }
 
         Write-SbomLog INFO "Extracting VIPM SBOM for '$name'..."
@@ -1140,7 +1142,7 @@ function Invoke-Project {
         $sbomArgs += @("--product-name", $name, "--product-version", $productVersion, "--output", $sbomPath)
         # NI's image ships its own LabVIEW patch level, which usually differs from the
         # manifest's pinned NIPM versions; the nipkg deep scan records what is installed.
-        if ((Get-EnvValue ALLOW_PACKAGE_DRIFT "1") -ne "0") { $sbomArgs += "--allow-package-drift" }
+        if ((Get-EnvValue ALLOW_PACKAGE_DRIFT "0") -ne "0") { $sbomArgs += "--allow-package-drift" }
         Invoke-Vipm -Arguments $sbomArgs -WorkingDirectory $projectDir
         $sbom = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($sbomPath)) -AsHashtable -Depth 100
     } else {

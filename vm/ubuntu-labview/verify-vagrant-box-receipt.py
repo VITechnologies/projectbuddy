@@ -11,7 +11,7 @@ import uuid
 import tempfile
 
 
-SCHEMA = "sandbox-sbom-reporting/ubuntu-vagrant-box@1"
+SCHEMA = "projectbuddy/ubuntu-vagrant-box@1"
 ACTIVATED_SNAPSHOT_NAME = "labview2026-q3-pro-activated-ready"
 PACKAGE_SNAPSHOT_NAME = "labview2026-q3-pro-package-ready"
 FORBIDDEN_FIELDS = {

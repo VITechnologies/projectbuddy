@@ -1,5 +1,9 @@
 # VM Provisioning Procedure
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 Satisfies `repo-standards-review`'s DOC/ARCH gaps for VM provisioning
 (`VITechnologies/projectbuddy#29`). Describes the real, already-proven
 behavior of `vm/windows-labview/` and `vm/ubuntu-labview/` -- this is a
@@ -25,14 +29,15 @@ matching its own schema). ISO path is a
 separate, non-identity input with a legitimate generic default in both
 families (see README.md's `Iso`/`GuestUser`/`WinRmHostPort` carve-out),
 not part of this identity-value set.
-`vm/windows-labview/batch-provision.sh` never overrides `guest_full_name`/
-`guest_hostname` when it
-dispatches `create-vm` for each VM in its batch (it only passes `vm_name`,
-`storage_root`, `iso_path`, `winrm_host_port`), so every VM it creates in
-a single batch run gets the exact same in-guest hostname
-(`vm-builder.local`) and full name (`VM Builder`) -- a real same-hostname
-collision risk across a batch, not just a cosmetic placeholder
-(`VITechnologies/projectbuddy#69`, open).
+`vm/windows-labview/batch-provision.sh` now passes `guest_full_name`/
+`guest_hostname` through to each VM's `create-vm` dispatch, sourced from
+optional `guestHostname`/`guestFullName` fields in `runner-inventory.json`
+(schema `@4+`); if either is omitted for a given VM, a unique fallback is
+derived automatically (a short, deterministic hash-based hostname that
+fits Windows's 15-character NetBIOS limit, and a `VM Builder (<vm_name>)`
+full name) instead of every VM in a batch silently sharing the same
+hostname (`VITechnologies/projectbuddy#69`, resolved; live-verified via
+a 2-VM dry-run batch -- one explicit, one derived, both distinct).
 
 ## Windows LabVIEW VM (`vm/windows-labview/`, `provision-windows-labview-vm.yml`)
 

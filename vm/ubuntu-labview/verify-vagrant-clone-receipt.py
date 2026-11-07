@@ -66,7 +66,7 @@ def main() -> int:
         if not condition:
             errors.append(message)
 
-    require(receipt.get("schema") == "sandbox-sbom-reporting/ubuntu-vagrant-clone@1", "unexpected schema")
+    require(receipt.get("schema") == "projectbuddy/ubuntu-vagrant-clone@1", "unexpected schema")
     require(receipt.get("outcome") == "PASS" and receipt.get("failures") == [], "receipt outcome is not PASS")
     require(receipt.get("sourceBox") == {
         "receiptSha256": digest(arguments.box_receipt),

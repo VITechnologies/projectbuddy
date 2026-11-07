@@ -113,16 +113,11 @@ try {
     }
     $config = ConvertFrom-Json -InputObject $configText
 } catch {
-    Write-PipelineLog -Message "Invalid pipeline configuration from '$configSource': $($_.Exception.Message) Expected an object containing a non-empty 'projects' array; each project requires 'name' and, unless disabled, 'vcs' ('git' or 'svn'). See docs/configuration-schema.md." -Level ERROR
+    Write-PipelineLog -Message "Invalid pipeline configuration from '$configSource': $($_.Exception.Message) Expected an object containing a non-empty 'projects' array; each project requires 'name' and, unless disabled, 'vcs' ('git' or 'svn'). See pipeline-config.schema.json (the real, validated schema)." -Level ERROR
     exit 1
 }
 
-$manifestDocsPath = "docs/configuration-schema.md#vipm-manifest-github-actions-variable"
-$manifestDocs = if ($env:GITHUB_SERVER_URL -and $env:GITHUB_REPOSITORY) {
-    "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/blob/main/$manifestDocsPath"
-} else {
-    $manifestDocsPath
-}
+$manifestDocs = "VIPM_TOML_CONFIGS must be a JSON object mapping each enabled project's 'name' to its real vipm.toml content as a string"
 $vipmManifestJson = [Environment]::GetEnvironmentVariable("VIPM_TOML_CONFIGS")
 try {
     if ([string]::IsNullOrWhiteSpace($vipmManifestJson)) {
@@ -145,7 +140,7 @@ try {
         }
     }
 } catch {
-    Write-PipelineLog -Message "Invalid VIPM_TOML_CONFIGS repository variable: $($_.Exception.Message) See $manifestDocs" -Level ERROR
+    Write-PipelineLog -Message "Invalid VIPM_TOML_CONFIGS repository variable: $($_.Exception.Message) ($manifestDocs)" -Level ERROR
     exit 1
 }
 
@@ -697,11 +692,11 @@ foreach ($proj in $config.projects) {
         }
 
         if (-not $vipmManifestsByProject.Contains($projectName)) {
-            throw "Configuration Error: VIPM_TOML_CONFIGS has no manifest entry for project '$projectName'. See $manifestDocs"
+            throw "Configuration Error: VIPM_TOML_CONFIGS has no manifest entry for project '$projectName'. ($manifestDocs)"
         }
         $vipmTomlContent = $vipmManifestsByProject[$projectName]
         if ($vipmTomlContent -isnot [string] -or [string]::IsNullOrWhiteSpace($vipmTomlContent)) {
-            throw "Configuration Error: VIPM_TOML_CONFIGS entry for project '$projectName' must be a non-blank TOML string. See $manifestDocs"
+            throw "Configuration Error: VIPM_TOML_CONFIGS entry for project '$projectName' must be a non-blank TOML string. ($manifestDocs)"
         }
         $tomlPath = [System.IO.Path]::Combine($projectWorkingDir, "vipm.toml")
         $lvOverrideVersion = if ($proj.labviewVersion) { ([string]$proj.labviewVersion).Trim() } else { "" }

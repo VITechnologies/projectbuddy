@@ -58,7 +58,7 @@ import sys
 probe_output, destination, exit_code, wall_ms = sys.argv[1:]
 output = pathlib.Path(probe_output).read_text(encoding="utf-8", errors="replace")
 record = {
-    "schema": "sandbox-sbom-reporting/labview-known-answer-capture@1",
+    "schema": "projectbuddy/labview-known-answer-capture@1",
     "probeVi": "/usr/local/natinst/share/nilvcli/Examples/AddTwoNumbers/AddTwoNumbers.vi",
     "labviewPath": "/usr/local/natinst/LabVIEW-2026-64/labview",
     "inputs": [20, 22],

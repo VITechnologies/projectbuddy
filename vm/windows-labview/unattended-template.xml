@@ -260,7 +260,7 @@
                     <Path>reg.exe ADD HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
                     <Description>Windows 11 disable TPM check</Description>
                 </RunAsynchronousCommand>
-                <!-- Added for SandboxSBOMReporting (see this file's header comment):
+                <!-- Added for a real production consumer (see this file's header comment):
                      disable Windows-Update-related services as early as possible in
                      the specialize pass (the FIRST pass where the real installed OS
                      and its services actually exist; the windowsPE pass above runs
@@ -279,22 +279,22 @@
                 <RunAsynchronousCommand>
                     <Order>6</Order>
                     <Path>sc.exe stop wuauserv</Path>
-                    <Description>SandboxSBOMReporting: stop Windows Update service</Description>
+                    <Description>Stop Windows Update service (prevents a race with first-boot provisioning)</Description>
                 </RunAsynchronousCommand>
                 <RunAsynchronousCommand>
                     <Order>7</Order>
                     <Path>sc.exe config wuauserv start= disabled</Path>
-                    <Description>SandboxSBOMReporting: disable Windows Update service</Description>
+                    <Description>Disable Windows Update service (prevents a race with first-boot provisioning)</Description>
                 </RunAsynchronousCommand>
                 <RunAsynchronousCommand>
                     <Order>8</Order>
                     <Path>sc.exe stop UsoSvc</Path>
-                    <Description>SandboxSBOMReporting: stop Update Orchestrator service</Description>
+                    <Description>Stop Update Orchestrator service (prevents a race with first-boot provisioning)</Description>
                 </RunAsynchronousCommand>
                 <RunAsynchronousCommand>
                     <Order>9</Order>
                     <Path>sc.exe config UsoSvc start= disabled</Path>
-                    <Description>SandboxSBOMReporting: disable Update Orchestrator service</Description>
+                    <Description>Disable Update Orchestrator service (prevents a race with first-boot provisioning)</Description>
                 </RunAsynchronousCommand>
                 <!-- A Windows-Service-based WinRM bootstrap was previously
                      prototyped as a specialize-pass RunAsynchronousCommand

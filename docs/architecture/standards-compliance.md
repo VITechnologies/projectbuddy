@@ -118,6 +118,27 @@ the standing rule remains in full effect, though the shrinking defect
 count each round suggests the spec/doc surface is converging toward
 stability.
 
+After 6 audit rounds, the operator reprioritized from "audit and file
+issues" to "act as operator and resolve the accumulated backlog."
+`v0.3.31` resolved all 9 issues the 6 rounds had filed: genericized
+every real `REQ-001` violation and formally scoped the 2 disclosed
+exceptions; fixed the `guestHostname`/`guestFullName` batch-collision
+gap with a live-verified derivation fallback; aligned
+`ALLOW_PACKAGE_DRIFT`'s default across all 3 pipeline flavors (a real
+behavior change, disclosed as such); wired a real CI caller for
+`toolchain-smoke-test.yml` and authored real Pester fixture tests for
+both `Test-SbomArtifact.ps1` and the restored `Install-VerifiedNugetPackage.ps1`;
+merged the redundant `REQ-018`/`REQ-019` pair; repointed 3 dangling doc
+references instead of authoring unneeded new docs; filled in the
+remaining Architecture Packet component gaps; and made 2 forward-looking
+process decisions, both now recorded here and in `docs/cm/cm-plan.md`/
+`docs/release/release-procedure.md`: adopt lightweight Document Control
+blocks across core docs (explicitly declining a full formal ISO
+29119-3 test-plan rewrite as disproportionate for this repo's current
+maturity), and tag the wiki repository at each release boundary going
+forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
+`CHANGELOG.md` entry for the full, per-issue resolution detail.
+
 ## Current gate status (as of the version above)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
