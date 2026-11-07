@@ -57,8 +57,8 @@ jobs:
           # Write to a file rather than a step output: CHANGELOG entries can
           # contain backticks, double quotes, and `$(...)` sequences, which
           # are unsafe to splice back into a later run: script's expression
-          # syntax (${{ }} is a literal textual substitution, not a shell
-          # variable) -- see CM-release.yml / CM-CI-Release-notes findings.
+          # syntax (a literal textual substitution, not a shell variable)
+          # -- see CM-release.yml / CM-CI-Release-notes findings.
           notes="$(sed -n "/^## $VERSION/,/^## v/p" CHANGELOG.md | sed '$d' | tail -n +2)"
           if [ -z "$notes" ]; then
             echo "::error::No '## $VERSION' section found in CHANGELOG.md. Add the entry there first."
