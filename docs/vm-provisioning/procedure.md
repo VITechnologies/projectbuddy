@@ -201,6 +201,25 @@ restored dispatch path.
   (`build-activation-receipt.py`, `finalize-activation-receipt.py`,
   `verify-activation-receipt.py`), reaching the
   `labview2026-q3-pro-activated-ready` snapshot (`ACTIVATED_SNAPSHOT_NAME`).
+- **`register-runner`** -- registers the VM as a GitHub Actions
+  self-hosted runner for a target repo over SSH (no interactive console
+  session needed), achieving functional parity with the Windows family's
+  own `register-runner` phase above (`REQ-038`): a dedicated,
+  non-privileged local service account runs the runner's systemd service
+  (`install-actions-runner.sh` on the guest, orchestrated by
+  `complete-runner-registration.sh` on the host); the pinned,
+  independently-verified Actions-runner download URL/hash comes from
+  `provisioning-manifest.json`'s `actionsRunner` entry. Unlike
+  `complete-activation`, this phase takes no new VirtualBox snapshot and
+  needs no NVMe evidence directory -- it is a safe, idempotent,
+  re-runnable operation (a registered, online runner with an unlicensed
+  LabVIEW/VIPM install is a safe, inert state, same principle as the
+  Windows phase). Per `REQ-020`'s own established discipline (a real past
+  incident where a Windows `register-runner` self-reported success while
+  the runner had actually registered under the wrong name): this phase
+  does not trust `config.sh`'s own exit code alone -- it polls the real
+  `gh api repos/<target>/actions/runners` afterward for the expected
+  runner name, `online` status, and labels before reporting PASS.
 - **`package-build`** -- the strongest end-to-end proof phase: builds a
   real `.vip` package (`vi_technologies_lib_super_network_streams`)
   against the activated appliance, verifies its installation, and

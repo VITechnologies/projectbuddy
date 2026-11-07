@@ -18,6 +18,7 @@ VALID_PHASES = {
     "resume-public",
     "provision-public",
     "complete-activation",
+    "register-runner",
     "package-build",
 }
 WINDOWS_ONLY_PHASES = {
@@ -28,7 +29,7 @@ WINDOWS_ONLY_PHASES = {
     "repair-public",
     "resume-public",
 }
-LINUX_ONLY_PHASES = {"complete-activation", "package-build"}
+LINUX_ONLY_PHASES = {"complete-activation", "register-runner", "package-build"}
 
 
 def validate_dispatch() -> None:
@@ -47,7 +48,7 @@ def validate_dispatch() -> None:
         raise SystemExit("vm_name contains unsupported characters")
     if phase in {
         "inspect-public", "resume-public", "console-fingerprint", "repair-ssh-console", "restart-public",
-        "repair-public", "complete-activation", "package-build",
+        "repair-public", "complete-activation", "register-runner", "package-build",
     }:
         try:
             uuid.UUID(os.environ["INPUT_VM_UUID"])
