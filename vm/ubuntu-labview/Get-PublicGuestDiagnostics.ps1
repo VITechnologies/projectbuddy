@@ -71,8 +71,8 @@ Invoke-GuestProbe -Name "system-state" -Executable "/usr/bin/systemctl" -Argumen
 Invoke-GuestProbe -Name "default-target" -Executable "/usr/bin/systemctl" -Arguments @("get-default")
 Invoke-GuestProbe -Name "ssh-service" -Executable "/usr/bin/systemctl" -Arguments @("is-active", "ssh.service")
 Invoke-GuestProbe -Name "guest-utils-service" -Executable "/usr/bin/systemctl" -Arguments @("is-active", "virtualbox-guest-utils.service")
-Invoke-GuestProbe -Name "base-state" -Executable "/usr/bin/stat" -Arguments @("-c", "%F %a %U:%G %n", "/var/lib/sandbox-sbom-reporting/base-bootstrap-state.json")
-Invoke-GuestProbe -Name "base-receipt" -Executable "/usr/bin/stat" -Arguments @("-c", "%F %a %U:%G %n", "/var/lib/sandbox-sbom-reporting/base-bootstrap-receipt.json")
+Invoke-GuestProbe -Name "base-state" -Executable "/usr/bin/stat" -Arguments @("-c", "%F %a %U:%G %n", "/var/lib/projectbuddy/base-bootstrap-state.json")
+Invoke-GuestProbe -Name "base-receipt" -Executable "/usr/bin/stat" -Arguments @("-c", "%F %a %U:%G %n", "/var/lib/projectbuddy/base-bootstrap-receipt.json")
 Invoke-GuestProbe -Name "base-finalizer" -Executable "/usr/bin/stat" -Arguments @("-c", "%F %a %U:%G %n", "/usr/local/sbin/sandbox-base-bootstrap-finalize")
 Invoke-GuestProbe -Name "base-timer" -Executable "/usr/bin/systemctl" -Arguments @("status", "sandbox-base-bootstrap-receipt.timer", "--no-pager", "--lines=0")
 

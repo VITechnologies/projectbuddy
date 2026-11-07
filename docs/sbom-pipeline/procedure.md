@@ -1,5 +1,9 @@
 # SBOM Pipeline Procedure
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 Satisfies `repo-standards-review`'s DOC/ARCH gaps for the native and
 containerized SBOM pipelines (`VITechnologies/projectbuddy#32`, following
 the same gap pattern `#29` closed for VM provisioning). Describes the

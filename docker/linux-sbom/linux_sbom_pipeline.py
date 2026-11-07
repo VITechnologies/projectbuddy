@@ -25,8 +25,9 @@ Environment variables (paths are relative to /workspace, the mounted repo):
   VIPM_TOML_CONFIGS        JSON object of manifests keyed by project name;
                            overrides VIPM_TOML.
   OUTPUT_DIR               Report directory (default: output/linux).
-  ALLOW_PACKAGE_DRIFT      "0" makes `vipm sbom` fail when manifest packages are not
-                           installed in the container (default: "1").
+  ALLOW_PACKAGE_DRIFT      "1" makes `vipm sbom` tolerate manifest packages that are not
+                           installed in the container (default: "0", matching the native
+                           pipeline -- strict unless explicitly opted into).
   SBOM_SOURCE              "vipm" (default) runs vipm init/lock/sbom and requires
                            VIPM Pro. "manifest" builds the base SBOM from the
                            deployed vipm.toml without VIPM (no vipm.lock merge).
@@ -1075,7 +1076,7 @@ def process_project(project, config, manifest_text, output_base, include_os, ski
         sbom_args += ["--product-name", name, "--product-version", product_version, "--output", sbom_path]
         # Manifest NIPM roots are often Windows package names that do not exist in the
         # Linux container; the dpkg deep scan below records what is actually installed.
-        if os.environ.get("ALLOW_PACKAGE_DRIFT", "1") != "0":
+        if os.environ.get("ALLOW_PACKAGE_DRIFT", "0") != "0":
             sbom_args.append("--allow-package-drift")
         run_vipm(sbom_args, cwd=project_dir)
         with open(sbom_path, encoding="utf-8") as handle:

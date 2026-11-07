@@ -1,15 +1,21 @@
 # ProjectBuddy
 
+- Status: Active
+- Last substantive update: 2026-11-07
+- Owner: svelderrainruiz
+
 A public, project-agnostic engine for provisioning self-hosted build/test
 infrastructure and running native SBOM reporting pipelines, maintained by
 [VI Technologies](https://github.com/VITechnologies).
 
 Anyone forking this repository can use it for their own projects by
 supplying their own `.toml`/`.json` project configuration — this repository
-is *intended* to ship with zero pre-committed project configs, VI
-Technologies-specific identifiers, or private infrastructure state (a
-handful of real violations of this intent are tracked and being resolved,
-see [`#68`](https://github.com/VITechnologies/projectbuddy/issues/68)).
+ships with zero pre-committed project configs, VI
+Technologies-specific identifiers, or private infrastructure state, except
+in a small number of scripts explicitly disclosed as narrow-purpose,
+consumer-vendored reference templates for one specific known consumer
+(see [`#68`](https://github.com/VITechnologies/projectbuddy/issues/68)
+for the full history and remediation evidence).
 Private consumers (such as `VITechnologies/SandboxSBOMReporting`) supply
 their own real project configuration and infrastructure state separately,
 and consume this repository's reusable workflows and scripts as a

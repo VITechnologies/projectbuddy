@@ -28,7 +28,7 @@ def main() -> int:
         if not condition:
             errors.append(message)
 
-    require(receipt.get("schema") == "sandbox-sbom-reporting/ubuntu-activation@1", "unexpected schema")
+    require(receipt.get("schema") == "projectbuddy/ubuntu-activation@1", "unexpected schema")
     require(receipt.get("outcome") == "PASS", "outcome is not PASS")
     require(receipt.get("failures") == [], "receipt contains failures")
     evidence_hashes = receipt.get("evidenceSha256", {})
