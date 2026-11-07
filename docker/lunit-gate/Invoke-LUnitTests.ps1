@@ -192,7 +192,14 @@ if ($MyInvocation.InvocationName -ne ".") {
     $labviewRoot = 'C:\Program Files\National Instruments\LabVIEW 2026'
     $labview = Join-Path $labviewRoot 'LabVIEW.exe'
     $cli = 'C:\Program Files (x86)\National Instruments\Shared\LabVIEW CLI\LabVIEWCLI.exe'
-    $workspace = 'C:\workspace\lv-icon-editor-under-test'
+    # Deliberately OUTSIDE C:\workspace (the host-bind-mounted repo checkout):
+    # a Move-Item of the extracted suite folder into that SMB-backed mount
+    # failed with "Access to the path ... is denied" on a real live-dispatch
+    # run -- Windows-container bind mounts are known to behave differently
+    # from local NTFS for rename/move operations. The suite under test does
+    # not need to live inside the mount; only $ResultsDirectory does (so the
+    # host can read artifacts after the container exits).
+    $workspace = 'C:\lunit-suite-under-test'
 
     try {
         if (-not (Test-Path -LiteralPath $labview -PathType Leaf)) { throw "LabVIEW executable not found: $labview" }
