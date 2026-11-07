@@ -1124,7 +1124,16 @@ def process_project(project, config, manifest_text, output_base, include_os, ski
         log("SUCCESS", f"Grype reports written to {os.path.relpath(report_path, WORKSPACE)} (+ .json).")
         details += f", {len(matches)} Grype findings"
         grype_gate_error = grype_gate(matches, project_name=name)
-        update_stage("grype", "completed", gate="failed" if grype_gate_error else "passed")
+        if grype_gate_error:
+            grype_gate_status = "failed"
+        elif os.environ.get("GRYPE_FAIL_ON", "high").strip().lower() == "none":
+            # Matches the Windows container pipeline's reporting: "none"
+            # means no gate was actually evaluated, which is a materially
+            # different, more honest status than "passed".
+            grype_gate_status = "not-gated"
+        else:
+            grype_gate_status = "passed"
+        update_stage("grype", "completed", gate=grype_gate_status)
 
     if reporting_mode == "hosted-grype":
         log("WARN", "DEPENDENCY_TRACK_MODE=hosted-grype; skipping the Dependency-Track upload and gate.")

@@ -24,7 +24,9 @@ true:
 
 This repo follows GitFlow (`ADR-0001`): `feature/*` branches land on
 `develop`; `release/vX.Y.Z` and `hotfix/vX.Y.Z` branches land on `main`
-(and merge back to `develop`). See
+(and merge back to `develop`, unless `develop` and `main` are already
+content-identical, in which case the merge-back is a legitimate no-op).
+See
 [`docs/release/release-procedure.md`](docs/release/release-procedure.md)
 for the full flow, and
 [`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)

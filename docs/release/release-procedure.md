@@ -16,7 +16,8 @@ for why this repo adopted GitFlow.
 - Delete the release branch after both required merges complete.
 - Hotfix branches originate from `main`.
 - Hotfix branches merge into `main`.
-- Hotfix branches also merge into `develop` (or an active release branch, if one exists).
+- Hotfix branches also merge into `develop`, and additionally into an
+  active release branch if one exists at the time.
 
 ## Scope
 
@@ -33,10 +34,17 @@ for why this repo adopted GitFlow.
 2. Land feature work into the fork's `main` through a reviewed pull request
    on `svelderrainruiz/projectbuddy`.
 3. Sync the fork's `main` to this repo's (`VITechnologies/projectbuddy`)
-   `develop` via a `sync-from-fork-<date>` branch + pull request (same
-   mechanism already used for `main`-to-`main` syncs prior to this ADR,
-   just re-targeted at `develop`).
+   `develop` via a branch + pull request targeting `develop` (named either
+   `sync-from-fork-<date>` or `sync-upstream-develop-<topic>` in practice;
+   both are the same mechanism, just named for the date or the change
+   being synced).
 4. Delete merged feature branches on the fork after promotion.
+5. After a release promotes `develop` to `main` here (Release Flow below),
+   sync that same `main` back to the fork via a `sync-upstream-main-vX.Y.Z`
+   pull request on `svelderrainruiz/projectbuddy` -- this is what keeps the
+   fork's `main` (step 1's starting point) current, and is also why
+   `develop` and `main` here are typically already content-identical by
+   the time Release Flow step 4 runs.
 
 ## Release Flow
 
