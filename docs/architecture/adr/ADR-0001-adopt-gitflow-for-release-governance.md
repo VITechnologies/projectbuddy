@@ -36,15 +36,9 @@
   produces or touches must carry a machine-checkable stamp of the exact
   `repo-standards-review` version (tag and commit SHA) that drove it, so
   the compliance claim is traceable to a specific, reproducible version of
-  the standard -- not an undated, driftable assertion. In practice this
-  means every such document is covered by (not a duplicate copy of) the
-  one canonical stamp in
-  [`../standards-compliance.md`](../standards-compliance.md), which every
-  CM/release/governance doc this ADR produced
-  (`docs/cm/cm-plan.md`, `docs/release/release-procedure.md`, this ADR
-  itself) explicitly cross-references rather than re-stamping
-  independently -- avoiding `N` separately-driftable stamps instead of
-  one.
+  the standard -- not an undated, driftable assertion. See
+  [`../standards-compliance.md`](../standards-compliance.md) for the
+  canonical stamp and the living re-certification policy.
 - This repo's fork, `svelderrainruiz/projectbuddy`, continues to be where
   day-to-day feature development happens; its own `main` branch now
   represents GitFlow's `develop` role. Sync pull requests from the fork
@@ -99,6 +93,15 @@
     (used throughout this engine's recent history) must change to "fork
     `main` syncs to upstream `develop`" -- a real process change for every
     future contribution, not just this one.
+
+## Addendum (2026-11-07, round-5 semantic audit)
+
+Per `docs/information-item-map.md`'s own Decision Record convention (a
+new `ADR-NNNN` file is added, never edited after acceptance), this
+section is an append-only addendum, not a rewrite of the original
+Decision/Consequences text above (an earlier commit briefly violated
+that convention by editing the text in place; reverted here).
+
 - Known variance: `v0.3.28` was tagged on a commit one PR past its
   `release/v0.3.28` branch's own promotion -- a second, non-release PR
   landed directly on `main` first (a real-CI-dispatch-discovered
@@ -106,4 +109,13 @@
   See `docs/cm/cm-plan.md`'s Status Accounting section for the full
   record and judgment; `docs/release/release-procedure.md` step 6 now
   states the rule this deviated from explicitly, to reduce recurrence.
+- Clarification of the stamp condition above: in practice, every
+  document this adoption produces or touches is covered by (not a
+  duplicate copy of) the one canonical stamp in
+  [`../standards-compliance.md`](../standards-compliance.md), which every
+  CM/release/governance doc this ADR produced
+  (`docs/cm/cm-plan.md`, `docs/release/release-procedure.md`, this ADR
+  itself) explicitly cross-references rather than re-stamping
+  independently -- avoiding `N` separately-driftable stamps instead of
+  one.
 

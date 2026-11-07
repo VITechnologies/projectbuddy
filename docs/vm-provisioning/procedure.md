@@ -18,9 +18,10 @@ families currently disagree on `guest_full_name`/`guest_hostname`**:
 `provision-ubuntu-vm.yml` marks both `required: true`;
 `provision-windows-labview-vm.yml` marks both `required: false` with a
 real, silently-applicable default (`VM Builder`/`vm-builder.local`) --
-that Windows-family workflow's own input descriptions even
-self-contradict this (prose says "no built-in default... required for
-create-vm" right beside a schema that says otherwise). ISO path is a
+that Windows-family workflow's own input descriptions disclose this
+directly (no longer self-contradictory as of `v0.3.29`: the prose now
+says the generic default is real and the field "is not yet required",
+matching its own schema). ISO path is a
 separate, non-identity input with a legitimate generic default in both
 families (see README.md's `Iso`/`GuestUser`/`WinRmHostPort` carve-out),
 not part of this identity-value set.
@@ -192,21 +193,28 @@ engine's own restored dispatch path.
 
 ### Receipt verification chain
 
-Every meaningful state transition (base appliance, activation, package
-build) produces a receipt and a dedicated `verify-*-receipt.py` script
+Every meaningful state transition (base appliance, activation) produces
+a receipt and a dedicated `verify-*-receipt.py` script
 that independently re-checks it (`verify-base-receipt.py`,
 `verify-activation-receipt.py`, `verify-public-appliance-receipt.py`,
 `verify-public-provisioning-receipt.py`, `verify-vagrant-box-receipt.py`,
 `verify-vagrant-clone-receipt.py`) -- mirroring `vm-fleet-status.yml`'s
 "never trust a self-reported status alone" discipline for the Windows
-family.
+family. The intended `package-build` transition has no dedicated
+receipt verifier of its own (`package-vagrant-box.py` validates its
+*input* vagrant-box receipt via `verify-vagrant-box-receipt.py`, but
+produces no independently-reverifiable receipt of its own output) -- a
+real gap, not yet resolved.
 
 ## Shared schemas
 
-- `provisioning-manifest.json` (one per VM family): a versioned schema
-  (`sandbox-sbom-reporting/windows-labview-provisioning@1` for Windows)
-  pinning the exact ISO/VIPM/LabVIEW/Actions-runner/PowerShell/NSSM
-  binary hashes this pipeline is proven against. Committed, public,
+- `provisioning-manifest.json` (one per VM family, each with its own
+  schema and content -- not a single shared shape): Windows's
+  (`sandbox-sbom-reporting/windows-labview-provisioning@1`) pins
+  ISO/VIPM/LabVIEW/Actions-runner/PowerShell7/NSSM binary hashes;
+  Ubuntu's (`sandbox-sbom-reporting/ubuntu-labview-provisioning@1`) pins
+  only ISO/VIPM/LabVIEW (no Actions-runner/PowerShell/NSSM equivalents,
+  which are Windows-specific concepts). Committed, public,
   contains no credentials.
 - `runner-inventory.example.json` (Windows family): a versioned schema
   (`vm-provisioning/windows-labview-runner-inventory@3`) a fork copies to

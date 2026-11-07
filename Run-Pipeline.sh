@@ -67,7 +67,7 @@ CONTAINER_WORKSPACE="/workspace"
 # own location (where fetch_examples() fetches NI's example VIs by default).
 # Defaults to SCRIPT_DIR so existing invocations are unaffected; a consumer
 # invoking this script from a pinned external checkout (see
-# docs/projectbuddy-consumption.md) must set this to the real repo root, so
+# README.md's "Consumption model" section) must set this to the real repo root, so
 # generated reports land where the calling workflow expects to upload them.
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$SCRIPT_DIR}"
 

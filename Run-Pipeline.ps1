@@ -14,7 +14,7 @@ param(
     # script itself (Build-Sbom.ps1/internal/pipeline-config.schema.json).
     # Defaults to $PSScriptRoot so existing invocations are unaffected;
     # a consumer invoking this script from a pinned external checkout
-    # (see docs/projectbuddy-consumption.md) must pass the real repo root
+    # (see README.md's "Consumption model" section) must pass the real repo root
     # here, since project-specific files like config/patches/*.patch only
     # exist there, never in the generic engine checkout.
     [string]$WorkspaceRoot = $PSScriptRoot

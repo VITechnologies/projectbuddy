@@ -90,6 +90,34 @@ Every one of the 4 verification passes run so far has found at least one
 real defect the prior pass's own fixes either missed or introduced --
 the standing rule remains in full effect.
 
+A sixth pass (same 3 models, verifying `v0.3.29`) found significantly
+fewer new defects than prior rounds -- an expected sign of convergence
+after 6 rounds of hardening the same spec/doc surface -- but still a
+genuine process violation and several real sibling-location drift
+instances: `v0.3.29`'s own fix to `ADR-0001` had edited its accepted
+Decision/Consequences text in place, directly violating this repo's own
+Decision Record convention ("never edited after acceptance," per
+`docs/information-item-map.md`) -- reverted to the original accepted
+text, with the genuinely useful new content moved into a proper,
+append-only Addendum section instead. Also found: 2 more dangling
+`docs/projectbuddy-consumption.md` references round 5 missed when fixing
+2 sibling instances of the identical gap; `.github/skills/projectbuddy-identity/`
+and `standards-compliance-recheck.yml` still carrying overclaims already
+corrected in `README.md`/`standards-compliance.md` themselves; a wiki
+citation of an ephemeral workflow run ID as sole evidence, directly
+contradicting that same SRS's own stated evidence-citation principle;
+and REQ-010/REQ-013 updated in one sibling location (SRS or RTM) but not
+the other. Two new `#68` evidence sites were added (a Windows-family
+hardcoded-identifier instance, and a broader schema-namespace-identifier
+pattern spanning 11 files, flagged with a nuance that it may be a
+namespace-naming choice rather than the same class of bug). See `v0.3.30`'s
+`CHANGELOG.md` entry and `#80` for the remaining lower-severity items.
+Every one of the 5 verification passes run so far has found at least one
+real defect the prior pass's own fixes either missed or introduced --
+the standing rule remains in full effect, though the shrinking defect
+count each round suggests the spec/doc surface is converging toward
+stability.
+
 ## Current gate status (as of the version above)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
