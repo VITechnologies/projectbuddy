@@ -204,6 +204,36 @@ def test_existing_destination_is_never_overwritten(inputs: tuple[Path, Path]) ->
     assert not (checkout / "docs/requirements/syrs.md").exists()
 
 
+@pytest.mark.parametrize("parent", ["docs", "docs/requirements", "docs/architecture"])
+def test_symlinked_destination_parent_is_rejected_before_staging(
+    inputs: tuple[Path, Path], tmp_path: Path, parent: str
+) -> None:
+    wiki, checkout = inputs
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    redirected = checkout / parent
+    redirected.parent.mkdir(parents=True, exist_ok=True)
+    redirected.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(scan.SpecError, match="symlinked scan destination directory"):
+        scan.prepare(wiki, checkout)
+    assert not list(outside.iterdir())
+    assert not (checkout / "docs/requirements/syrs.md").exists()
+    assert not (checkout / "docs/architecture/overview.md").exists()
+
+
+def test_non_directory_destination_parent_is_rejected_before_staging(
+    inputs: tuple[Path, Path],
+) -> None:
+    wiki, checkout = inputs
+    (checkout / "docs").mkdir()
+    parent = checkout / "docs/requirements"
+    parent.write_text("existing", encoding="utf-8")
+    with pytest.raises(scan.SpecError, match="non-directory scan destination parent"):
+        scan.prepare(wiki, checkout)
+    assert parent.read_text(encoding="utf-8") == "existing"
+    assert not (checkout / "docs/architecture/overview.md").exists()
+
+
 def test_main_reports_success_and_validation_errors(
     inputs: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:

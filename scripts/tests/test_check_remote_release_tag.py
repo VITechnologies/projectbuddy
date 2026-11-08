@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +31,7 @@ class RemoteReleaseTagGuardTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_guard(self, status, stdout="", stderr=""):
+    def run_guard(self, status, stdout="", stderr="", *, script=GUARD, cwd=None):
         env = os.environ.copy()
         env.update(
             {
@@ -42,7 +43,8 @@ class RemoteReleaseTagGuardTests(unittest.TestCase):
             }
         )
         return subprocess.run(
-            ["bash", str(GUARD), "v1.2.3", "origin"],
+            ["bash", str(script), "v1.2.3", "origin"],
+            cwd=cwd,
             env=env,
             capture_output=True,
             text=True,
@@ -74,6 +76,13 @@ class RemoteReleaseTagGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("failed", result.stdout)
 
+    def test_unexpected_exit_two_with_stdout_is_not_absence(self):
+        for output in ("\n", "\r\n", "unexpected output"):
+            with self.subTest(output=output):
+                result = self.run_guard(2, stdout=output)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn("is absent", result.stdout)
+
     def test_other_nonzero_exit_is_not_absence(self):
         result = self.run_guard(1)
         self.assertEqual(result.returncode, 2)
@@ -85,6 +94,7 @@ class RemoteReleaseTagGuardTests(unittest.TestCase):
             "not-an-object\trefs/tags/v1.2.3",
             "a" * 40 + "\trefs/tags/v1.2.4",
             "a" * 40 + "\trefs/tags/v1.2.3\n" + "b" * 40 + "\trefs/tags/v1.2.3",
+            "a" * 40 + "\trefs/tags/v1.2.3\n\n",
         ):
             with self.subTest(output=output):
                 result = self.run_guard(0, output)
@@ -106,9 +116,30 @@ class RemoteReleaseTagGuardTests(unittest.TestCase):
 
     def test_release_workflow_runs_guard_before_release_creation(self):
         text = WORKFLOW.read_text(encoding="utf-8")
-        guard = text.index("./scripts/Check-RemoteReleaseTag.sh")
+        guard = text.index("./.release-control/scripts/Check-RemoteReleaseTag.sh")
         release = text.index("name: Create Release")
         self.assertLess(guard, release)
+
+    def test_release_guard_comes_from_the_workflow_revision(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        control = text.split("      - name: Checkout Workflow Revision", 1)[1].split(
+            "      - name: Validate Version Format", 1
+        )[0]
+        self.assertIn("ref: ${{ github.sha }}", control)
+        self.assertIn("path: .release-control", control)
+        self.assertIn("persist-credentials: false", control)
+        self.assertIn("ref: ${{ inputs.target }}", text)
+
+    def test_workflow_guard_runs_when_target_checkout_has_no_helper(self):
+        target = Path(self.temp.name) / "target"
+        control = target / ".release-control" / "scripts"
+        control.mkdir(parents=True)
+        helper = control / GUARD.name
+        shutil.copyfile(GUARD, helper)
+        self.assertFalse((target / "scripts" / GUARD.name).exists())
+        result = self.run_guard(2, script=helper, cwd=target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is absent", result.stdout)
 
 
 if __name__ == "__main__":

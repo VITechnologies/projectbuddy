@@ -139,6 +139,13 @@ def prepare(wiki: Path, checkout: Path) -> None:
 
     destinations = [(checkout / destination, documents[name]) for name, destination in DOCUMENTS]
     for path, _ in destinations:
+        parent = checkout
+        for component in path.relative_to(checkout).parts[:-1]:
+            parent /= component
+            if parent.is_symlink():
+                raise SpecError(f"symlinked scan destination directory: {parent.relative_to(checkout)}")
+            if parent.exists() and not parent.is_dir():
+                raise SpecError(f"non-directory scan destination parent: {parent.relative_to(checkout)}")
         if path.exists() or path.is_symlink():
             raise SpecError(f"scan destination already exists: {path.relative_to(checkout)}")
     for path, data in destinations:

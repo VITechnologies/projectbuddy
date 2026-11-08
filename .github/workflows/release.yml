@@ -32,6 +32,13 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.target }}
 
+      - name: Checkout Workflow Revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-control
+
       - name: Validate Version Format
         shell: bash
         env:
@@ -45,7 +52,7 @@ jobs:
           # Exit 2 means no matching ref only when the command produced no
           # output or diagnostics. Transport, authentication, and malformed
           # results fail closed; do not treat every nonzero exit as absence.
-          ./scripts/Check-RemoteReleaseTag.sh "$VERSION" origin
+          ./.release-control/scripts/Check-RemoteReleaseTag.sh "$VERSION" origin
 
       - name: Extract Matching CHANGELOG Section
         id: changelog

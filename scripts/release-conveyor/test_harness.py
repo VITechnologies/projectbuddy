@@ -2,6 +2,10 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from types import SimpleNamespace
+from unittest import mock
 
 import harness
 
@@ -98,6 +102,11 @@ class Belt(unittest.TestCase):
         self.put("D1", recs["V1"])
         self.assertEqual(self.verdict("D1"), ("FAIL", ["out-of-order-D1"]))
 
+    def test_broken_future_record_symlink_is_out_of_order(self):
+        self.advance("D1")
+        os.symlink("missing", os.path.join(self.inp, "V2.json"))
+        self.assertEqual(self.verdict("D1"), ("FAIL", ["out-of-order-V2"]))
+
     def test_cross_conveyor_and_candidate_rejected(self):
         recs = self.advance("D1")
         other = dict(recs["V1"], conveyorId="belt-b")
@@ -149,6 +158,23 @@ class Belt(unittest.TestCase):
         self.assertEqual(self.verdict("D1"), ("FAIL", ["duplicate-field"]))
         self.put_raw("V1", "{not json")
         self.assertEqual(self.verdict("D1"), ("FAIL", ["malformed-V1"]))
+
+    def test_invalid_lane_types_produce_a_failure_record(self):
+        recs = self.advance("D1")
+        for value in ([], {}, None, 1, True):
+            with self.subTest(value=value):
+                bad = stage("V1", recs["D0"])
+                bad["lanes"][0]["lane"] = value
+                self.put("V1", bad)
+                self.assertEqual(self.verdict("D1"), ("FAIL", ["fields-V1-lane"]))
+
+    def test_unreadable_input_is_unknown(self):
+        self.put("lunit", lunit())
+        with mock.patch("builtins.open", side_effect=PermissionError("unreadable")):
+            with self.assertRaises(harness.Verdict) as outcome:
+                harness.load(self.inp, "lunit")
+        self.assertEqual((outcome.exception.verdict, outcome.exception.reason),
+                         ("UNKNOWN", "unreadable-lunit"))
 
     def test_output_redacts_input_values(self):
         recs = self.advance("D1")
@@ -219,6 +245,13 @@ class Environment(unittest.TestCase):
         finally:
             os.chmod(self.inp, 0o755)
 
+    def test_read_only_probe_refuses_errors_and_symlinks(self):
+        with mock.patch.object(harness.os, "statvfs", side_effect=PermissionError("unreadable")):
+            self.assertFalse(harness._read_only_tree(self.inp))
+        os.symlink("missing", os.path.join(self.inp, "broken.json"))
+        with mock.patch.object(harness.os, "statvfs", return_value=SimpleNamespace(f_flag=os.ST_RDONLY)):
+            self.assertFalse(harness._read_only_tree(self.inp))
+
     def test_missing_net_dir_is_unproven(self):
         problems = harness.environment_problems(self.inp, self.out, {}, os.path.join(self.tmp.name, "nope"),
                                                 (), (), lambda path: True)
@@ -231,6 +264,26 @@ class Environment(unittest.TestCase):
             argv[i] = bad
             self.assertEqual(harness.main(argv, {}, self.net, (), (), lambda path: True), harness.REFUSED)
         self.assertEqual(harness.main(good[:5], {}, self.net, (), (), lambda path: True), harness.REFUSED)
+
+    def test_output_race_and_write_error_are_refused(self):
+        good = ["D0", "belt-a", CAND, HD, self.inp, self.out]
+        for error, reason in ((FileExistsError(), "output-exists"),
+                              (PermissionError(), "output-write-failed")):
+            with self.subTest(reason=reason), mock.patch.object(harness, "run", side_effect=error):
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    result = harness.main(good, {}, self.net, (), (), lambda path: True)
+                self.assertEqual(result, harness.REFUSED)
+                self.assertIn("refused: " + reason, stderr.getvalue())
+
+    def test_broken_output_symlink_is_refused(self):
+        os.symlink("missing", os.path.join(self.out, "D0.json"))
+        good = ["D0", "belt-a", CAND, HD, self.inp, self.out]
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            result = harness.main(good, {}, self.net, (), (), lambda path: True)
+        self.assertEqual(result, harness.REFUSED)
+        self.assertIn("refused: output-exists", stderr.getvalue())
 
 
 if __name__ == "__main__":

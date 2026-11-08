@@ -21,6 +21,10 @@ capabilities are required before the harness can participate in release
 qualification. Do not treat a `PASS` from these tests or this prototype as
 release evidence.
 
+Malformed lane identities fail, unavailable input is unknown, and an
+existing or unwritable station output is refused rather than reported as
+an accepted record.
+
 The Docker image pins its Python base image by digest. A release-quality
 launcher must independently enforce and attest the sandbox and image digest;
 the harness's environment checks are defense in depth only.

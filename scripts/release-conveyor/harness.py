@@ -69,6 +69,8 @@ def load(directory, name):
         raise
     except (ValueError, UnicodeDecodeError):
         raise Verdict(FAIL, "malformed-" + name)
+    except OSError:
+        raise Verdict(UNKNOWN, "unreadable-" + name)
 
 
 def _exact_fields(record, fields, name):
@@ -110,6 +112,8 @@ def check_stage_record(record, ctx, stage, predecessor):
     names = []
     for lane in lanes:
         _exact_fields(lane, LANE_FIELDS, stage + "-lane")
+        if not isinstance(lane["lane"], str):
+            raise Verdict(FAIL, "fields-" + stage + "-lane")
         names.append(lane["lane"])
     if len(names) != len(set(names)):
         raise Verdict(FAIL, "duplicate-lane-" + stage)
@@ -144,7 +148,7 @@ def evaluate(station, ctx, inputs, progress):
     """Re-verify the chain before `station`; progress["last"] is the last verified record."""
     upto = ORDER.index(station)
     for name in ORDER[upto:]:
-        if os.path.exists(os.path.join(inputs, name + ".json")):
+        if os.path.lexists(os.path.join(inputs, name + ".json")):
             raise Verdict(FAIL, "out-of-order-" + name)
     check_lunit(load(inputs, "lunit"), ctx)
     previous = None
@@ -173,11 +177,16 @@ def emit(station, ctx, predecessor, verdict, reason):
 
 
 def _read_only_tree(path):
-    if not os.path.isdir(path) or not os.statvfs(path).f_flag & os.ST_RDONLY:
-        return False
-    for entry in os.scandir(path):
-        if os.access(entry.path, os.W_OK) or not os.statvfs(entry.path).f_flag & os.ST_RDONLY:
+    try:
+        if not os.path.isdir(path) or not os.statvfs(path).f_flag & os.ST_RDONLY:
             return False
+        with os.scandir(path) as entries:
+            for entry in entries:
+                if (entry.is_symlink() or os.access(entry.path, os.W_OK)
+                        or not os.statvfs(entry.path).f_flag & os.ST_RDONLY):
+                    return False
+    except OSError:
+        return False
     return True
 
 
@@ -230,11 +239,18 @@ def main(argv, environ=None, net_dir="/sys/class/net", sockets=DOCKER_SOCKETS,
     if problems:
         print("refused: " + ",".join(problems), file=sys.stderr)
         return REFUSED
-    if os.path.exists(os.path.join(outputs, station + ".json")):
+    if os.path.lexists(os.path.join(outputs, station + ".json")):
         print("refused: output-exists", file=sys.stderr)
         return REFUSED
     ctx = {"conveyorId": conveyor_id, "candidate": candidate, "harnessDigest": harness_digest}
-    record = run(station, ctx, inputs, outputs)
+    try:
+        record = run(station, ctx, inputs, outputs)
+    except FileExistsError:
+        print("refused: output-exists", file=sys.stderr)
+        return REFUSED
+    except OSError:
+        print("refused: output-write-failed", file=sys.stderr)
+        return REFUSED
     reason = record["reasons"][0] if record["reasons"] else ""
     print(station + " " + record["verdict"] + ((" " + reason) if reason else ""))
     return EXIT[record["verdict"]]

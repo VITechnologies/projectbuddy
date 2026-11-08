@@ -9,21 +9,26 @@ if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 2
 fi
 
+lookup_stdout=$(mktemp)
+trap 'rm -f "$lookup_stdout"' EXIT
 lookup_stderr=$(mktemp)
-trap 'rm -f "$lookup_stderr"' EXIT
+trap 'rm -f "$lookup_stdout" "$lookup_stderr"' EXIT
 
 set +e
-lookup_output=$(git ls-remote --exit-code --tags "$remote" "refs/tags/$version" 2>"$lookup_stderr")
+git ls-remote --exit-code --tags "$remote" "refs/tags/$version" >"$lookup_stdout" 2>"$lookup_stderr"
 lookup_status=$?
 set -e
 
-if [[ $lookup_status -eq 2 && -z "$lookup_output" && ! -s "$lookup_stderr" ]]; then
+if [[ $lookup_status -eq 2 && ! -s "$lookup_stdout" && ! -s "$lookup_stderr" ]]; then
   echo "::notice::Tag $version is absent from the remote."
   exit 0
 fi
 
 if [[ $lookup_status -eq 0 ]]; then
-  if [[ -n "$lookup_output" && "$lookup_output" != *$'\n'* ]]; then
+  lookup_lines=()
+  mapfile -t lookup_lines <"$lookup_stdout"
+  if [[ ${#lookup_lines[@]} -eq 1 ]]; then
+    lookup_output=${lookup_lines[0]}
     oid=${lookup_output%%$'\t'*}
     expected_line=$oid$'\t'"refs/tags/$version"
     if [[ "$lookup_output" == "$expected_line" &&
