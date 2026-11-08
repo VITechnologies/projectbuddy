@@ -148,6 +148,17 @@ the dual-platform gate is now **Active**. See
 for the full procedure, the SHA-256 package-pinning provenance, and the
 named-waiver policy.
 
+### Release conveyor harness prototype (`scripts/release-conveyor/`)
+
+A synthetic Docker-to-Docker transition harness prototype for the planned
+release qualification conveyor. Its pull-request workflow validates only
+the harness and synthetic stage records; it does not verify actual VM or
+LUnit evidence and is not a release gate. An authenticated evidence verifier,
+protected station-record authority, and launcher-enforced sandbox are
+required before it can participate in release qualification. See
+[`scripts/release-conveyor/README.md`](scripts/release-conveyor/README.md)
+and the ProjectBuddy wiki requirements for the planned design.
+
 ### Runner/registration helpers (root-level)
 
 `Register-WindowsRunner.ps1` and `Register-WslRunnerKeepAlive.ps1` plan or

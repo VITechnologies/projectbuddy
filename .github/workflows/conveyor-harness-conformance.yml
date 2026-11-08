@@ -1,0 +1,33 @@
+name: Release Conveyor Harness Conformance
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/release-conveyor/**'
+      - '.github/workflows/conveyor-harness-conformance.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/release-conveyor/**'
+      - '.github/workflows/conveyor-harness-conformance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  docker-conformance:
+    name: Synthetic Docker-to-Docker conformance (not release qualification)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s scripts/release-conveyor -p 'test_*.py'
+
+      - name: Run Docker-to-Docker conformance
+        run: python3 scripts/release-conveyor/docker_conformance.py
