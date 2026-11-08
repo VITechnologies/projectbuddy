@@ -202,7 +202,11 @@ def environment_problems(inputs, outputs, environ=None, net_dir="/sys/class/net"
         problems.append("docker-socket")
     if any(os.path.exists(path) for path in devices):
         problems.append("hypervisor-device")
-    if not os.path.isdir(net_dir) or set(os.listdir(net_dir)) - {"lo"}:
+    try:
+        network_unproven = not os.path.isdir(net_dir) or bool(set(os.listdir(net_dir)) - {"lo"})
+    except OSError:
+        network_unproven = True
+    if network_unproven:
         problems.append("network-unproven")
     if not read_only(inputs):
         problems.append("input-not-read-only")

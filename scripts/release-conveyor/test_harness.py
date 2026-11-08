@@ -257,6 +257,18 @@ class Environment(unittest.TestCase):
                                                 (), (), lambda path: True)
         self.assertIn("network-unproven", problems)
 
+    def test_unreadable_or_removed_net_dir_is_refused(self):
+        good = ["D0", "belt-a", CAND, HD, self.inp, self.out]
+        for error in (PermissionError("unreadable"), FileNotFoundError("removed")):
+            with self.subTest(error=type(error).__name__):
+                stderr = StringIO()
+                with mock.patch.object(harness.os, "listdir", side_effect=error):
+                    with redirect_stderr(stderr):
+                        result = harness.main(good, {}, self.net, (), (), lambda path: True)
+                self.assertEqual(result, harness.REFUSED)
+                self.assertIn("network-unproven", stderr.getvalue())
+                self.assertFalse(os.path.lexists(os.path.join(self.out, "D0.json")))
+
     def test_invocation_validation(self):
         good = ["D0", "belt-a", CAND, HD, self.inp, self.out]
         for i, bad in [(0, "V1"), (1, "Belt A"), (2, "abc"), (3, "sha256:xyz")]:
