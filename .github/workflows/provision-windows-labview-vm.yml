@@ -272,22 +272,7 @@ jobs:
           python3 -m venv "${{ runner.temp }}/winrm-venv-shutdown" 2>/dev/null || true
           "${{ runner.temp }}/winrm-venv-shutdown/bin/pip" install --quiet pywinrm 2>/dev/null || true
           winrm_ready=0
-          # 24 iterations (~28 min) was confirmed live (2026-11-08) to be
-          # genuinely insufficient against a fresh disposable VM, not merely
-          # a rare flake: 3 separate attempts against the same VM each timed
-          # out at ~28-37 minutes with a repeating ReadTimeoutError on the
-          # WinRM round-trip, while the bare TCP port and the guest's own
-          # desktop were independently confirmed reachable/visible (via
-          # VBoxManage screenshotpng) well within that window -- the WinRM
-          # application layer itself was the slow part, not guest boot time.
-          # Raised to 90 iterations (~90 min headroom) to directly test
-          # whether patience alone resolves it; each attempt now also prints
-          # its own elapsed time so a future failure is diagnosable without
-          # needing to reverse-engineer timestamps from raw log lines.
-          attempt_start_epoch="$(date +%s)"
-          for attempt in $(seq 1 90); do
-            elapsed=$(( $(date +%s) - attempt_start_epoch ))
-            echo "wait-ready attempt $attempt/90 (${elapsed}s elapsed since restart)"
+          for _ in $(seq 1 24); do
             "${{ runner.temp }}/winrm-venv-shutdown/bin/python3" ./vm/windows-labview/provision-windows-guest.py \
               --port "$WINRM_PORT" --password-file "$WINRM_PASSWORD_FILE" wait-ready && { winrm_ready=1; break; }
             sleep 10
