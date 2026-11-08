@@ -32,6 +32,13 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.target }}
 
+      - name: Checkout Workflow Revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-control
+
       - name: Validate Version Format
         shell: bash
         env:
@@ -42,14 +49,10 @@ jobs:
             echo "::error::-version must look like vX.Y.Z, got: $VERSION"
             exit 1
           fi
-          # actions/checkout defaults to fetch-tags: false (confirmed live:
-          # `git fetch --no-tags ...`), so a local `git rev-parse` here was
-          # previously dead code -- it could never see a real remote tag.
-          # Query the remote directly instead.
-          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
-            echo "::error::Tag $VERSION already exists. Immutable releases do not allow tag reuse, even after deletion -- pick a new version."
-            exit 1
-          fi
+          # Exit 2 means no matching ref only when the command produced no
+          # output or diagnostics. Transport, authentication, and malformed
+          # results fail closed; do not treat every nonzero exit as absence.
+          ./.release-control/scripts/Check-RemoteReleaseTag.sh "$VERSION" origin
 
       - name: Extract Matching CHANGELOG Section
         id: changelog
