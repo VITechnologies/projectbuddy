@@ -2,8 +2,8 @@
 
 The verifier rebuilds the whole receipt from the profile, the evidence, the source box receipt, and
 the clone's identity; any difference fails. It also verifies ``projectbuddy/ubuntu-vagrant-clone@1``
-receipts, which name no profile: only against a profile whose SHA-256 the caller pins and that
-declares the ``@1`` runtime block.
+receipts, which name no profile: only against the separate ``@1`` profile the caller gives, whose
+SHA-256 the caller pins and which declares the ``@1`` runtime block.
 """
 from __future__ import annotations
 
@@ -87,9 +87,19 @@ def _observed(receipt: dict, profile: Profile, errors: list[str]) -> list[str] |
 
 
 def verify_receipt(path: pathlib.Path, *, profile: Profile, box_receipt: pathlib.Path, evidence_dir: pathlib.Path,
-                   name: str, uuid: str, v1_profile_sha256: str | None = None) -> dict:
-    """Return the verified receipt or raise ``ReceiptError`` naming every failed check."""
+                   name: str, uuid: str, v1_profile: Profile | None = None,
+                   v1_profile_sha256: str | None = None) -> dict:
+    """Return the verified receipt or raise ``ReceiptError`` naming every failed check.
+
+    A ``@2`` receipt verifies against ``profile``. A ``@1`` receipt verifies against ``v1_profile``
+    alone, which must hash to ``v1_profile_sha256`` and declare the ``@1`` runtime block.
+    """
     receipt = load_object(path, "clone receipt")
+    schema = receipt.get("schema")
+    if schema == RECEIPT_V1_SCHEMA:
+        if v1_profile is None or v1_profile.sha256 != v1_profile_sha256 or v1_profile.receipt_v1_runtime is None:
+            raise ReceiptError(f"a {RECEIPT_V1_SCHEMA} receipt verifies only against its pinned profile")
+        profile = v1_profile
     uuid = canonical_uuid(uuid, "clone VM UUID")
     box = source_box(box_receipt)
     evidence = load_evidence(profile, evidence_dir)
@@ -102,7 +112,6 @@ def verify_receipt(path: pathlib.Path, *, profile: Profile, box_receipt: pathlib
     found = forbidden_keys(receipt)
     if found:
         errors.append(f"forbidden fields present: {', '.join(found)}")
-    schema = receipt.get("schema")
     expected = None
     if schema == RECEIPT_SCHEMA:
         observed = _observed(receipt, profile, errors)
@@ -110,10 +119,7 @@ def verify_receipt(path: pathlib.Path, *, profile: Profile, box_receipt: pathlib
             expected = build_receipt(profile, box=box, name=name, uuid=uuid, boot=boot, evidence_dir=evidence_dir,
                                      observed=observed)
     elif schema == RECEIPT_V1_SCHEMA:
-        if profile.sha256 != v1_profile_sha256 or profile.receipt_v1_runtime is None:
-            errors.append(f"a {RECEIPT_V1_SCHEMA} receipt verifies only against its pinned profile")
-        else:
-            expected = build_v1_receipt(profile, box=box, name=name, uuid=uuid, boot=boot, evidence_dir=evidence_dir)
+        expected = build_v1_receipt(profile, box=box, name=name, uuid=uuid, boot=boot, evidence_dir=evidence_dir)
     else:
         errors.append("unexpected schema")
     if expected is not None:

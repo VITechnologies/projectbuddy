@@ -19,7 +19,7 @@
       {"file": "activation-known-answer-capture.json", "pointer": "/host/bootId"}
     ]
   },
-  "runnerUnits": "record",
+  "runnerUnits": "refuse",
   "checks": [
     {"file": "activation-known-answer-capture.json", "pointer": "/inputs", "equals": [20, 22],
      "message": "clone LabVIEW known-answer probe failed"},
@@ -54,13 +54,5 @@
      "items": {"where": {"name": "vi_technologies_lib_super_network_streams"}, "count": 1,
                "each": {"installed_version": "2.0.0.21", "status": "installed"}},
      "message": "clone sample package is not installed at the expected version"}
-  ],
-  "receiptV1Runtime": {
-    "os": {"distribution": "ubuntu", "version": "24.04", "codename": "noble"},
-    "automaticLoginEnabled": false,
-    "labviewPackageVersion": "26.3.1.49165-0+f13",
-    "knownAnswer": {"inputs": [20, 22], "actualOutput": 42, "viServerPort": 3363},
-    "vipm": {"version": "26.3.2", "buildNumber": "4056", "edition": "Professional", "validThrough": "Perpetual"},
-    "package": {"name": "vi_technologies_lib_super_network_streams", "version": "2.0.0.21", "status": "installed"}
-  }
+  ]
 }

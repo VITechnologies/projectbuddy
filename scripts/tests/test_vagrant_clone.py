@@ -29,6 +29,7 @@ from vagrant_clone.receipt import ReceiptError  # noqa: E402
 REPOSITORY = SCRIPTS.parent
 APPLIANCE = REPOSITORY / "vm" / "ubuntu-labview"
 PROFILE_PATH = APPLIANCE / "clone-profile.json"
+V1_PROFILE_PATH = APPLIANCE / "clone-profile.v1.json"
 CLONE_ADAPTER = APPLIANCE / "verify-vagrant-clone.py"
 RECEIPT_ADAPTER = APPLIANCE / "verify-vagrant-clone-receipt.py"
 UUID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
@@ -67,6 +68,10 @@ def appliance() -> clone_profile.Profile:
     return clone_profile.load_profile(PROFILE_PATH)
 
 
+def v1_appliance() -> clone_profile.Profile:
+    return clone_profile.load_profile(V1_PROFILE_PATH)
+
+
 def sample_package() -> dict:
     """The consumer's sample package, as the profile names it."""
     check = next(entry for entry in profile_data()["checks"] if "where" in entry.get("items", {}))
@@ -102,10 +107,8 @@ def set_pointer(document: dict, pointer: str, value: object) -> None:
 DELETE = object()
 
 
-def profile_copy(directory: Path, drop: tuple[str, ...] = (), **changes) -> clone_profile.Profile:
+def profile_copy(directory: Path, **changes) -> clone_profile.Profile:
     data = profile_data()
-    for field in drop:
-        data.pop(field)
     data.update(changes)
     directory.mkdir(parents=True, exist_ok=True)
     shutil.copy(APPLIANCE / data["capture"]["script"], directory)
@@ -139,19 +142,43 @@ def replace_check(**test):
 def test_the_appliance_profile_loads():
     loaded = appliance()
     assert loaded.name == "ubuntu-labview-appliance"
-    assert loaded.runner_units == "record"
+    assert loaded.runner_units == "refuse"
     assert loaded.script == "capture-activation.sh" and (APPLIANCE / loaded.script).is_file()
     assert loaded.timeout == 600
     assert loaded.files == (KNOWN_ANSWER, RUNTIME, ABOUT, TARGETS, INSTALLED)
     assert loaded.boot_id == ((RUNTIME, "/bootId"), (KNOWN_ANSWER, "/host/bootId"))
     assert len(loaded.checks) == 14
-    assert loaded.receipt_v1_runtime == profile_data()["receiptV1Runtime"]
+    assert loaded.receipt_v1_runtime is None
     assert loaded.directory == APPLIANCE and loaded.sha256 == sha256_file(PROFILE_PATH)
 
 
-def test_the_v1_pin_is_the_appliance_profile(monkeypatch):
+def test_the_v1_profile_records_runner_units_and_states_the_v1_runtime():
+    loaded = v1_appliance()
+    data = json.loads(V1_PROFILE_PATH.read_text(encoding="utf-8"))
+    assert (loaded.name, loaded.runner_units, loaded.directory) == ("ubuntu-labview-appliance", "record", APPLIANCE)
+    assert loaded.receipt_v1_runtime == data["receiptV1Runtime"]
+    checks = {(entry["file"], entry["pointer"]): entry for entry in data["checks"]}
+    runtime = loaded.receipt_v1_runtime
+    assert runtime["os"] == checks[(RUNTIME, "/os")]["equals"]
+    assert runtime["automaticLoginEnabled"] == checks[(RUNTIME, "/automaticLoginEnabled")]["equals"]
+    assert runtime["labviewPackageVersion"] == checks[(RUNTIME, "/labviewPackageVersion")]["equals"]
+    assert runtime["knownAnswer"] == {
+        "inputs": checks[(KNOWN_ANSWER, "/inputs")]["equals"],
+        "actualOutput": checks[(KNOWN_ANSWER, "/expectedOutput")]["equals"],
+        "viServerPort": checks[(TARGETS, "/labview_versions")]["items"]["each"]["vi_server_tcp_port"]}
+    assert runtime["vipm"] == {
+        "version": checks[(ABOUT, "/version")]["equals"], "buildNumber": checks[(ABOUT, "/build_number")]["oneOf"][0],
+        "edition": checks[(ABOUT, "/edition")]["equals"], "validThrough": checks[(ABOUT, "/valid_through")]["equals"]}
+    package = checks[(INSTALLED, "/dependencies")]["items"]
+    assert runtime["package"] == {"name": package["where"]["name"], "version": package["each"]["installed_version"],
+                                  "status": package["each"]["status"]}
+
+
+def test_the_v1_pin_is_the_frozen_v1_profile(monkeypatch):
     monkeypatch.setattr(sys, "path", list(sys.path))
-    assert runpy.run_path(str(RECEIPT_ADAPTER), run_name="adapter")["V1_PROFILE_SHA256"] == sha256_file(PROFILE_PATH)
+    adapter = runpy.run_path(str(RECEIPT_ADAPTER), run_name="adapter")
+    assert adapter["V1_PROFILE"] == V1_PROFILE_PATH
+    assert adapter["V1_PROFILE_SHA256"] == sha256_file(V1_PROFILE_PATH) != sha256_file(PROFILE_PATH)
 
 
 def test_the_appliance_profile_matches_the_manifest():
@@ -167,11 +194,6 @@ def test_the_appliance_profile_matches_the_manifest():
     assert target["vi_server_tcp_port"] == manifest["labview"]["viServerPort"]
     assert checks[(ABOUT, "/version")]["equals"] == version
     assert checks[(ABOUT, "/build_number")]["oneOf"] == [build, int(build)]
-    runtime = data["receiptV1Runtime"]
-    assert runtime["os"] == os_fields
-    assert runtime["labviewPackageVersion"] == manifest["labview"]["packageVersion"]
-    assert runtime["knownAnswer"]["viServerPort"] == manifest["labview"]["viServerPort"]
-    assert (runtime["vipm"]["version"], runtime["vipm"]["buildNumber"]) == (version, build)
 
 
 def test_a_minimal_profile_parses():
@@ -714,7 +736,7 @@ def test_a_receipt_records_its_inputs(tmp_path):
         "profile": {"name": "ubuntu-labview-appliance", "sha256": sha256_file(PROFILE_PATH)},
         "sourceBox": {"receiptSha256": sha256_file(setup.box_receipt), "boxSha256": BOX_SHA256},
         "clone": {"vm": {"name": NAME, "uuid": UUID}, "bootId": BOOT, "finalState": "poweroff"},
-        "runnerUnits": {"policy": "record", "observed": []},
+        "runnerUnits": {"policy": "refuse", "observed": []},
         "evidenceSha256": {name: sha256_file(setup.evidence_dir / name) for name in evidence()},
         "failures": [],
         "outcome": "PASS",
@@ -724,8 +746,9 @@ def test_a_receipt_records_its_inputs(tmp_path):
 
 
 def test_a_receipt_with_recorded_runner_units_verifies(tmp_path):
-    setup = setup_receipt(tmp_path, observed=("actions.runner.a.service", RUNNER))
-    assert verify(setup)["runnerUnits"]["observed"] == ["actions.runner.a.service", RUNNER]
+    recording = profile_copy(tmp_path / "profile", runnerUnits="record")
+    setup = setup_receipt(tmp_path, profile=recording, observed=("actions.runner.a.service", RUNNER))
+    assert verify(setup)["runnerUnits"] == {"policy": "record", "observed": ["actions.runner.a.service", RUNNER]}
 
 
 @pytest.mark.parametrize("change, message", [
@@ -738,7 +761,7 @@ def test_a_receipt_with_recorded_runner_units_verifies(tmp_path):
     (lambda r: r["clone"].update(bootId=SOURCE_UUID), "receipt does not match its inputs: clone"),
     (lambda r: r["clone"].update(finalState="running"), "receipt does not match its inputs: clone"),
     (lambda r: r["clone"].pop("finalState"), "receipt does not match its inputs: clone"),
-    (lambda r: r["runnerUnits"].update(policy="refuse"), "receipt does not match its inputs: runnerUnits"),
+    (lambda r: r["runnerUnits"].update(policy="record"), "receipt does not match its inputs: runnerUnits"),
     (lambda r: r["runnerUnits"].update(extra=1), "receipt does not match its inputs: runnerUnits"),
     (lambda r: r["evidenceSha256"].update({ABOUT: "0" * 64}), "receipt does not match its inputs: evidenceSha256"),
     (lambda r: r["evidenceSha256"].update(extra="0" * 64), "receipt does not match its inputs: evidenceSha256"),
@@ -834,15 +857,8 @@ def test_missing_evidence_fails_at_once(tmp_path):
         verify(setup)
 
 
-def test_a_refusing_profile_verifies_a_receipt_without_units(tmp_path):
-    refusing = profile_copy(tmp_path / "profile", runnerUnits="refuse")
-    setup = setup_receipt(tmp_path, profile=refusing)
-    assert verify(setup)["runnerUnits"] == {"policy": "refuse", "observed": []}
-
-
-def test_a_refusing_profile_fails_a_receipt_with_units(tmp_path):
-    refusing = profile_copy(tmp_path / "profile", runnerUnits="refuse")
-    setup = setup_receipt(tmp_path, profile=refusing, observed=(RUNNER,))
+def test_the_appliance_profile_fails_a_receipt_with_units(tmp_path):
+    setup = setup_receipt(tmp_path, observed=(RUNNER,))
     with pytest.raises(ReceiptError, match="^the profile refuses Actions runner units, but the receipt records some$"):
         verify(setup)
 
@@ -876,11 +892,26 @@ def v1_setup(tmp_path):
     return setup
 
 
+def verify_v1(setup: SimpleNamespace, **options) -> dict:
+    """Verify with the frozen ``@1`` profile and its pin, as the receipt adapter does."""
+    return verify(setup, **{"v1_profile": v1_appliance(), "v1_profile_sha256": sha256_file(V1_PROFILE_PATH),
+                            **options})
+
+
 def test_a_genuine_v1_receipt_verifies_against_its_pin(v1_setup):
-    assert verify(v1_setup, v1_profile_sha256=sha256_file(PROFILE_PATH)) == v1_setup.receipt
-    assert clone_receipt.build_v1_receipt(appliance(), box=clone_receipt.source_box(v1_setup.box_receipt),
+    assert verify_v1(v1_setup) == v1_setup.receipt
+    assert clone_receipt.build_v1_receipt(v1_appliance(), box=clone_receipt.source_box(v1_setup.box_receipt),
                                           name=NAME, uuid=UUID, boot=BOOT,
                                           evidence_dir=v1_setup.evidence_dir) == v1_setup.receipt
+
+
+def test_a_v1_receipt_ignores_the_current_profile(v1_setup, tmp_path):
+    v1_setup.profile = profile_copy(tmp_path / "profile", checks=[
+        {"file": KNOWN_ANSWER, "pointer": "/exitCode", "equals": 1, "message": "other profile check"}])
+    assert verify_v1(v1_setup) == v1_setup.receipt
+    current = setup_receipt(tmp_path / "current", profile=v1_setup.profile)
+    with pytest.raises(ReceiptError, match="^raw capture: other profile check$"):
+        verify(current)
 
 
 def test_a_v1_receipt_with_an_integer_build_number_verifies(v1_setup):
@@ -889,19 +920,22 @@ def test_a_v1_receipt_with_an_integer_build_number_verifies(v1_setup):
     write_json(v1_setup.evidence_dir / ABOUT, about)
     rewrite(v1_setup, lambda r: r["evidenceSha256"].update(
         {"sandbox-vipm-about": sha256_file(v1_setup.evidence_dir / ABOUT)}))
-    verify(v1_setup, v1_profile_sha256=sha256_file(PROFILE_PATH))
+    verify_v1(v1_setup)
 
 
-@pytest.mark.parametrize("pin", [None, "0" * 64])
-def test_a_v1_receipt_needs_its_pinned_profile(v1_setup, pin):
-    with pytest.raises(ReceiptError, match="^a projectbuddy/ubuntu-vagrant-clone@1 receipt verifies only against"):
-        verify(v1_setup, v1_profile_sha256=pin)
-
-
-def test_a_v1_receipt_needs_a_profile_with_a_v1_runtime(v1_setup, tmp_path):
-    v1_setup.profile = profile_copy(tmp_path / "profile", drop=("receiptV1Runtime",))
-    with pytest.raises(ReceiptError, match="verifies only against its pinned profile"):
-        verify(v1_setup, v1_profile_sha256=v1_setup.profile.sha256)
+@pytest.mark.parametrize("options", [
+    {"v1_profile_sha256": None},
+    {"v1_profile_sha256": "0" * 64},
+    {"v1_profile": None},
+    {"v1_profile": "appliance", "v1_profile_sha256": sha256_file(PROFILE_PATH)},
+])
+def test_a_v1_receipt_needs_its_pinned_profile(v1_setup, options):
+    if options.get("v1_profile") == "appliance":
+        options["v1_profile"] = appliance()
+    v1_setup.profile = v1_appliance()
+    with pytest.raises(ReceiptError, match="^a projectbuddy/ubuntu-vagrant-clone@1 receipt verifies only against "
+                                           "its pinned profile$"):
+        verify_v1(v1_setup, **options)
 
 
 @pytest.mark.parametrize("change", [
@@ -914,7 +948,7 @@ def test_a_v1_receipt_needs_a_profile_with_a_v1_runtime(v1_setup, tmp_path):
 def test_a_tampered_v1_runtime_fails(v1_setup, change):
     rewrite(v1_setup, change)
     with pytest.raises(ReceiptError, match="^receipt does not match its inputs: runtime$"):
-        verify(v1_setup, v1_profile_sha256=sha256_file(PROFILE_PATH))
+        verify_v1(v1_setup)
 
 
 @pytest.mark.parametrize("change, field", [
@@ -926,7 +960,7 @@ def test_a_tampered_v1_runtime_fails(v1_setup, change):
 def test_a_v1_receipt_keeps_its_own_shape(v1_setup, change, field):
     rewrite(v1_setup, change)
     with pytest.raises(ReceiptError, match=f"^receipt does not match its inputs: {field}$"):
-        verify(v1_setup, v1_profile_sha256=sha256_file(PROFILE_PATH))
+        verify_v1(v1_setup)
 
 
 # The live check: commands, outputs, and the instance.
@@ -1170,28 +1204,26 @@ def test_the_capture_runs_for_the_profile_timeout(live_setup, tmp_path):
     assert [record.timeout for record in guest.records if record.label == "capture"] == [1234]
 
 
-def test_a_recording_profile_records_runner_units(live_setup):
+def test_a_recording_profile_records_runner_units(live_setup, tmp_path):
     guest = live_setup.guest(units=f"ssh.service enabled enabled\n{RUNNER} enabled enabled\n")
-    receipt = json.loads(live_setup.check(guest).read_text(encoding="utf-8"))
+    recording = profile_copy(tmp_path / "profile", runnerUnits="record")
+    receipt = json.loads(live_setup.check(guest, recording).read_text(encoding="utf-8"))
     assert receipt["runnerUnits"] == {"policy": "record", "observed": [RUNNER]}
     assert guest.calls == PASSING_CALLS
 
 
-def test_a_refusing_profile_stops_before_the_capture(live_setup, tmp_path):
+def test_the_appliance_profile_stops_before_the_capture(live_setup):
     """TEST-105: an Actions runner unit on the clone fails the check before anything runs in the guest."""
     guest = live_setup.guest(units=f"ssh.service enabled enabled\n{RUNNER} enabled enabled\n")
-    refusing = profile_copy(tmp_path / "profile", runnerUnits="refuse")
     with pytest.raises(CloneError, match=f"^REQ-103: the clone has an Actions runner unit: {re.escape(RUNNER)}$"):
-        live_setup.check(guest, refusing)
+        live_setup.check(guest)
     assert guest.calls == ["enroll", "list-unit-files", "list-units", "acpipowerbutton", "showvminfo"]
     assert list(live_setup.clone.evidence_dir.iterdir()) == []
     assert list(live_setup.runtime.iterdir()) == []
 
 
-def test_a_refusing_profile_passes_a_clone_without_runner_units(live_setup, tmp_path):
-    guest = live_setup.guest()
-    receipt = json.loads(live_setup.check(guest, profile_copy(tmp_path / "profile", runnerUnits="refuse"))
-                         .read_text(encoding="utf-8"))
+def test_the_appliance_profile_passes_a_clone_without_runner_units(live_setup):
+    receipt = json.loads(live_setup.check(live_setup.guest()).read_text(encoding="utf-8"))
     assert receipt["runnerUnits"] == {"policy": "refuse", "observed": []}
 
 
@@ -1564,13 +1596,35 @@ def test_the_receipt_adapter_verifies_both_schemas(tmp_path, monkeypatch, capsys
     assert capsys.readouterr().out == f"Vagrant clone receipt: PASS: {NAME} ({UUID})\n"
 
 
-def test_the_receipt_adapter_pins_v1_receipts_to_the_appliance_profile(tmp_path, monkeypatch, capsys):
+def test_a_v1_receipt_ignores_the_adapter_profile_option(tmp_path, monkeypatch, capsys):
     setup = setup_receipt(tmp_path)
     write_json(setup.path, v1_receipt(setup))
     other = profile_copy(tmp_path / "profile", name="other-appliance")
     assert run_adapter(monkeypatch, RECEIPT_ADAPTER,
-                       receipt_arguments(setup, "--profile", str(other.directory / "clone-profile.json"))) == 2
-    assert "verifies only against its pinned profile" in capsys.readouterr().err
+                       receipt_arguments(setup, "--profile", str(other.directory / "clone-profile.json"))) == 0
+    assert capsys.readouterr().out == f"Vagrant clone receipt: PASS: {NAME} ({UUID})\n"
+
+
+def test_a_receipt_from_before_192_verifies_with_the_v1_profile(tmp_path, monkeypatch, capsys):
+    setup = setup_receipt(tmp_path, profile=v1_appliance())
+    assert run_adapter(monkeypatch, RECEIPT_ADAPTER, receipt_arguments(setup)) == 2
+    assert capsys.readouterr().err == (
+        "Vagrant clone receipt: FAIL: receipt does not match its inputs: profile, runnerUnits\n")
+    assert run_adapter(monkeypatch, RECEIPT_ADAPTER,
+                       receipt_arguments(setup, "--profile", str(V1_PROFILE_PATH))) == 0
+    assert capsys.readouterr().out == f"Vagrant clone receipt: PASS: {NAME} ({UUID})\n"
+
+
+def test_the_receipt_adapter_reads_the_v1_profile_for_every_receipt(tmp_path, monkeypatch, capsys):
+    copy = tmp_path / "vm" / "ubuntu-labview"
+    copy.mkdir(parents=True)
+    for name in (RECEIPT_ADAPTER.name, PROFILE_PATH.name, "capture-activation.sh"):
+        shutil.copy(APPLIANCE / name, copy)
+    setup = setup_receipt(tmp_path / "receipt")
+    assert run_adapter(monkeypatch, RECEIPT_ADAPTER, receipt_arguments(setup)) == 0
+    capsys.readouterr()
+    assert run_adapter(monkeypatch, copy / RECEIPT_ADAPTER.name, receipt_arguments(setup)) == 2
+    assert capsys.readouterr().err.startswith("Vagrant clone receipt: FAIL: clone profile is unreadable")
 
 
 @pytest.mark.parametrize("change, message", [
