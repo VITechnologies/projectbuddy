@@ -61,4 +61,5 @@ requirement (`VITechnologies/projectbuddy#11`).
   publishes the four files it staged as a generated, non-authoritative view
   for whole-table review: the job summary shows each file's SHA-256 and the
   assembled Traceability Matrix, and the `assembled-wiki-spec` artifact holds
-  all four. Edit the wiki pages, never this output.
+  all four. Both need a GitHub sign-in to view, even for this public
+  repository. Edit the wiki pages, never this output.
