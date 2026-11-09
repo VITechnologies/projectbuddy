@@ -279,6 +279,16 @@ receipt verifier of its own (`package-vagrant-box.py` validates its
 produces no independently-reverifiable receipt of its own output) -- a
 real gap, not yet resolved.
 
+### LabVIEW-free lane box (`vm/ubuntu-lane/`)
+
+A lane box is a Vagrant box of a LabVIEW-free Ubuntu 24.04 VM with a pinned
+toolchain and no runner, built from a lane profile
+(`projectbuddy/ubuntu-lane-profile@1`) and reusing this family's base
+bootstrap receipt. Its packager writes its own
+`projectbuddy/ubuntu-lane-box@1` receipt, which `Invoke-LaneBox.py
+verify-receipt` recomputes from its inputs. The appliance path above is
+unchanged. See the [Ubuntu lane box procedure](ubuntu-lane-box.md).
+
 ## Shared schemas
 
 - `provisioning-manifest.json` (one per VM family, each with its own

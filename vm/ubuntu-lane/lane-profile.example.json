@@ -1,0 +1,92 @@
+{
+  "schema": "projectbuddy/ubuntu-lane-profile@1",
+  "name": "vscode-extension-lane",
+  "os": {
+    "distribution": "ubuntu",
+    "version": "24.04",
+    "codename": "noble",
+    "virtualBoxOsType": "Ubuntu24_LTS_64",
+    "iso": {
+      "filename": "ubuntu-24.04.4-desktop-amd64.iso",
+      "url": "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-desktop-amd64.iso",
+      "sha256": "3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e"
+    }
+  },
+  "virtualBox": {
+    "diskGb": 40,
+    "memoryMb": 8192,
+    "cpus": 4,
+    "vramMb": 128
+  },
+  "toolchain": [
+    {
+      "name": "node",
+      "version": "24.19.0",
+      "source": {
+        "kind": "tarball",
+        "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz",
+        "sha256": "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+      },
+      "probe": {
+        "argv": [
+          "node",
+          "--version"
+        ],
+        "pattern": "v(\\S+)",
+        "expected": "24.19.0"
+      }
+    },
+    {
+      "name": "npm",
+      "version": "11.17.0",
+      "source": {
+        "kind": "bundled",
+        "in": "node"
+      },
+      "probe": {
+        "argv": [
+          "npm",
+          "--version"
+        ],
+        "pattern": "(\\S+)",
+        "expected": "11.17.0"
+      }
+    },
+    {
+      "name": "git",
+      "version": "1:2.43.0-1ubuntu7.4",
+      "source": {
+        "kind": "deb",
+        "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/git/git_2.43.0-1ubuntu7.4_amd64.deb",
+        "sha256": "c79b7948ef9860c97ec74293a90178676e63368a0711c95c28a55af4edf1adab"
+      },
+      "probe": {
+        "argv": [
+          "git",
+          "--version"
+        ],
+        "pattern": "git version (\\S+)",
+        "expected": "2.43.0"
+      }
+    },
+    {
+      "name": "ca-certificates",
+      "version": "20260816ubuntu0.24.04.2",
+      "source": {
+        "kind": "deb",
+        "url": "https://archive.ubuntu.com/ubuntu/pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.24.04.2_all.deb",
+        "sha256": "f9fbacd417b515450b831032cc39d18059e9874e67525679a43c16071dabf9a0"
+      },
+      "probe": {
+        "argv": [
+          "dpkg-query",
+          "-W",
+          "-f=${Version}",
+          "ca-certificates"
+        ],
+        "pattern": "(\\S+)",
+        "expected": "20260816ubuntu0.24.04.2"
+      }
+    }
+  ]
+}
