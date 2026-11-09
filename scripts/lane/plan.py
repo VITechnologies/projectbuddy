@@ -395,6 +395,7 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
               cwd=str(run_dir), environment=vagrant_environment),
         _step("verify-instance", "prepare", "host", show, QUERY_TIMEOUT),
         _step("connect", "prepare", "engine", None, None),
+        _step("check-runner-units", "prepare", "engine", None, None),
         *(_step(f"probe-{tool['name']}", "prepare", "guest", list(tool["probe"]["argv"]), PROBE_TIMEOUT)
           for tool in declaration.toolchain),
         _step("transfer-candidate", "prepare", "engine", None, None),

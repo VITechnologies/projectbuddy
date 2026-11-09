@@ -311,7 +311,7 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
     assert CANARY not in lane.plan_out.read_text(encoding="utf-8") + out + err
     steps = value["steps"]
     assert [step["name"] for step in steps] == [
-        "box-add", "up", "verify-instance", "connect", "probe-node", "probe-npm", "probe-git",
+        "box-add", "up", "verify-instance", "connect", "check-runner-units", "probe-node", "probe-npm", "probe-git",
         "probe-ca-certificates", "transfer-candidate", "workload", "network-off", "verify-network-off",
         "await-workload", "network-on", "collect-outputs", "write-evidence", "teardown",
     ]

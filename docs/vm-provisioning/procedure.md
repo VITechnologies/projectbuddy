@@ -279,6 +279,13 @@ receipt verifier of its own (`package-vagrant-box.py` validates its
 produces no independently-reverifiable receipt of its own output) -- a
 real gap, not yet resolved.
 
+`verify-vagrant-clone.py` and `verify-vagrant-clone-receipt.py` are thin
+adapters over the neutral clone verifier (`scripts/vagrant_clone/`), with the
+appliance's clone checks as data in `vm/ubuntu-labview/clone-profile.json`.
+They write and verify `projectbuddy/ubuntu-vagrant-clone@2` receipts and still
+verify `@1` receipts. See the
+[Ubuntu Vagrant clone check](ubuntu-vagrant-clone.md).
+
 ### LabVIEW-free lane box (`vm/ubuntu-lane/`)
 
 A lane box is a Vagrant box of a LabVIEW-free Ubuntu 24.04 VM with a pinned
