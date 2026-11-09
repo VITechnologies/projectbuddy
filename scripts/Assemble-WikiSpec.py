@@ -24,9 +24,14 @@ table or sections markers assembles unchanged.
 
 Usage:
     Assemble-WikiSpec.py --wiki DIR [--emit PAGE=PATH ...] [--strict [--max-page-bytes N]]
+                         [--view PAGE=PATH ... --link-base URL]
 
 On any error nothing is written. Emitted files are staged and replaced only
 after every staged write succeeds, so a PATH may be the hub page itself.
+
+--view writes a display copy of a hub for renderers without wikilink support:
+each resolvable wikilink becomes a Markdown link to URL/PAGE, the wiki page
+that holds the content. Only --emit output is the scan input.
 """
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 ID_PATTERN = r"(?:SYS-REQ|REQ|TEST)-\d{3}"
 ID_NAME = re.compile(rf"{ID_PATTERN}\Z")
@@ -309,7 +315,8 @@ class Wiki:
                     self.error(f"{owner.rel}: table lists {page.kind} page [[{ident}]]")
                     continue
                 self.table_rows[ident].append(f"{owner.name}: {header}")
-                cells = [ident]
+                # Relinking turns this back into the bare ID in the scan input.
+                cells = [f"[[{ident}]]"]
                 for column in columns[1:]:
                     if column == TITLE_COLUMN:
                         value = page.title
@@ -356,9 +363,23 @@ class Wiki:
             return f"[[{self.section_anchor[target]}]]"
         return f"[[{target}]]"
 
-    def assemble(self, name: str) -> str:
+    def _view_link(self, target: str, link_base: str) -> str:
+        name, _, anchor = target.partition("#")
+        if "|" in target or name not in self.pages:
+            return f"[[{target}]]"
+        url = f"{link_base.rstrip('/')}/{quote(name.replace(' ', '-'))}"
+        if anchor:
+            url += f"#{quote(anchor)}"
+        return f"[{target}]({url})"
+
+    def assemble(self, name: str, link_base: str | None = None) -> str:
         text = self._emit(name, 1)
-        return map_prose(text, lambda chunk: WIKILINK.sub(lambda m: self._relink(m.group(1)), chunk))
+        if link_base is None:
+            relink = self._relink
+        else:
+            def relink(target: str) -> str:
+                return self._view_link(target, link_base)
+        return map_prose(text, lambda chunk: WIKILINK.sub(lambda m: relink(m.group(1)), chunk))
 
     def validate(self, emitted: set[str]) -> dict[str, str]:
         roots = self.roots()
@@ -398,12 +419,12 @@ class Wiki:
                     self.error(f"{page.rel}: unlinked mention of {ident}; write [[{ident}]] or put it in code")
 
 
-def parse_emit(values: list[str]) -> list[tuple[str, Path]]:
+def parse_emit(values: list[str], flag: str = "--emit") -> list[tuple[str, Path]]:
     pairs = []
     for value in values:
         name, sep, path = value.partition("=")
         if not sep or not name or not path:
-            raise SpecError(f"--emit expects PAGE=PATH, got {value!r}")
+            raise SpecError(f"{flag} expects PAGE=PATH, got {value!r}")
         pairs.append((name, Path(path)))
     return pairs
 
@@ -416,27 +437,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--strict", action="store_true",
                         help="also enforce link hygiene for the split layout")
     parser.add_argument("--max-page-bytes", type=int, help="page size budget checked with --strict")
+    parser.add_argument("--view", action="append", default=[], metavar="PAGE=PATH",
+                        help="also write a display copy of hub PAGE with Markdown links (repeatable)")
+    parser.add_argument("--link-base", metavar="URL", help="wiki page URL prefix for --view links")
     args = parser.parse_args(argv)
 
     try:
-        targets = parse_emit(args.emit)
+        targets = [(name, path, None) for name, path in parse_emit(args.emit)]
+        targets += [(name, path, args.link_base) for name, path in parse_emit(args.view, "--view")]
     except SpecError as exc:
         parser.error(str(exc))
+    if args.view and not args.link_base:
+        parser.error("--view requires --link-base")
     wiki = Wiki(args.wiki)
     outputs: dict[Path, str] = {}
     if not wiki.errors:
-        assembled = wiki.validate({name for name, _ in targets})
+        assembled = wiki.validate({name for name, _, base in targets if base is None})
         if args.strict:
             wiki.strict_checks(args.max_page_bytes)
-        for name, path in targets:
+        for name, path, base in targets:
+            flag = "--emit" if base is None else "--view"
             page = wiki.pages.get(name)
             if page is None or page.is_id or name in wiki.parent:
-                wiki.error(f"--emit {name}: not a hub page")
+                wiki.error(f"{flag} {name}: not a hub page")
                 continue
             if path.resolve() in outputs:
-                wiki.error(f"--emit {name}: output path {path} is used twice")
+                wiki.error(f"{flag} {name}: output path {path} is used twice")
                 continue
-            outputs[path.resolve()] = assembled[name] if name in assembled else wiki.assemble(name)
+            if base is not None:
+                outputs[path.resolve()] = wiki.assemble(name, base)
+            else:
+                outputs[path.resolve()] = assembled[name] if name in assembled else wiki.assemble(name)
     if wiki.errors:
         for message in sorted(set(wiki.errors)):
             print(f"error: {message}", file=sys.stderr)

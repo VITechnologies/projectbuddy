@@ -348,3 +348,61 @@ def test_unsplit_wiki_in_place_is_unchanged(tmp_path, capsys):
     assert assemble_wiki_spec.main(["--wiki", str(root), "--emit", f"SRS={root / 'SRS.md'}"]) == 0, errors(capsys)
     assert (root / "SRS.md").read_bytes() == pages["SRS.md"].encode("utf-8")
     assert sorted(p.name for p in root.iterdir()) == ["Home.md", "SRS.md"]
+
+
+BASE = "https://example.test/wiki"
+EXPECTED_RTM_VIEW = f"""# RTM
+
+| ReqID | Requirement (short) | TestID |
+| --- | --- | --- |
+| [REQ-001]({BASE}/REQ-001) | First | [TEST-001]({BASE}/TEST-001) |
+| [REQ-002]({BASE}/REQ-002) | Second, see [REQ-001]({BASE}/REQ-001) | [TEST-002]({BASE}/TEST-002) |
+"""
+
+
+def test_view_links_each_wikilink_to_its_wiki_page(tmp_path, capsys):
+    views = tmp_path / "views"
+    code, files = run(
+        split_wiki(tmp_path / "wiki"), tmp_path, "--strict",
+        "--view", f"RTM={views / 'rtm.md'}", "--view", f"SRS={views / 'srs.md'}", "--link-base", BASE + "/",
+    )
+    assert code == 0, errors(capsys)
+    assert files == {"srs.md": EXPECTED_SRS, "rtm.md": EXPECTED_RTM, "overview.md": EXPECTED_ARCH}
+    assert (views / "rtm.md").read_text(encoding="utf-8") == EXPECTED_RTM_VIEW
+    srs = (views / "srs.md").read_text(encoding="utf-8")
+    assert f"Intro cites [REQ-001]({BASE}/REQ-001) and `REQ-002`." in srs
+    assert f"See [Planned-Cases]({BASE}/Planned-Cases)." in srs
+    assert "[[" not in srs
+
+
+def test_view_keeps_unresolvable_links_and_code(tmp_path, capsys):
+    text = "# SRS\n\nSee [[SRS#intro]], [[Inner Page]], [[Missing]], [[A|B]] and `[[Inner Page]]`.\n"
+    root = write(tmp_path / "wiki", {"SRS.md": text, "Inner Page.md": "# Inner\n"})
+    view = tmp_path / "view.md"
+    args = ["--wiki", str(root), "--emit", f"SRS={tmp_path / 'srs.md'}", "--view", f"SRS={view}", "--link-base", BASE]
+    assert assemble_wiki_spec.main(args) == 0, errors(capsys)
+    assert (tmp_path / "srs.md").read_text(encoding="utf-8") == text
+    assert view.read_text(encoding="utf-8") == (
+        f"# SRS\n\nSee [SRS#intro]({BASE}/SRS#intro), [Inner Page]({BASE}/Inner-Page), [[Missing]], [[A|B]] and `[[Inner Page]]`.\n"
+    )
+
+
+def test_view_requires_link_base(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        assemble_wiki_spec.main(["--wiki", str(tmp_path), "--view", f"SRS={tmp_path / 'v.md'}"])
+    assert exc.value.code == 2
+    assert "--view requires --link-base" in errors(capsys)
+    with pytest.raises(SystemExit):
+        assemble_wiki_spec.main(["--wiki", str(tmp_path), "--view", "SRS", "--link-base", BASE])
+    assert "--view expects PAGE=PATH" in errors(capsys)
+
+
+def test_view_is_checked_like_emit(tmp_path, capsys):
+    out = tmp_path / "out"
+    code, _ = run(split_wiki(tmp_path / "wiki"), tmp_path, "--view", f"REQ-001={tmp_path / 'v.md'}",
+                  "--view", f"Arch={out / 'rtm.md'}", "--link-base", BASE)
+    assert code == 1
+    err = errors(capsys)
+    assert "--view REQ-001: not a hub page" in err
+    assert "--view Arch: output path" in err and "is used twice" in err
+    assert not out.exists() and not (tmp_path / "v.md").exists()
