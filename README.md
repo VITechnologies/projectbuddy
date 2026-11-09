@@ -103,6 +103,9 @@ for the full phase-by-phase procedure (both VM families), including the
 deliberate human-only LabVIEW activation boundary (VIPM activation on the
 Ubuntu-LabVIEW family is a deliberate, narrower automated exception) and
 the active fleet-status verification design.
+[`docs/vm-provisioning/ubuntu-lane-box.md`](docs/vm-provisioning/ubuntu-lane-box.md)
+covers the LabVIEW-free Ubuntu lane box (`vm/ubuntu-lane/`,
+`scripts/Invoke-LaneBox.py`).
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 

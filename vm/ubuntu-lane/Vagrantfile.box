@@ -1,0 +1,8 @@
+# Embedded in the lane box by `vagrant package --vagrantfile`. A lane run's own Vagrantfile
+# sets hardware and adds nothing that weakens these defaults.
+Vagrant.configure("2") do |config|
+  config.vm.communicator = "none"
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+  # Vagrant adds a default SSH forward unless one with id "ssh" is defined; this one binds loopback only.
+  config.vm.network "forwarded_port", guest: 22, host: 2224, host_ip: "127.0.0.1", id: "ssh", auto_correct: false
+end
