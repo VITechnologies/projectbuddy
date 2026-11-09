@@ -1,0 +1,66 @@
+name: Approval Request
+
+# Entry point for human-approved automation requests (ADR-0007). Requesters do
+# not dispatch this by hand; `scripts/Invoke-ApprovalGate.py submit` validates
+# a request, stages its content under `refs/heads/requests/<id>`, and
+# dispatches this workflow on the default branch. Reviewers approve or reject
+# the waiting "Execute approved request" job in the GitHub UI after reading
+# the run summary. See docs/approval-gate/procedure.md.
+#
+# The run name is parsed by the tool (`approval_gate.submit.TITLE_RE`); keep
+# both in step.
+
+run-name: "Approval request ${{ inputs.request-id }} · ${{ inputs.action-class }} · #${{ inputs.tracking-issue }} · expires ${{ inputs.expires-at }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      request-id:
+        description: "Request ID (lowercase letters, digits, '.', '_', '-')."
+        required: true
+        type: string
+      action-class:
+        description: "Action class from .github/approval-gate/classes.json (built-in: noop)."
+        required: true
+        type: string
+      tracking-issue:
+        description: "Issue number that receives the decision record."
+        required: true
+        type: string
+      expires-at:
+        description: "UTC expiry, YYYY-MM-DDTHH:MM:SSZ."
+        required: true
+        type: string
+      request:
+        description: "Canonical request JSON (approval-gate/request@1)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: approval-request-${{ inputs.request-id }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Gate
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    uses: ./.github/workflows/approval-gate.yml
+    with:
+      engine-repository: ${{ github.repository }}
+      engine-ref: ${{ github.sha }}
+      request-id: ${{ inputs.request-id }}
+      action-class: ${{ inputs.action-class }}
+      tracking-issue: ${{ inputs.tracking-issue }}
+      expires-at: ${{ inputs.expires-at }}
+      request: ${{ inputs.request }}
+    secrets:
+      APPROVAL_GATE_PRIVATE_PATTERNS: ${{ secrets.APPROVAL_GATE_PRIVATE_PATTERNS }}
+      # Must resolve to nothing here: the probe belongs only to approval
+      # environments, whose secrets replace it inside the gated job.
+      APPROVAL_GATE_PROBE: ${{ secrets.APPROVAL_GATE_PROBE }}

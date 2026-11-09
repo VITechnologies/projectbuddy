@@ -1,0 +1,201 @@
+name: Approval Gate
+
+# Reusable human approval gate (ADR-0007; wiki SYS-REQ-028, REQ-094..REQ-100).
+# One run is one request: `preflight` publishes the whole decision in the run
+# summary, `execute` waits in the action class's protected environment until a
+# human required reviewer approves or rejects it, re-verifies the approval,
+# and only then runs the class's executor, and `record` always writes the
+# decision to the request's tracking issue.
+#
+# Callers dispatch through a workflow like `approval-request.yml` and pass the
+# exact engine repository and commit they call this file at, because a
+# reusable workflow cannot discover its own ref (see toolchain-smoke-test.yml):
+#
+#   uses: <owner>/projectbuddy/.github/workflows/approval-gate.yml@<commit-sha>
+#   with:
+#     engine-repository: <owner>/projectbuddy
+#     engine-ref: <commit-sha>
+#
+# All inputs reach scripts through `env:` only, never through `run:` text.
+# Setup and usage: docs/approval-gate/procedure.md.
+
+on:
+  workflow_call:
+    inputs:
+      engine-repository:
+        description: "Repository holding this workflow and scripts/Invoke-ApprovalGate.py (OWNER/NAME)."
+        required: true
+        type: string
+      engine-ref:
+        description: "Commit SHA this workflow was called at; the gate checks its scripts out at this commit."
+        required: true
+        type: string
+      request-id:
+        required: true
+        type: string
+      action-class:
+        required: true
+        type: string
+      tracking-issue:
+        required: true
+        type: string
+      expires-at:
+        required: true
+        type: string
+      request:
+        description: "Canonical request JSON (approval-gate/request@1)."
+        required: true
+        type: string
+      registry-path:
+        description: "Action-class registry in the caller repository, read at the run's commit."
+        required: false
+        type: string
+        default: .github/approval-gate/classes.json
+    secrets:
+      APPROVAL_GATE_PRIVATE_PATTERNS:
+        description: "Optional extra leak-scan patterns, one regular expression per line."
+        required: false
+      APPROVAL_GATE_PROBE:
+        description: "Optional approval-environment secret; the gate reports only whether it is visible."
+        required: false
+    outputs:
+      decision:
+        description: "approved, rejected, expired, or failed."
+        value: ${{ jobs.record.outputs.decision }}
+      outcome:
+        description: "executed, refused:<reason>, or not-run:<reason>."
+        value: ${{ jobs.record.outputs.outcome }}
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    outputs:
+      environment: ${{ steps.preflight.outputs.environment }}
+    steps:
+      - name: Check out the gate engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ inputs.engine-repository }}
+          ref: ${{ inputs.engine-ref }}
+          path: engine
+          persist-credentials: false
+      - name: Check out the action-class registry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: caller
+          sparse-checkout: .github/approval-gate
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.11"
+      - name: Preflight checks and reviewer summary
+        id: preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPROVAL_GATE_REQUEST: ${{ inputs.request }}
+          APPROVAL_GATE_INPUT_REQUEST_ID: ${{ inputs.request-id }}
+          APPROVAL_GATE_INPUT_ACTION_CLASS: ${{ inputs.action-class }}
+          APPROVAL_GATE_INPUT_TRACKING_ISSUE: ${{ inputs.tracking-issue }}
+          APPROVAL_GATE_INPUT_EXPIRES_AT: ${{ inputs.expires-at }}
+          APPROVAL_GATE_REGISTRY: caller/${{ inputs.registry-path }}
+          APPROVAL_GATE_PRIVATE_PATTERNS: ${{ secrets.APPROVAL_GATE_PRIVATE_PATTERNS }}
+          # Visible here only if it is wrongly also a repository or organization secret.
+          APPROVAL_GATE_PROBE: ${{ secrets.APPROVAL_GATE_PROBE }}
+        run: python engine/scripts/Invoke-ApprovalGate.py preflight
+
+  execute:
+    name: Execute approved request
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The environment comes from the trusted registry, never from request inputs.
+    environment: ${{ needs.preflight.outputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    outputs:
+      verdict: ${{ steps.execute.outputs.verdict }}
+    steps:
+      - name: Check out the gate engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ inputs.engine-repository }}
+          ref: ${{ inputs.engine-ref }}
+          path: engine
+          persist-credentials: false
+      - name: Check out the action-class registry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: caller
+          sparse-checkout: .github/approval-gate
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.11"
+      - name: Verify the approval, then execute
+        id: execute
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPROVAL_GATE_REQUEST: ${{ inputs.request }}
+          APPROVAL_GATE_REGISTRY: caller/${{ inputs.registry-path }}
+          APPROVAL_GATE_JOB_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+          APPROVAL_GATE_PROBE: ${{ secrets.APPROVAL_GATE_PROBE }}
+        run: python engine/scripts/Invoke-ApprovalGate.py execute
+
+  record:
+    name: Record decision
+    needs: [preflight, execute]
+    # Runs after approval, rejection, expiry, cancellation, and failure alike.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    outputs:
+      decision: ${{ steps.record.outputs.decision }}
+      outcome: ${{ steps.record.outputs.outcome }}
+    steps:
+      - name: Check out the gate engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ inputs.engine-repository }}
+          ref: ${{ inputs.engine-ref }}
+          path: engine
+          persist-credentials: false
+      - name: Check out the action-class registry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: caller
+          sparse-checkout: .github/approval-gate
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.11"
+      - name: Record the decision on the tracking issue
+        id: record
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPROVAL_GATE_REQUEST: ${{ inputs.request }}
+          APPROVAL_GATE_INPUT_REQUEST_ID: ${{ inputs.request-id }}
+          APPROVAL_GATE_INPUT_TRACKING_ISSUE: ${{ inputs.tracking-issue }}
+          APPROVAL_GATE_REGISTRY: caller/${{ inputs.registry-path }}
+          APPROVAL_GATE_PRIVATE_PATTERNS: ${{ secrets.APPROVAL_GATE_PRIVATE_PATTERNS }}
+          APPROVAL_GATE_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          APPROVAL_GATE_EXECUTE_RESULT: ${{ needs.execute.result }}
+          APPROVAL_GATE_VERDICT: ${{ needs.execute.outputs.verdict }}
+        run: python engine/scripts/Invoke-ApprovalGate.py record
