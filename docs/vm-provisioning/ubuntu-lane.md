@@ -195,6 +195,7 @@ is still to come.
 | `up` | `prepare` | host | `vagrant up` in the run directory |
 | `verify-instance` | `prepare` | host | `VBoxManage showvminfo {uuid} --machinereadable` |
 | `connect` | `prepare` | engine | connects over SSH, accepting only the host key in the box receipt |
+| `check-runner-units` | `prepare` | engine | lists the guest's units with `systemctl list-unit-files` and `systemctl list-units --all`, and stops the run if any is an `actions.runner.*` unit ([REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103), [clone check](ubuntu-vagrant-clone.md#runner-units)) |
 | `probe-<tool>` | `prepare` | guest | runs one declared tool probe, for up to 60 seconds |
 | `transfer-candidate` | `prepare` | engine | sends the candidate commit to the guest |
 | `workload` | `build` | guest | starts the declared `argv` in the working directory, with only the declared secrets; it waits for the link to go off before it runs |

@@ -108,7 +108,10 @@ covers the LabVIEW-free Ubuntu lane box (`vm/ubuntu-lane/`,
 `scripts/Invoke-LaneBox.py`), and
 [`docs/vm-provisioning/ubuntu-lane.md`](docs/vm-provisioning/ubuntu-lane.md)
 covers the dry-run lane plan and lane teardown by VM UUID
-(`scripts/Invoke-Lane.py`).
+(`scripts/Invoke-Lane.py`), and
+[`docs/vm-provisioning/ubuntu-vagrant-clone.md`](docs/vm-provisioning/ubuntu-vagrant-clone.md)
+covers the neutral clone verifier (`scripts/vagrant_clone/`) and its clone
+profiles.
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 
