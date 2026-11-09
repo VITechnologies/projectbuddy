@@ -1,0 +1,17 @@
+{
+  "schema": "approval-gate/classes@1",
+  "classes": {
+    "noop": {
+      "description": "Known-answer class: verifies the approval and the content, then writes nothing.",
+      "executor": "noop",
+      "environment": "approval-noop",
+      "targets": ["@self"],
+      "refs": ["@default"],
+      "content_kinds": ["commit", "sha256"],
+      "precondition_kinds": ["ref-sha", "issue-edited"],
+      "default_expiry_hours": 72,
+      "max_expiry_hours": 72,
+      "allow_digest_only": true
+    }
+  }
+}

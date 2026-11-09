@@ -176,6 +176,23 @@ decision to escalate is a judgment call made during an agent's own
 analysis, not a routine CI step, so it is invoked directly (second
 consumption model above) at the point that judgment is made.
 
+### Human approval gate (`scripts/Invoke-ApprovalGate.py`, `approval-gate.yml`)
+
+Where an escalation only notifies a human, the approval gate lets a human
+authorize one privileged action. An automated requester submits a request
+with `scripts/Invoke-ApprovalGate.py submit`. The request becomes one run
+of `approval-request.yml`, whose gated job waits in a protected GitHub
+environment for a human required reviewer. After an approval, the job
+re-verifies it, then runs the action class's executor with the credential
+that only that environment holds. Every decision is recorded on a
+tracking issue. Forks and other repositories adopt the gate by
+configuration: an action-class registry, one environment per class, and a
+`readiness` check that names anything missing. See
+[`docs/approval-gate/procedure.md`](docs/approval-gate/procedure.md) and
+[`ADR-0007`](docs/architecture/adr/ADR-0007-human-approved-automation-requests.md).
+Phase 1 ships the gate with only a no-op known-answer class, so it is not
+yet live-proven.
+
 ### Repo onboarding (`Enable-RepoIssueTracking.ps1`)
 
 Many repos this engine builds for start with Issues disabled, which forces
