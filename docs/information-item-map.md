@@ -51,3 +51,9 @@ requirement (`VITechnologies/projectbuddy#11`).
   closed if any page content would be left out; an unsplit wiki assembles
   byte-for-byte unchanged. The System Specification is staged as
   `docs/requirements/syrs.md`.
+- The scan runs the assembler with `--strict --max-page-bytes 16384`, so it
+  enforces the wiki `Home` page's link conventions: unpiped `[[Page-Name]]`
+  links with no `|` alias and no `#heading` anchor, every link resolving to
+  a wiki page, every ID mention linked unless it is in code formatting, and
+  pages capped at 16 KiB (16,384 bytes). A violation fails the scan before
+  anything is staged.
