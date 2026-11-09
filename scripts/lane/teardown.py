@@ -21,13 +21,12 @@ from dataclasses import dataclass, field
 from typing import Iterator
 
 from lane_box.common import (
-    SHA256_PATTERN, LaneBoxError, forbidden_keys, hash_line, require_private_directory, sha256_file,
-    verify_hash_file, write_private,
+    SHA256_PATTERN, LaneBoxError, forbidden_keys, require_private_directory, sha256_file, verify_hash_file,
 )
 from lane_box.packager import parse_vm_info
 from lane_box.receipt import load_json
 
-from .common import INSTANCE_NAME, MACHINE_ID, UUID_PATTERN, target_uuid
+from .common import INSTANCE_NAME, MACHINE_ID, UUID_PATTERN, target_uuid, write_new_with_digest
 
 TEARDOWN_SCHEMA = "projectbuddy/lane-teardown@1"
 ABSENT = "absent"
@@ -378,8 +377,8 @@ def teardown(request: Request, vbox: VirtualBox) -> tuple[dict, bool]:
             record.failures.append(str(error))
         receipt = record.receipt(request.box_sha256)
         try:
-            write_private(request.receipt_out, json.dumps(receipt, indent=2, sort_keys=True) + "\n")
-            write_private(request.receipt_hash, hash_line(request.receipt_out))
+            write_new_with_digest(request.receipt_out, request.receipt_hash,
+                                  json.dumps(receipt, indent=2, sort_keys=True) + "\n")
         except OSError as error:
             raise ReceiptNotWritten(
                 f"teardown ended {receipt['outcome']}, but its receipt cannot be written: {error}", record.changed,

@@ -1,4 +1,4 @@
-"""Command line for the lane executor: teardown by UUID and the teardown receipt verifier."""
+"""Command line for the lane executor: the dry-run plan, teardown by UUID, and the teardown receipt verifier."""
 from __future__ import annotations
 
 import argparse
@@ -9,18 +9,42 @@ import sys
 
 from lane_box.common import LaneBoxError
 
+from . import plan as lane_plan
 from .teardown import ReceiptNotWritten, Request, VirtualBox, plan, teardown, verify_receipt
 
 LOCK_DIRECTORY = "projectbuddy-lane-locks"
 REMOVAL_OUTCOMES = ("removed", "absent")
+ENGINE = pathlib.Path(__file__).resolve().parents[2]
+EMBEDDED_VAGRANTFILE = ENGINE / "vm" / "ubuntu-lane" / "Vagrantfile.box"
+LABELS = {"plan": "Lane plan", "teardown": "Lane teardown", "verify-teardown": "Lane teardown receipt"}
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="Invoke-Lane.py",
-        description="Ubuntu lane executor: teardown and receipts (docs/vm-provisioning/ubuntu-lane.md).",
+        description="Ubuntu lane executor: plan, teardown, and receipts (docs/vm-provisioning/ubuntu-lane.md).",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    dry = commands.add_parser("plan", help="host: check every input and write a dry-run lane plan; changes nothing")
+    dry.add_argument("--declaration", type=pathlib.Path, required=True, help="the workload declaration JSON")
+    dry.add_argument("--candidate-repo", type=pathlib.Path, required=True,
+                     help="the host's clone that holds the candidate commit")
+    dry.add_argument("--box", type=pathlib.Path, required=True)
+    dry.add_argument("--box-receipt", type=pathlib.Path, required=True)
+    dry.add_argument("--profile", type=pathlib.Path, required=True)
+    dry.add_argument("--base-receipt", type=pathlib.Path, required=True)
+    dry.add_argument("--readiness-receipt", type=pathlib.Path, required=True)
+    dry.add_argument("--embedded-vagrantfile", type=pathlib.Path, default=EMBEDDED_VAGRANTFILE)
+    dry.add_argument("--work-dir", type=pathlib.Path, required=True, help="holds each instance's run directory")
+    dry.add_argument("--evidence-dir", type=pathlib.Path, required=True)
+    dry.add_argument("--records-dir", type=pathlib.Path, required=True,
+                     help="holds the teardown receipts of earlier lane instances")
+    dry.add_argument("--plan-out", type=pathlib.Path, required=True)
+    dry.add_argument("--ssh-port", type=int, help="host port for the guest's SSH forward (default: a free port)")
+    dry.add_argument("--vboxmanage")
+    dry.add_argument("--vagrant")
+    dry.add_argument("--git")
 
     down = commands.add_parser("teardown", help="host: tear down one lane instance by UUID (default: print the plan)")
     down.add_argument("--uuid", required=True, help="the instance's VM UUID; a VM name is refused")
@@ -48,6 +72,29 @@ def _lock_dir(value: pathlib.Path | None) -> pathlib.Path:
     path = pathlib.Path(runtime) / LOCK_DIRECTORY
     path.mkdir(mode=0o700, exist_ok=True)
     return path
+
+
+def _plan(arguments: argparse.Namespace) -> int:
+    tools = {name: shutil.which(getattr(arguments, name) or default)
+             for name, default in (("vboxmanage", "VBoxManage"), ("vagrant", "vagrant"), ("git", "git"))}
+    missing = [name for name, path in tools.items() if not path]
+    if missing:
+        print(f"Lane plan: FAIL: missing {', '.join(missing)}", file=sys.stderr)
+        return 127
+    request = lane_plan.Request(
+        declaration=arguments.declaration, candidate_repo=arguments.candidate_repo, box=arguments.box,
+        box_receipt=arguments.box_receipt, profile=arguments.profile, base_receipt=arguments.base_receipt,
+        readiness_receipt=arguments.readiness_receipt, embedded_vagrantfile=arguments.embedded_vagrantfile,
+        work_dir=arguments.work_dir, evidence_dir=arguments.evidence_dir, records_dir=arguments.records_dir,
+        plan_out=arguments.plan_out, engine=ENGINE, ssh_port=arguments.ssh_port,
+    )
+    lane_plan.check_request(request)
+    value = lane_plan.make_plan(request, lane_plan.Host(**tools), os.environ)
+    lane_plan.write_plan(request, value)
+    for refusal in value["refusals"]:
+        print(f"Lane plan: REFUSED: {refusal['rule']}: {refusal['detail']}", file=sys.stderr)
+    print(f"Lane plan: {value['outcome'].upper()}: {value['instance']['name']}: {arguments.plan_out}")
+    return 0 if value["outcome"] == "ready" else 2
 
 
 def _teardown(arguments: argparse.Namespace) -> int:
@@ -84,8 +131,10 @@ def _verify(arguments: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
-    label = {"teardown": "Lane teardown", "verify-teardown": "Lane teardown receipt"}[arguments.command]
+    label = LABELS[arguments.command]
     try:
+        if arguments.command == "plan":
+            return _plan(arguments)
         if arguments.command == "teardown":
             return _teardown(arguments)
         return _verify(arguments)

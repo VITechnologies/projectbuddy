@@ -107,7 +107,8 @@ the active fleet-status verification design.
 covers the LabVIEW-free Ubuntu lane box (`vm/ubuntu-lane/`,
 `scripts/Invoke-LaneBox.py`), and
 [`docs/vm-provisioning/ubuntu-lane.md`](docs/vm-provisioning/ubuntu-lane.md)
-covers lane teardown by VM UUID (`scripts/Invoke-Lane.py`).
+covers the dry-run lane plan and lane teardown by VM UUID
+(`scripts/Invoke-Lane.py`).
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 
