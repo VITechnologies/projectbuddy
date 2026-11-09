@@ -42,3 +42,12 @@ requirement (`VITechnologies/projectbuddy#11`).
   can see them; that copy is ephemeral and never committed here.
 - This table is updated whenever an information item's path, owner, or
   proving evidence changes -- not on a fixed schedule.
+- The wiki may split each specification hub into linked, ID-addressable
+  pages (one page per `SYS-REQ-###`, `REQ-###`, and `TEST-###`, and one per
+  Architecture Packet section) so Obsidian's graph shows the trace
+  relationships. Before staging, the scan rebuilds the System
+  Specification, Software Specification, Traceability Matrix, and
+  Architecture Packet hubs with `scripts/Assemble-WikiSpec.py`, which fails
+  closed if any page content would be left out; an unsplit wiki assembles
+  byte-for-byte unchanged. The System Specification is staged as
+  `docs/requirements/syrs.md`.

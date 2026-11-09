@@ -40,8 +40,18 @@ jobs:
           # source of truth and is never written back to here.
           rm -rf /tmp/projectbuddy-wiki-scan
           git clone --quiet --depth 1 "https://github.com/VITechnologies/projectbuddy.wiki.git" /tmp/projectbuddy-wiki-scan
+          # The wiki may split each hub into linked ID and section pages.
+          # Rebuild every governed hub in place from them (byte-identical for
+          # an unsplit wiki); this fails closed if any page content would
+          # drop out of the scan input.
+          python3 scripts/Assemble-WikiSpec.py --wiki /tmp/projectbuddy-wiki-scan \
+            --emit System-Requirements-Specification=/tmp/projectbuddy-wiki-scan/System-Requirements-Specification.md \
+            --emit Software-Requirements-Specification=/tmp/projectbuddy-wiki-scan/Software-Requirements-Specification.md \
+            --emit Requirements-Traceability-Matrix=/tmp/projectbuddy-wiki-scan/Requirements-Traceability-Matrix.md \
+            --emit Architecture-Packet=/tmp/projectbuddy-wiki-scan/Architecture-Packet.md
 
           mkdir -p docs/requirements
+          cp /tmp/projectbuddy-wiki-scan/System-Requirements-Specification.md docs/requirements/syrs.md
           cp /tmp/projectbuddy-wiki-scan/Software-Requirements-Specification.md docs/requirements/srs.md
           cp /tmp/projectbuddy-wiki-scan/Requirements-Traceability-Matrix.md docs/requirements/rtm.md
           cp /tmp/projectbuddy-wiki-scan/Architecture-Packet.md docs/architecture/overview.md
