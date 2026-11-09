@@ -57,3 +57,12 @@ requirement (`VITechnologies/projectbuddy#11`).
   a wiki page, every ID mention linked unless it is in code formatting, and
   pages capped at 16 KiB (16,384 bytes). A violation fails the scan before
   anything is staged.
+- Whenever assembly succeeds, even if a gate then fails, the scan run
+  publishes the four files it staged as a generated, non-authoritative view
+  for whole-table review: the job summary shows each file's SHA-256 and the
+  assembled Traceability Matrix, and the `assembled-wiki-spec` artifact holds
+  all four exactly as scored. In the summary copy, written by the
+  assembler's `--view` option, wikilinks are rendered as Markdown links to
+  the wiki page that holds each row or section, because job summaries do not
+  render wikilinks. Both need a GitHub sign-in to view, even for this public
+  repository. Edit the wiki pages, never this output.
