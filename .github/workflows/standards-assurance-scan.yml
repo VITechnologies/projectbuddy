@@ -43,8 +43,11 @@ jobs:
           # The wiki may split each hub into linked ID and section pages.
           # Rebuild every governed hub in place from them (byte-identical for
           # an unsplit wiki); this fails closed if any page content would
-          # drop out of the scan input.
+          # drop out of the scan input. --strict also rejects, before anything
+          # is written, piped, heading-anchor, and unresolved links, unlinked
+          # ID mentions, and pages over the 16 KiB budget.
           python3 scripts/Assemble-WikiSpec.py --wiki /tmp/projectbuddy-wiki-scan \
+            --strict --max-page-bytes 16384 \
             --emit System-Requirements-Specification=/tmp/projectbuddy-wiki-scan/System-Requirements-Specification.md \
             --emit Software-Requirements-Specification=/tmp/projectbuddy-wiki-scan/Software-Requirements-Specification.md \
             --emit Requirements-Traceability-Matrix=/tmp/projectbuddy-wiki-scan/Requirements-Traceability-Matrix.md \
