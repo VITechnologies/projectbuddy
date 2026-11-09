@@ -289,6 +289,15 @@ bootstrap receipt. Its packager writes its own
 verify-receipt` recomputes from its inputs. The appliance path above is
 unchanged. See the [Ubuntu lane box procedure](ubuntu-lane-box.md).
 
+### Ubuntu lane teardown (`scripts/Invoke-Lane.py`)
+
+Lane teardown removes one disposable lane instance by VM UUID. It powers off
+only from `running` or `paused`, deletes only from `poweroff` or `aborted`,
+and refuses every other state, including `livesnapshotting`. It holds a host
+lock per UUID and writes a `projectbuddy/lane-teardown@1` receipt that
+reports removal only after the UUID is observed absent. See the
+[Ubuntu lane procedure](ubuntu-lane.md).
+
 ## Shared schemas
 
 - `provisioning-manifest.json` (one per VM family, each with its own
