@@ -89,10 +89,21 @@ expected version. A build number of `"4056"` or `4056` passes, as before.
 
 `scripts/tests/test_vagrant_clone.py` fails if the profile's OS, LabVIEW
 package version, LabVIEW year, VI Server port, or VIPM version differs from the
-manifest. The appliance profile records runner units rather than refusing
-them, so the appliance's behavior is unchanged: its `register-runner` phase
-can run on the source VM before the box is packaged, and nothing on the
-packaging path checks for a runner.
+manifest.
+
+The appliance profile refuses runner units (`#192`). A clone with a runner
+unit would start a copy of the source VM's runner, with its registration, so
+every clone check of such a box fails before the capture runs. The appliance's
+`register-runner` phase installs that unit on the source VM and takes no
+snapshot, and `package-vagrant-box.py` packages the source VM's current state
+with `vagrant package --base`: its current-snapshot check does not exclude
+changes made after the snapshot. Package the box before registering a runner
+on the source VM.
+
+`clone-profile.v1.json` is the appliance profile as it was before `#192`: the
+same checks, with `runnerUnits` set to `record`, plus `receiptV1Runtime`. It
+is frozen. `verify-vagrant-clone-receipt.py` pins its SHA-256 and reads it
+only for `@1` receipts (see [Receipts](#receipts)).
 
 ## Runner units
 
@@ -182,10 +193,16 @@ names) and against the policy.
 
 It still verifies `projectbuddy/ubuntu-vagrant-clone@1` receipts, which carry
 a `runtime` block and name no profile. An `@1` receipt verifies only against
-the profile whose SHA-256 `verify-vagrant-clone-receipt.py` pins
-(`V1_PROFILE_SHA256`), and its `runtime` must equal that profile's
-`receiptV1Runtime`. A changed `clone-profile.json` therefore stops `@1`
-receipts from verifying with it; keep the pinned profile to verify them.
+the frozen `clone-profile.v1.json`, whose SHA-256
+`verify-vagrant-clone-receipt.py` pins (`V1_PROFILE_SHA256`), and its
+`runtime` must equal that profile's `receiptV1Runtime`. `--profile` does not
+apply to `@1` receipts, and a changed `clone-profile.v1.json` stops them from
+verifying. The verifier reads both profiles for every receipt, so an
+unreadable one fails any receipt.
+
+An `@2` receipt names the profile it was checked with. One written under the
+appliance profile from before `#192` verifies with
+`--profile vm/ubuntu-labview/clone-profile.v1.json`.
 
 The new verifier is stricter than the code it replaces: a receipt with a
 field the receipt does not define, a duplicate key, or a value of the wrong

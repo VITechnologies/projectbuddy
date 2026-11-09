@@ -1,0 +1,66 @@
+{
+  "schema": "projectbuddy/ubuntu-vagrant-clone-profile@1",
+  "name": "ubuntu-labview-appliance",
+  "capture": {
+    "script": "capture-activation.sh",
+    "timeoutSeconds": 600,
+    "files": [
+      "activation-known-answer-capture.json",
+      "sandbox-runtime-state.json",
+      "sandbox-vipm-about.json",
+      "sandbox-vipm-labview.json",
+      "sandbox-vipm-installed.json"
+    ]
+  },
+  "bootId": {
+    "file": "sandbox-runtime-state.json",
+    "pointer": "/bootId",
+    "alsoIn": [
+      {"file": "activation-known-answer-capture.json", "pointer": "/host/bootId"}
+    ]
+  },
+  "runnerUnits": "record",
+  "checks": [
+    {"file": "activation-known-answer-capture.json", "pointer": "/inputs", "equals": [20, 22],
+     "message": "clone LabVIEW known-answer probe failed"},
+    {"file": "activation-known-answer-capture.json", "pointer": "/expectedOutput", "equals": 42,
+     "message": "clone LabVIEW known-answer probe failed"},
+    {"file": "activation-known-answer-capture.json", "pointer": "/exitCode", "equals": 0,
+     "message": "clone LabVIEW known-answer probe failed"},
+    {"file": "activation-known-answer-capture.json", "pointer": "/output",
+     "matches": "Operation output:\\s*42\\s+RunVI operation succeeded\\.",
+     "message": "clone LabVIEW known-answer probe failed"},
+    {"file": "sandbox-runtime-state.json", "pointer": "/os",
+     "equals": {"distribution": "ubuntu", "version": "24.04", "codename": "noble"},
+     "message": "clone guest OS does not match the appliance contract"},
+    {"file": "sandbox-runtime-state.json", "pointer": "/labviewPackageVersion", "equals": "26.3.1.49165-0+f13",
+     "message": "clone LabVIEW package or security state is invalid"},
+    {"file": "sandbox-runtime-state.json", "pointer": "/automaticLoginEnabled", "equals": false,
+     "message": "clone LabVIEW package or security state is invalid"},
+    {"file": "sandbox-vipm-about.json", "pointer": "/version", "equals": "26.3.2",
+     "message": "clone VIPM activation state is invalid"},
+    {"file": "sandbox-vipm-about.json", "pointer": "/build_number", "oneOf": ["4056", 4056],
+     "message": "clone VIPM activation state is invalid"},
+    {"file": "sandbox-vipm-about.json", "pointer": "/edition", "equals": "Professional",
+     "message": "clone VIPM activation state is invalid"},
+    {"file": "sandbox-vipm-about.json", "pointer": "/valid_through", "equals": "Perpetual",
+     "message": "clone VIPM activation state is invalid"},
+    {"file": "sandbox-vipm-about.json", "pointer": "/valid_activation_code", "equals": true,
+     "message": "clone VIPM activation state is invalid"},
+    {"file": "sandbox-vipm-labview.json", "pointer": "/labview_versions",
+     "items": {"count": 1, "each": {"version_year": "2026", "bitness": 64, "vi_server_tcp_port": 3363}},
+     "message": "clone LabVIEW target or VI Server contract is invalid"},
+    {"file": "sandbox-vipm-installed.json", "pointer": "/dependencies",
+     "items": {"where": {"name": "vi_technologies_lib_super_network_streams"}, "count": 1,
+               "each": {"installed_version": "2.0.0.21", "status": "installed"}},
+     "message": "clone sample package is not installed at the expected version"}
+  ],
+  "receiptV1Runtime": {
+    "os": {"distribution": "ubuntu", "version": "24.04", "codename": "noble"},
+    "automaticLoginEnabled": false,
+    "labviewPackageVersion": "26.3.1.49165-0+f13",
+    "knownAnswer": {"inputs": [20, 22], "actualOutput": 42, "viServerPort": 3363},
+    "vipm": {"version": "26.3.2", "buildNumber": "4056", "edition": "Professional", "validThrough": "Perpetual"},
+    "package": {"name": "vi_technologies_lib_super_network_streams", "version": "2.0.0.21", "status": "installed"}
+  }
+}

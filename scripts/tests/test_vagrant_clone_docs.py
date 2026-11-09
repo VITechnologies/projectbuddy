@@ -81,7 +81,21 @@ def test_schemas_paths_and_timing_are_documented():
     assert f"trying {live.ENROLL_ATTEMPTS} times, {live.ENROLL_INTERVAL} seconds apart" in UNWRAPPED
     assert f"after {live.POWEROFF_POLLS} state checks, {live.POWEROFF_INTERVAL} seconds apart" in UNWRAPPED
     assert "`V1_PROFILE_SHA256`" in PROCEDURE
-    assert "V1_PROFILE_SHA256 = " in ADAPTERS[1].read_text(encoding="utf-8")
+    receipt_adapter = ADAPTERS[1].read_text(encoding="utf-8")
+    assert "V1_PROFILE_SHA256 = " in receipt_adapter
+    assert 'V1_PROFILE = SCRIPT_DIR / "clone-profile.v1.json"' in receipt_adapter
+    assert "the frozen `clone-profile.v1.json`" in UNWRAPPED
+    assert "`--profile` does not apply to `@1` receipts" in UNWRAPPED
+    assert "The verifier reads both profiles for every receipt" in UNWRAPPED
+
+
+def test_the_appliance_runner_unit_policy_is_documented():
+    assert profile.load_profile(APPLIANCE / "clone-profile.json").runner_units == "refuse"
+    assert "The appliance profile refuses runner units" in UNWRAPPED
+    assert "Package the box before registering a runner on the source VM." in UNWRAPPED
+    vm_procedure = " ".join((DOCS / "vm-provisioning" / "procedure.md").read_text(encoding="utf-8").split())
+    assert "Package any Vagrant box before this phase" in vm_procedure
+    assert "(ubuntu-vagrant-clone.md#the-appliance-profile)" in vm_procedure
 
 
 def test_every_adapter_option_is_documented():

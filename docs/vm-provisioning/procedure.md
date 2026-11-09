@@ -220,6 +220,9 @@ restored dispatch path.
   does not trust `config.sh`'s own exit code alone -- it polls the real
   `gh api repos/<target>/actions/runners` afterward for the expected
   runner name, `online` status, and labels before reporting PASS.
+  Package any Vagrant box before this phase: the appliance's clone
+  profile refuses Actions runner units (see
+  [the appliance profile](ubuntu-vagrant-clone.md#the-appliance-profile)).
 - **`package-build`** -- the strongest end-to-end proof phase: builds a
   real `.vip` package (`vi_technologies_lib_super_network_streams`)
   against the activated appliance, verifies its installation, and
@@ -283,7 +286,9 @@ real gap, not yet resolved.
 adapters over the neutral clone verifier (`scripts/vagrant_clone/`), with the
 appliance's clone checks as data in `vm/ubuntu-labview/clone-profile.json`.
 They write and verify `projectbuddy/ubuntu-vagrant-clone@2` receipts and still
-verify `@1` receipts. See the
+verify `@1` receipts against the frozen
+`vm/ubuntu-labview/clone-profile.v1.json`. The profile refuses Actions runner
+units, so package the Vagrant box before `register-runner`. See the
 [Ubuntu Vagrant clone check](ubuntu-vagrant-clone.md).
 
 ### LabVIEW-free lane box (`vm/ubuntu-lane/`)
