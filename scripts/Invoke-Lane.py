@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Invoke-Lane.py: the Ubuntu lane executor's teardown and receipt verifier.
+"""Invoke-Lane.py: the Ubuntu lane executor's dry-run plan, teardown, and receipt verifier.
 
-Implements part of VITechnologies/projectbuddy#185 (REQ-102). Procedure:
-`docs/vm-provisioning/ubuntu-lane.md`.
+Implements part of VITechnologies/projectbuddy#185 (REQ-090 to REQ-093, REQ-101, REQ-102).
+Procedure: `docs/vm-provisioning/ubuntu-lane.md`.
 
 Usage:
+    Invoke-Lane.py plan --declaration FILE --candidate-repo DIR --box BOX --box-receipt FILE \\
+        --profile FILE --base-receipt FILE --readiness-receipt FILE --work-dir DIR \\
+        --evidence-dir DIR --records-dir DIR --plan-out FILE [--ssh-port PORT]   (host)
     Invoke-Lane.py teardown --uuid UUID --run-dir DIR --box BOX --box-sha256 SHA256 \\
         --receipt-out RECEIPT [--lock-dir DIR] [--run]                 (host)
     Invoke-Lane.py verify-teardown RECEIPT [--uuid UUID] [--box-sha256 SHA256]   (host)

@@ -330,8 +330,8 @@ exactly.
 
 ## Related
 
-- [Ubuntu lane procedure](ubuntu-lane.md): tearing down a lane instance by
-  VM UUID.
+- [Ubuntu lane procedure](ubuntu-lane.md): planning a lane run from the box,
+  and tearing down a lane instance by VM UUID.
 - [VM provisioning procedure](procedure.md): the LabVIEW appliance and its
   receipt chain.
 - `VITechnologies/projectbuddy#183`: this lane box profile, packager, and

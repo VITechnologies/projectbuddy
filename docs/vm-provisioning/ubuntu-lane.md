@@ -1,24 +1,215 @@
 # Ubuntu Lane Procedure
 
-- Status: teardown is built and fixture-tested offline
-  (`VITechnologies/projectbuddy#185`); not yet live-proven. The lane plan and
-  the clone verifier are still to come under the same issue.
+- Status: the dry-run lane plan and teardown are built and fixture-tested
+  offline (`VITechnologies/projectbuddy#185`); neither is live-proven yet. The
+  clone verifier is still to come under the same issue.
 - Last substantive update: 2026-11-09
 - Owner: svelderrainruiz
 
 The Ubuntu lane runs one disposable VM per job from a verified
 [lane box](ubuntu-lane-box.md). The wiki's
+[REQ-090](https://github.com/VITechnologies/projectbuddy/wiki/REQ-090) to
+[REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093) and
 [REQ-101](https://github.com/VITechnologies/projectbuddy/wiki/REQ-101) to
 [REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103) set its
-rules. This guide covers the part that exists so far: **teardown**
-([REQ-102](https://github.com/VITechnologies/projectbuddy/wiki/REQ-102),
-[TEST-104](https://github.com/VITechnologies/projectbuddy/wiki/TEST-104)).
+rules. This guide covers the parts that exist so far:
+
+- **The plan** checks every input of one run and writes the run's steps,
+  changing nothing.
+- **Teardown** removes one lane instance
+  ([REQ-102](https://github.com/VITechnologies/projectbuddy/wiki/REQ-102),
+  [TEST-104](https://github.com/VITechnologies/projectbuddy/wiki/TEST-104)).
 
 The pieces:
 
 - [`scripts/Invoke-Lane.py`](../../scripts/Invoke-Lane.py): the host command
   line. It needs Python 3.11 or later on a POSIX host.
-- [`scripts/lane/`](../../scripts/lane/): the teardown and receipt modules.
+- [`scripts/lane/`](../../scripts/lane/): the declaration, plan, teardown,
+  and receipt modules.
+- [`vm/ubuntu-lane/lane-workload.example.json`](../../vm/ubuntu-lane/lane-workload.example.json):
+  a generic workload declaration.
+
+## Plan
+
+`Invoke-Lane.py plan` checks every input of one lane run and writes a
+`projectbuddy/lane-plan@1` plan. It is a dry run. It runs only read-only
+queries: `VBoxManage --version`, `list vms`, and `list systemproperties`;
+`vagrant --version`; and `git rev-parse`, `status`, `cat-file`, and
+`ls-tree`. It never adds a box, starts or changes a VM, opens a connection,
+or writes a secret's value anywhere.
+
+### The workload declaration
+
+A consumer gives its workload as data, in a `projectbuddy/lane-workload@1`
+JSON file
+([REQ-090](https://github.com/VITechnologies/projectbuddy/wiki/REQ-090)).
+The [example](../../vm/ubuntu-lane/lane-workload.example.json) names no
+consumer; its commit is a placeholder.
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | `projectbuddy/lane-workload@1` |
+| `commit` | the full 40-digit lowercase candidate commit SHA |
+| `workingDirectory` | where the workload runs, in the candidate checkout; `.` is its root |
+| `argv` | the one argument vector the workload runs, without a shell |
+| `timeoutSeconds` | the workload's limit in the guest, a positive integer |
+| `inputs` | the files and directories the workload reads, which must be in the commit |
+| `outputs` | the files the run copies into its evidence directory |
+| `secrets` | the names of the secrets the workload receives ([REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093)) |
+| `toolchain` | each tool's `name` and `probe`, as in the [lane profile](ubuntu-lane-box.md#the-lane-profile) ([REQ-091](https://github.com/VITechnologies/projectbuddy/wiki/REQ-091)) |
+
+Every path is relative, uses `/`, and is in normalized form without `..`. An
+output is never a VM disk, saved state, VM settings file, or known-hosts
+file: a file name ending in `.vdi`, `.vmdk`, `.vhd`, `.vhdx`, `.sav`, or
+`.vbox`, or named `known_hosts`, is refused in any letter case.
+
+The declaration's digest is the SHA-256 of its RFC 8785 canonical form, so
+the same content has the same digest however the file is formatted. A
+declaration with no canonical form is refused: one that holds a `null`, a
+number with a fraction or an exponent, an integer beyond 2^53 - 1, a key
+that appears twice, or an unpaired surrogate.
+
+Declaration `@1` has one argument vector and no fetch steps. A workload that
+needs the network, such as `npm ci`, waits for the fetch phase
+(`VITechnologies/projectbuddy#182`).
+
+### Run the plan (host)
+
+```bash
+python3 scripts/Invoke-Lane.py plan --declaration "$DECLARATION" \
+  --candidate-repo "$CANDIDATE" --box "$BOX" --box-receipt "$BOX_RECEIPT" \
+  --profile "$PROFILE" --base-receipt "$BASE_RECEIPT" \
+  --readiness-receipt "$READINESS_RECEIPT" --work-dir "$WORK" \
+  --evidence-dir "$EVIDENCE" --records-dir "$RECORDS" \
+  --plan-out "$OUT/lane-plan.json"
+```
+
+- `--declaration` is the workload declaration file.
+- `--candidate-repo` is the top level of the host's clone of the candidate
+  repository, not a directory inside it. The declared commit must be a commit
+  object in it. Every input and the working directory must
+  be in that commit's tree, and neither a symbolic link nor a submodule, nor
+  below one.
+- `--box`, `--box-receipt`, `--profile`, `--base-receipt`, and
+  `--readiness-receipt` are the lane box and the files its receipt binds, as
+  in [Verify the box](ubuntu-lane-box.md#7-verify-the-box-host).
+  `--embedded-vagrantfile` defaults to the engine's
+  `vm/ubuntu-lane/Vagrantfile.box`.
+- `--work-dir` and `--evidence-dir` hold each run's own run directory and
+  evidence directory, named after its instance. `--records-dir` holds the
+  teardown receipts of earlier runs, each named
+  `<instance name>.teardown.json`. All three must be private (mode 700 or
+  stricter).
+- `--plan-out` must not exist yet, and its directory must be private. The
+  plan and its `.sha256` file are written with mode 600 and hard-linked into
+  place, so the directory's file system must support hard links. A plan or
+  `.sha256` file that appears while the plan runs is kept, and the plan fails
+  (exit code 2).
+- `--ssh-port` is the host port for the guest's SSH forward, which listens
+  only on `127.0.0.1`. By default the plan picks a free port.
+- `--vboxmanage`, `--vagrant`, and `--git` name the tools when they are not
+  on `PATH`.
+
+Every path must be absolute. Each plan names a new instance: `pb-lane-` and
+12 random hexadecimal digits. The plan records the engine's commit, and
+refuses a checkout whose tracked files have changes, because its commit
+would not identify the code that runs.
+
+### Refusals
+
+Each failed check is a refusal that names its rule. The plan reports every
+refusal it finds, not only the first, and its outcome is `ready` only when
+there is none.
+
+| Rule | Refused when |
+| --- | --- |
+| `declaration-json` | the declaration cannot be read, is not a JSON object, or has no canonical form |
+| `declaration-fields` | a field is missing or unknown, or `schema` is not `projectbuddy/lane-workload@1` |
+| `commit` | `commit` is not a full 40-digit lowercase SHA: a branch, a tag, or an abbreviated SHA |
+| `argv` | `argv` is not a non-empty list of non-empty strings |
+| `working-directory` | `workingDirectory` is not a relative path in normalized form |
+| `timeout` | `timeoutSeconds` is not a positive integer |
+| `input-path` | `inputs` is not a list of strings, or an input is not a relative path below the checkout, or appears twice |
+| `output-path` | `outputs` is not a list of strings, or an output is not a relative path below the evidence directory, or appears twice |
+| `output-forbidden` | an output is a VM disk, saved state, VM settings file, or known-hosts file |
+| `secret-name` | `secrets` is not a list of strings, or a name is not an environment variable name, or appears twice |
+| `toolchain` | `toolchain` is not a non-empty list, or an entry is not a valid `name` and `probe`, or a name appears twice |
+| `box-digest` | the box's SHA-256 differs from the one its receipt records ([TEST-103](https://github.com/VITechnologies/projectbuddy/wiki/TEST-103)) |
+| `box-receipt` | the box or its receipt cannot be read, or the receipt does not verify against the box, profile, base and readiness receipts, and embedded Vagrantfile |
+| `toolchain-contract` | the declared toolchain differs from the box receipt's |
+| `candidate-missing` | `--candidate-repo` is not the top level of a git clone, or the commit is not a commit object in it (an annotated tag's own SHA is refused) |
+| `candidate-path` | an input or the working directory is not in the commit, is or is below a symbolic link or a submodule, or the working directory is not a directory |
+| `secret-missing` | a declared secret is unset or empty in the plan's environment |
+| `engine-commit` | the engine's commit cannot be read, or its tracked files have changes |
+| `earlier-record-invalid` | a `.teardown.json` receipt in the records directory does not verify |
+| `reused-instance-uuid` | VirtualBox lists a UUID that an earlier record observed `removed` or `absent` ([REQ-101](https://github.com/VITechnologies/projectbuddy/wiki/REQ-101)) |
+| `instance-name-in-use` | the new name is already a registered VM, a run directory, an evidence directory, or a lane record |
+| `host-virtualbox` | `VBoxManage --version` fails or prints an unexpected form, `list vms` fails, or VirtualBox names no absolute default machine folder |
+| `host-vagrant` | `vagrant --version` fails or prints an unexpected form |
+| `host-disk-space` | a file system has less free space than one instance needs there |
+| `ssh-port` | the SSH forward's host port is in use |
+
+A plan refused by a declaration rule, `box-digest`, or `box-receipt` has no
+steps. The disk check adds up, for each file system, the box file and its
+extracted size under the work directory, and the box receipt's full
+`diskGb` in VirtualBox's default machine folder, because a dynamic disk
+never grows past its capacity.
+
+### The plan
+
+The plan (`projectbuddy/lane-plan@1`) holds:
+
+| Field | Meaning |
+| --- | --- |
+| `engine` | the engine checkout's `path` and `commit` |
+| `instance` | the new instance's `name`, `runDirectory`, and `evidenceDirectory` |
+| `declaration` | the declaration's `path`, and its canonical `sha256` or `null` |
+| `candidate` | the candidate `repository`, and the declared `commit` or `null` |
+| `box` | the box `path` and `sha256`, the `receiptSha256`, the `extractedBytes`, and the receipt's `profile` and `sshHostKey` |
+| `host` | the `virtualBox` and `vagrant` versions, the `machineFolder`, and the `disks` the space check compared |
+| `hardware` | the box receipt's `virtualBox` block, or `null` |
+| `network` | one NAT adapter, its link off during the `build` phase, and the SSH forward from `127.0.0.1` |
+| `vagrantfile` | the generated Vagrantfile's `text` and its `sha256` |
+| `steps` | the steps below, in order |
+| `earlierInstances` | the UUIDs that earlier lane records name |
+| `refusals` | each refusal's `rule` and `detail`, in order |
+| `outcome` | `ready` or `refused` |
+
+The generated Vagrantfile loads after the box's embedded one. It disables
+the synced folder, box updates, linked clones, and Vagrant's removal of
+unused network interfaces. It forwards only SSH, from `127.0.0.1`, turns off
+the NAT's access to the host's loopback, and sets the box receipt's
+hardware. Vagrant does not connect to the guest; the lane does that itself.
+
+Each step has a `name`, a `phase`, where it `runs` (`host`, `guest`, or
+`engine`, the lane itself), its `argv`, `cwd`, `environment`, the `secrets`
+it receives by name, and its `timeoutSeconds`. `{uuid}` in an argv is the
+instance's UUID, which exists only after `vagrant up`. The phases are
+`prepare`, `fetch`, `build`, `collect`, and `teardown`; `fetch` has no steps
+at declaration `@1`. The plan names these steps; the executor that runs them
+is still to come.
+
+| Step | Phase | Runs | What it does |
+| --- | --- | --- | --- |
+| `box-add` | `prepare` | host | adds the box under the run's own `VAGRANT_HOME`, checked against its SHA-256 |
+| `up` | `prepare` | host | `vagrant up` in the run directory |
+| `verify-instance` | `prepare` | host | `VBoxManage showvminfo {uuid} --machinereadable` |
+| `connect` | `prepare` | engine | connects over SSH, accepting only the host key in the box receipt |
+| `probe-<tool>` | `prepare` | guest | runs one declared tool probe, for up to 60 seconds |
+| `transfer-candidate` | `prepare` | engine | sends the candidate commit to the guest |
+| `workload` | `build` | guest | starts the declared `argv` in the working directory, with only the declared secrets; it waits for the link to go off before it runs |
+| `network-off` | `build` | host | `VBoxManage controlvm {uuid} setlinkstate1 off` |
+| `verify-network-off` | `build` | host | checks that the link is off |
+| `await-workload` | `build` | engine | waits for the workload, for up to its timeout plus 300 seconds |
+| `network-on` | `collect` | host | `VBoxManage controlvm {uuid} setlinkstate1 on` |
+| `collect-outputs` | `collect` | engine | copies the declared outputs into the evidence directory |
+| `write-evidence` | `collect` | engine | writes the run's evidence record |
+| `teardown` | `teardown` | host | [teardown](#teardown) with `--run`, writing its receipt to the records directory |
+
+The workload starts before the link goes off because SSH reaches the guest
+through the only adapter (`VITechnologies/projectbuddy#182`, option N2).
+Host queries time out after 120 seconds, `git` after 120 seconds, and
+`box-add` and `up` after 1800 seconds each.
 
 ## Teardown
 
@@ -117,7 +308,10 @@ Add `--run` to tear down for real. The other inputs:
 - `--box` and `--box-sha256` name the lane box the instance came from, and
   its expected digest from the lane box receipt.
 - `--receipt-out` must not exist yet. Its directory must be private. The
-  receipt and its `.sha256` file are written with mode 600.
+  receipt and its `.sha256` file are written with mode 600 and hard-linked
+  into place, the same as the plan. A receipt or `.sha256` file that appears
+  while teardown runs is kept, and teardown reports that its receipt cannot be
+  written.
 - `--lock-dir` is the private directory for the per-UUID locks. It defaults
   to `$XDG_RUNTIME_DIR/projectbuddy-lane-locks` (`--lock-dir`), created with
   mode 700. Without an absolute `XDG_RUNTIME_DIR`, pass `--lock-dir`. Every
@@ -197,16 +391,17 @@ The verifier rejects a receipt when any of these is false:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | the plan, a `removed` or `absent` teardown, or a receipt that passes |
+| `0` | a `ready` lane plan, the teardown plan, a `removed` or `absent` teardown, or a receipt that passes |
 | `1` | a teardown that was refused or failed after it ran a command, a receipt that could not be written after a command ran, or a consistent receipt that records `refused` or `failed` |
-| `2` | a refusal or failure before any command ran, an invalid receipt, or a usage error; nothing was changed |
-| `127` | VBoxManage is missing, or the given path is not executable |
+| `2` | a `refused` lane plan, a refusal or failure before any command ran, an invalid receipt, or a usage error; nothing was changed |
+| `127` | VBoxManage, Vagrant, or git is missing, or the given path is not executable |
 
 ## Related
 
 - [Ubuntu lane box procedure](ubuntu-lane-box.md): building and verifying the
   box that lane instances start from.
 - [VM provisioning procedure](procedure.md): the LabVIEW appliances.
-- `VITechnologies/projectbuddy#185`: the lane plan, this teardown, and the
-  clone verifier.
+- `VITechnologies/projectbuddy#185`: this plan and teardown, and the clone
+  verifier.
+- `VITechnologies/projectbuddy#182`: the lane network and the fetch phase.
 - `VITechnologies/projectbuddy#166`: the lane design.

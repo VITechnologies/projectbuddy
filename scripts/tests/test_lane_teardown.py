@@ -503,13 +503,30 @@ def test_a_changed_box_fails_after_removal(host, capsys):
 def test_a_receipt_that_cannot_be_written_is_reported(host, capsys, monkeypatch, state, code):
     host.set_vm(state)
 
-    def full(path, content):
+    def full(path, hash_path, content):
         raise OSError("no space left on device")
 
-    monkeypatch.setattr(teardown, "write_private", full)
+    monkeypatch.setattr(teardown, "write_new_with_digest", full)
     exit_code, _, err = run_cli(host.args(run=True), capsys)
     assert exit_code == code and "but its receipt cannot be written: no space left on device" in err
     assert not host.receipt.exists()
+
+
+def test_a_receipt_that_appears_during_teardown_is_kept(host, capsys, monkeypatch):
+    """Two teardowns racing for one --receipt-out: the later writer fails and replaces nothing."""
+    host.set_vm("running")
+    sha256_file = teardown.sha256_file
+
+    def racing(path):
+        host.receipt.write_text("kept\n", encoding="utf-8")
+        return sha256_file(path)
+
+    monkeypatch.setattr(teardown, "sha256_file", racing)
+    exit_code, _, err = run_cli(host.args(run=True), capsys)
+    assert exit_code == 1 and "but its receipt cannot be written" in err and "File exists" in err
+    assert host.receipt.read_text(encoding="utf-8") == "kept\n"
+    assert not Path(f"{host.receipt}.sha256").exists()
+    assert sorted(path.name for path in host.receipt.parent.iterdir()) == [host.receipt.name]
 
 
 def test_run_directory_and_box_errors_after_removal_are_recorded(host, capsys, monkeypatch):

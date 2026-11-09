@@ -1,0 +1,67 @@
+{
+  "schema": "projectbuddy/lane-workload@1",
+  "commit": "0000000000000000000000000000000000000000",
+  "workingDirectory": ".",
+  "argv": [
+    "npm",
+    "run",
+    "package"
+  ],
+  "timeoutSeconds": 1800,
+  "inputs": [
+    "package.json",
+    "package-lock.json"
+  ],
+  "outputs": [
+    "dist/package.tgz"
+  ],
+  "secrets": [],
+  "toolchain": [
+    {
+      "name": "node",
+      "probe": {
+        "argv": [
+          "node",
+          "--version"
+        ],
+        "pattern": "v(\\S+)",
+        "expected": "24.19.0"
+      }
+    },
+    {
+      "name": "npm",
+      "probe": {
+        "argv": [
+          "npm",
+          "--version"
+        ],
+        "pattern": "(\\S+)",
+        "expected": "11.17.0"
+      }
+    },
+    {
+      "name": "git",
+      "probe": {
+        "argv": [
+          "git",
+          "--version"
+        ],
+        "pattern": "git version (\\S+)",
+        "expected": "2.43.0"
+      }
+    },
+    {
+      "name": "ca-certificates",
+      "probe": {
+        "argv": [
+          "dpkg-query",
+          "-W",
+          "-f=${Version}",
+          "ca-certificates"
+        ],
+        "pattern": "(\\S+)",
+        "expected": "20260816ubuntu0.24.04.2"
+      }
+    }
+  ]
+}
