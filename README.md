@@ -105,7 +105,9 @@ Ubuntu-LabVIEW family is a deliberate, narrower automated exception) and
 the active fleet-status verification design.
 [`docs/vm-provisioning/ubuntu-lane-box.md`](docs/vm-provisioning/ubuntu-lane-box.md)
 covers the LabVIEW-free Ubuntu lane box (`vm/ubuntu-lane/`,
-`scripts/Invoke-LaneBox.py`).
+`scripts/Invoke-LaneBox.py`), and
+[`docs/vm-provisioning/ubuntu-lane.md`](docs/vm-provisioning/ubuntu-lane.md)
+covers lane teardown by VM UUID (`scripts/Invoke-Lane.py`).
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 
