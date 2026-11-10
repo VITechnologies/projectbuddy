@@ -450,13 +450,17 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
         _step("verify-instance", "prepare", "host", show, QUERY_TIMEOUT),
         _step("connect", "prepare", "engine", None, None),
         _step("check-runner-units", "prepare", "engine", None, None),
+        _step("create-account", "prepare", "engine", None, None),
         *(_step(f"probe-{tool['name']}", "prepare", "guest", list(tool["probe"]["argv"]), PROBE_TIMEOUT)
           for tool in declaration.toolchain),
         _step("transfer-candidate", "prepare", "engine", None, None),
+        _step("place-guest-files", "prepare", "engine", None, None),
         *(_step(f"fetch-{index}", "fetch", "guest", list(argv), None, cwd=declaration.working_directory)
           for index, argv in enumerate(declaration.fetch.steps, start=1)),
         *([_step("await-fetch", "fetch", "engine", None, declaration.fetch.timeout + HOST_DEADLINE_GRACE)]
           if declaration.fetch.steps else []),
+        _step("place-secrets", "build", "engine", None, None, secrets=declaration.secrets),
+        _step("start-build", "build", "engine", None, None),
         *(_step(f"build-{index}", "build", "guest", list(argv), None, secrets=declaration.secrets,
                 cwd=declaration.working_directory)
           for index, argv in enumerate(declaration.build.steps, start=1)),

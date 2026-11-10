@@ -231,8 +231,8 @@ order, in one unit that the guest stops after that phase's `timeoutSeconds`
 in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
 The plan names these steps; the executor that runs them, on the host and in
 the guest, is still to come, apart from the [SSH channel](#the-ssh-channel),
-the [guest supervisor](#guest-phases), and the output disk's launcher and
-reader.
+the [workload placement](#workload-placement) steps, the
+[guest supervisor](#guest-phases), and the output disk's launcher and reader.
 
 | Step | Phase | Runs | What it does |
 | --- | --- | --- | --- |
@@ -242,10 +242,14 @@ reader.
 | `verify-instance` | `prepare` | host | `VBoxManage showvminfo {uuid} --machinereadable` |
 | `connect` | `prepare` | engine | records the instance's host key only when its fingerprint is the box receipt's, then logs in as root with only the run's key ([the SSH channel](#the-ssh-channel)) |
 | `check-runner-units` | `prepare` | engine | lists the guest's units with `systemctl list-unit-files` and `systemctl list-units --all`, and stops the run if any is an `actions.runner.*` unit ([REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103), [clone check](ubuntu-vagrant-clone.md#runner-units)) |
-| `probe-<tool>` | `prepare` | guest | runs one declared tool probe, for up to 60 seconds |
-| `transfer-candidate` | `prepare` | engine | sends the candidate commit to the guest |
+| `create-account` | `prepare` | engine | creates the workload account, `pb-workload`, without a login shell, and denies it cron and at ([workload placement](#workload-placement)) |
+| `probe-<tool>` | `prepare` | guest | runs one declared tool probe as the workload account, for up to 60 seconds |
+| `transfer-candidate` | `prepare` | engine | writes the candidate commit to the run directory as `candidate.tar` and extracts it in the guest as the workload account |
+| `place-guest-files` | `prepare` | engine | places the supervisor, the launcher, and the run's spec in `/run/projectbuddy-lane` |
 | `fetch-<n>` | `fetch` | guest | runs fetch step `n` in the working directory, with the network and no secrets |
-| `await-fetch` | `fetch` | engine | waits for the fetch steps to end, for up to the fetch timeout plus 300 seconds; there is none when the fetch phase has no step |
+| `await-fetch` | `fetch` | engine | runs the supervisor's `fetch` mode, which waits for the fetch steps to end, for up to the fetch timeout plus 300 seconds; there is none when the fetch phase has no step |
+| `place-secrets` | `build` | engine | places the declared secrets, which it receives by name, as root's own file in `/run/projectbuddy-lane` |
+| `start-build` | `build` | engine | runs the supervisor's `start-build` mode while the link is still on |
 | `build-<n>` | `build` | guest | runs build step `n` in the working directory, with only the declared secrets; the build waits for the link to go off before its first step runs |
 | `network-off` | `build` | host | `VBoxManage controlvm {uuid} setlinkstate1 off` |
 | `verify-network-off` | `build` | host | checks that the link is off |
@@ -323,6 +327,105 @@ with an empty word, is refused. The choices that matter:
 `connect`'s login and `check-runner-units`' queries time out after 60
 seconds each.
 
+### Workload placement
+
+The workload placement steps
+([`scripts/lane/placement.py`](../../scripts/lane/placement.py)) run as root
+over the [SSH channel](#the-ssh-channel). Each step requires every command it
+runs to exit 0 and the guest to end in the state below; anything else stops
+the run. Each guest command they run times out after 60 seconds unless
+this section gives another timeout.
+
+`create-account` requires `getent passwd pb-workload` to exit 2, which means
+the guest has no such account, and then runs:
+
+```text
+useradd --create-home --home-dir /home/pb-workload --shell /usr/sbin/nologin --user-group pb-workload
+```
+
+It accepts the account only when `getent passwd pb-workload` then prints
+`pb-workload:x:<uid>:<gid>::/home/pb-workload:/usr/sbin/nologin`, with a user
+ID and a group ID other than 0. It appends `pb-workload` to `/etc/cron.deny`
+and `/etc/at.deny` with `tee --append`, and checks each file with
+`grep --fixed-strings --line-regexp`. When the guest has neither
+`/etc/at.allow` nor `/etc/at.deny`, only root may use `at`, so creating
+`at.deny` lets every other account use it; the lane accepts that residual
+risk.
+
+Each `probe-<tool>` runs `runuser -u pb-workload -- <argv>`, for up to 60
+seconds. As the box receipt's probe does, it requires the probe's `pattern`
+to match the whole trimmed output and its group to be the declared
+`expected` version, so the build uses the tools that the workload account
+itself finds.
+
+`transfer-candidate` writes the candidate commit's tree to `candidate.tar` in
+the run directory, as a new file with mode 600, and records its SHA-256. It
+builds the archive itself from `git ls-tree -r -t -z --full-tree` and
+`git cat-file --batch`, not with `git archive`, which applies the tree's
+`export-ignore` and `export-subst` attributes and has no option to turn them
+off. git runs with `--no-replace-objects` and without the caller's `GIT_*`
+variables, so neither a replace ref nor the environment changes what it
+reads. The archive is deterministic: PAX format, owner and group 0 with no
+names, modification time 0, and mode 0644 or 0755 for a file, by its
+executable bit, 0755 for a directory, and 0777 for a symbolic link, which
+stays a link. A submodule, or a path or link target that is not UTF-8, stops
+the run. In the guest, the workload account creates its candidate directory,
+which must not exist yet, and extracts the archive from standard input, for
+up to 1800 seconds:
+
+```text
+runuser -u pb-workload -- mkdir -m 0700 -- /home/pb-workload/candidate
+runuser -u pb-workload -- tar --extract --file=- --directory=/home/pb-workload/candidate --no-same-owner --no-same-permissions --touch
+```
+
+`--no-same-permissions` applies the account's umask to the archive's modes,
+and `--touch` gives each file the extraction time, as a checkout does. The
+spec's `root` is the declared working directory in
+`/home/pb-workload/candidate`.
+
+`place-guest-files` takes the output disk from `verify-instance`'s output:
+the slot the plan attaches the disk at, `SATA-1-0`, must hold the plan's
+disk, and the instance must have no snapshot, since a snapshot would put a
+differencing image in that slot. The medium in `SATA-ImageUUID-1-0` gives the
+spec's `device` ([the output disk](#the-output-disk)). The engine builds the
+spec from the declaration and refuses it unless the supervisor's own check
+accepts it. It then runs `mkdir -m 0755 -- /run/projectbuddy-lane`, which
+fails when the directory exists, and places this engine's `supervisor.py`
+and `output_disk.py` and the spec, each sent on standard input to:
+
+```text
+install -m 0644 -o root -g root /dev/stdin /run/projectbuddy-lane/<file>
+```
+
+It accepts them only when `stat --printf='%u %g %f %h %s\n'` shows the
+directory as root's with mode 0755, and each file as root's with mode 0644,
+one link, and the size sent, and `sha256sum` prints the SHA-256 of what it
+sent.
+
+`await-fetch` runs `/usr/bin/python3 /run/projectbuddy-lane/supervisor.py fetch`
+for up to the fetch timeout plus 300 seconds, and requires exit 0 and the
+output `fetch: exited 0`.
+
+`place-secrets` sends one `NAME=VALUE` followed by a NUL byte for each
+declared secret, in declared order, on standard input to:
+
+```text
+sh -c 'umask 077 && exec install -m 0600 -o root -g root /dev/stdin /run/projectbuddy-lane/secrets'
+```
+
+A value travels only on standard input, never in an argv, and no message
+holds one; a missing or empty value, or one with a NUL byte, stops the run
+and names only the secret. With no declared secret the file is empty, since
+the build unit still reads it as its standard input. The engine accepts the
+file only when `stat` shows it as root's with mode 0600, one link, and the
+size sent. The step runs last before `start-build`, so the secrets file is in
+the guest only from then until the build unit opens it.
+
+`start-build` runs
+`/usr/bin/python3 /run/projectbuddy-lane/supervisor.py start-build` while the
+link is on, for up to 180 seconds, and requires exit 0 and the output
+`start-build: pb-lane-supervisor.service started`.
+
 ### Guest phases
 
 The guest supervisor
@@ -335,9 +438,9 @@ with mode 0755, beside the run's spec, `lane-guest.json`, with mode 0644, so
 the workload account can read them but not change them. Only root can create
 an entry in `/run`, so the workload account cannot claim that directory
 first. Outside a lane guest every mode changes nothing and exits 2. The
-engine runs these modes as root over the [SSH channel](#the-ssh-channel). The
-host side that writes the spec and the secrets file and runs the modes is
-still to come (`VITechnologies/projectbuddy#206`).
+engine runs these modes as root over the [SSH channel](#the-ssh-channel), in
+the [workload placement](#workload-placement) steps, which also write the spec
+and the secrets file.
 
 | Mode | Runs as | What it does |
 | --- | --- | --- |

@@ -333,16 +333,19 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
     assert CANARY not in lane.plan_out.read_text(encoding="utf-8") + out + err
     steps = value["steps"]
     assert [step["name"] for step in steps] == [
-        "client-key", "box-add", "up", "verify-instance", "connect", "check-runner-units", "probe-node", "probe-npm", "probe-git",
-        "probe-ca-certificates", "transfer-candidate", "fetch-1", "await-fetch", "build-1", "build-2", "network-off",
+        "client-key", "box-add", "up", "verify-instance", "connect", "check-runner-units", "create-account",
+        "probe-node", "probe-npm", "probe-git", "probe-ca-certificates", "transfer-candidate", "place-guest-files",
+        "fetch-1", "await-fetch", "place-secrets", "start-build", "build-1", "build-2", "network-off",
         "verify-network-off", "await-poweroff", "read-outputs", "write-evidence", "teardown",
     ]
     assert all(set(step) == set(plan.STEP_FIELDS) for step in steps)
     phases = [plan.PHASES.index(step["phase"]) for step in steps]
     assert phases == sorted(phases)
     by_name = {step["name"]: step for step in steps}
-    # REQ-093 / REQ-106: secret names go to the build phase only.
-    assert [name for name, step in by_name.items() if step["secrets"]] == ["build-1", "build-2"]
+    # REQ-093 / REQ-106: secret names go to the build phase only, placed just before the build starts.
+    assert [name for name, step in by_name.items() if step["secrets"]] == ["place-secrets", "build-1", "build-2"]
+    assert all(step["phase"] == "build" for step in steps if step["secrets"])
+    assert by_name["place-secrets"]["secrets"] == ["LANE_TEST_SECRET"]
     assert by_name["fetch-1"] == {
         "name": "fetch-1", "phase": "fetch", "runs": "guest", "argv": ["npm", "ci", "--ignore-scripts"], "cwd": "src",
         "environment": {}, "secrets": [], "timeoutSeconds": None,
@@ -761,7 +764,8 @@ def test_a_declaration_without_fetch_steps_has_no_fetch_phase(lane, capsys):
     code, value, _, err = lane.run(capsys)
     assert code == 0, err
     assert "fetch" not in {step["phase"] for step in value["steps"]}
-    assert [step["name"] for step in value["steps"] if step["phase"] == "build"][:2] == ["build-1", "build-2"]
+    assert [step["name"] for step in value["steps"] if step["phase"] == "build"][:4] == [
+        "place-secrets", "start-build", "build-1", "build-2"]
 
 
 def test_the_output_disk_is_whole_mib_and_holds_max_output_bytes(lane, capsys):
