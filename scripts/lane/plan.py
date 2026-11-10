@@ -27,6 +27,7 @@ from lane_box.common import LaneBoxError, require_private_directory, sha256_file
 from lane_box.receipt import load_json, verify_box_receipt
 from lane_box.toolchain import PROBE_TIMEOUT
 
+from .channel import ACCESS_PROPERTY, PUBLIC_KEY, SSH_PATH
 from .common import INSTANCE_NAME, UUID_PATTERN, Refusal, new_instance_name, write_new_with_digest
 from .declaration import DECLARATION_RULES, Declaration, load_declaration
 from .output_disk import MIB, disk_bytes
@@ -60,7 +61,7 @@ OUTPUT_DEVICE_PREFIX = "/dev/disk/by-id/ata-VBOX_HARDDISK_VB"
 RULES = DECLARATION_RULES + (
     "box-digest", "box-receipt", "toolchain-contract", "candidate-missing", "candidate-path", "secret-missing",
     "engine-commit", "earlier-record-invalid", "reused-instance-uuid", "instance-name-in-use",
-    "host-virtualbox", "host-vagrant", "host-disk-space", "ssh-port",
+    "host-virtualbox", "host-vagrant", "host-disk-space", "ssh-port", "run-directory-path",
 )
 PLAN_FIELDS = (
     "schema", "engine", "instance", "declaration", "candidate", "box", "host", "hardware", "network",
@@ -87,6 +88,7 @@ Vagrant.configure("2") do |config|
     vb.customize ["modifyvm", :id, "--vram", "{vram}", "--nat-localhostreachable1", "off"]
     vb.customize ["createmedium", "disk", "--filename", {disk}, "--size", "{disk_mb}", "--format", "VDI", "--variant", "Fixed"]
     vb.customize ["storageattach", :id, "--storagectl", "{controller}", "--port", "{disk_port}", "--device", "0", "--type", "hdd", "--medium", {disk}]
+    vb.customize ["guestproperty", "set", :id, {access_property}, File.read({public_key}).chomp, "--flags", "RDONLYGUEST"]
   end
 end
 """
@@ -402,7 +404,8 @@ def ruby_string(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def render_vagrantfile(name: str, port: int, hardware: Mapping[str, object], disk: Mapping[str, object]) -> str:
+def render_vagrantfile(name: str, port: int, hardware: Mapping[str, object], disk: Mapping[str, object],
+                       public_key: str) -> str:
     if not INSTANCE_NAME.fullmatch(name) or port not in PORT_RANGE:
         raise LaneBoxError("refusing to render a Vagrantfile for an invalid instance name or port")
     values = [hardware.get(key) for key in ("memoryMb", "cpus", "vramMb")]
@@ -413,7 +416,8 @@ def render_vagrantfile(name: str, port: int, hardware: Mapping[str, object], dis
     memory, cpus, vram = values
     return VAGRANTFILE.format(name=name, port=port, guest_port=SSH_GUEST_PORT, memory=memory, cpus=cpus, vram=vram,
                               disk=ruby_string(disk["path"]), disk_mb=disk["sizeMb"],
-                              controller=OUTPUT_DISK_CONTROLLER, disk_port=OUTPUT_DISK_PORT)
+                              controller=OUTPUT_DISK_CONTROLLER, disk_port=OUTPUT_DISK_PORT,
+                              access_property=ruby_string(ACCESS_PROPERTY), public_key=ruby_string(public_key))
 
 
 def _step(name: str, phase: str, runs: str, argv: list[str] | None, timeout: int | None, *,
@@ -436,6 +440,7 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
     vagrant_environment = {"VAGRANT_HOME": str(run_dir / "vagrant-home"), "TMPDIR": str(run_dir / "tmp")}
     show = [host.vboxmanage, "showvminfo", UUID_PLACEHOLDER, "--machinereadable"]
     return [
+        _step("client-key", "prepare", "engine", None, None),
         _step("box-add", "prepare", "host", [
             host.vagrant, "box", "add", "--name", name, "--provider", "virtualbox", "--checksum", box_sha256,
             "--checksum-type", "sha256", str(request.box),
@@ -499,6 +504,9 @@ def check_host(request: Request, host: Host, name: str, records: Records, box: d
     port = request.ssh_port if request.ssh_port is not None else free_port()
     if not port_is_free(port):
         refusals.append(Refusal("ssh-port", f"127.0.0.1:{port} is in use"))
+    if not SSH_PATH.fullmatch(str(request.work_dir / name)):
+        refusals.append(Refusal("run-directory-path", f"ssh would expand or split {request.work_dir / name}; "
+                                                      f"the run directory must match {SSH_PATH.pattern}"))
     folder = host.machine_folder()
     if folder is None:
         refusals.append(Refusal("host-virtualbox", "VBoxManage list systemproperties named no default machine folder"))
@@ -534,7 +542,8 @@ def make_plan(request: Request, host: Host, environ: Mapping[str, str]) -> dict:
     details, port, found = check_host(request, host, name, records, box, hardware, disk,
                                       None if declaration is None else declaration.max_output_bytes)
     refusals += found
-    vagrantfile = None if hardware is None or disk is None else render_vagrantfile(name, port, hardware, disk)
+    vagrantfile = None if hardware is None or disk is None else render_vagrantfile(
+        name, port, hardware, disk, str(request.work_dir / name / PUBLIC_KEY))
     ready = declaration is not None and hardware is not None
     return {
         "schema": PLAN_SCHEMA,

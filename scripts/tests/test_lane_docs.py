@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lane import cli, common, declaration, output_disk, outputs, plan, supervisor, teardown  # noqa: E402
+from lane import channel, cli, common, declaration, output_disk, outputs, plan, supervisor, teardown  # noqa: E402
+from vagrant_clone import guest as clone_guest  # noqa: E402
 from lane_box.toolchain import PROBE_TIMEOUT  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -243,4 +244,42 @@ def test_the_guest_rules_are_documented():
     uuid = "aabbccdd-eeff-0011-2233-445566778899"
     assert f"`{plan.OUTPUT_DEVICE_PREFIX}`" in UNWRAPPED
     assert f"medium UUID `{uuid}` it is `{plan.output_device(uuid)}`" in UNWRAPPED
-    assert "the [guest supervisor](#guest-phases) and the output disk's launcher and reader" in UNWRAPPED
+    assert ("apart from the [SSH channel](#the-ssh-channel), the [guest supervisor](#guest-phases), and the "
+            "output disk's launcher and reader") in UNWRAPPED
+
+
+def test_the_client_key_property_is_documented():
+    assert f"`{channel.ACCESS_PROPERTY}` with the flag `RDONLYGUEST`" in UNWRAPPED
+    line = next(line for line in plan.VAGRANTFILE.splitlines() if "guestproperty" in line)
+    assert '"--flags", "RDONLYGUEST"]' in line and "{access_property}" in line and "File.read({public_key})" in line
+    assert f"read from `{channel.PUBLIC_KEY}` in the run directory" in UNWRAPPED
+    assert f"`{channel.CLIENT_KEY}` and `{channel.PUBLIC_KEY}`" in UNWRAPPED
+
+
+def test_the_ssh_channel_is_the_code(tmp_path):
+    [block] = code_blocks("### The SSH channel", "### Guest phases")
+    session = channel.Session(channel.Guest(Path("/RUNDIR"), 2222, "SHA256:" + "A" * 43))
+    argv = " ".join(session.argv).replace("/RUNDIR", "<run directory>").replace(" 2222 ", " <port> ")
+    assert block == f"{argv} <command>"
+    calls = []
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+    try:
+        channel.generate_client_key(run_dir, "pb-lane-0123456789ab", lambda argv, **kwargs: calls.append(argv) or (1, ""))
+    except channel.LaneBoxError:
+        pass
+    [keygen] = calls
+    words = ['""' if word == "" else word for word in keygen]
+    shown = " ".join(words).replace("pb-lane-0123456789ab", "<instance name>").replace(str(run_dir), "<run directory>")
+    assert f"`{shown}`" in UNWRAPPED
+    assert channel.SSH_PATH.pattern == "/[A-Za-z0-9._/@+-]*"
+    assert UNWRAPPED.count(f"`{channel.SSH_PATH.pattern}`") == 2
+    assert channel.KEYGEN_TIMEOUT == 60 and "for up to 60 seconds, and accepts the result" in UNWRAPPED
+    assert (clone_guest.ENROLL_ATTEMPTS, clone_guest.ENROLL_INTERVAL, clone_guest.ENROLL_TIMEOUT) == (30, 5, 20)
+    assert "up to 30 times, 5 seconds apart, for up to 20 seconds each" in UNWRAPPED
+    assert (channel.AUTH_ATTEMPTS, channel.AUTH_INTERVAL, channel.SSH_FAILED) == (12, 5, 255)
+    assert "retrying up to 12 times, 5 seconds apart, while ssh itself fails with exit code 255" in UNWRAPPED
+    assert clone_guest.QUERY_TIMEOUT == 60 and "`check-runner-units`' queries time out after 60 seconds each" in UNWRAPPED
+    assert f"`[{clone_guest.GUEST_HOST}]:<port> ssh-ed25519 <key>`" in UNWRAPPED
+    assert f"refuses a run directory that already has a `{channel.KNOWN_HOSTS}` file" in UNWRAPPED
+    assert channel.ACCOUNT == "root" and "runs `id -u` as root" in UNWRAPPED

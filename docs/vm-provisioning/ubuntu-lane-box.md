@@ -74,9 +74,10 @@ The pieces:
   restarts nothing, so the base VM keeps accepting password logins until it
   reboots. Lane instances boot from the box, so this does not affect them.
 - **Which key the host sets.** The guest accepts any key the host sets in the
-  property. Generating it, setting it on every instance before it boots, and
-  connecting with it are the lane run's job
-  (`VITechnologies/projectbuddy#206`), which is still to come.
+  property. A lane run generates a new key for each instance and sets it
+  before the instance first boots
+  ([the SSH channel](ubuntu-lane.md#the-ssh-channel)); a key that any other
+  host process sets is outside this guarantee.
 - **A live proof.** No lane box has been built from a real VM yet.
 
 ## The lane profile
