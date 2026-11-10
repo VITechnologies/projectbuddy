@@ -1,17 +1,20 @@
-#Requires -Version 5.1
 <#
 Read-only diagnostics for the ProjectBuddy peer link (VITechnologies/projectbuddy#211, P0).
-Changes nothing on this machine. Run from the USB stick in an elevated PowerShell:
+Changes nothing on this machine. In an elevated Windows PowerShell, either run the file:
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Get-PeerLinkDiagnostics.ps1
-Writes peer-diag-<timestamp>.txt next to this script. The file holds private network
-details; keep it on the USB stick and the workstation only, never in a public repository.
+or pipe it from a commit-pinned raw URL: irm <url> | iex
+Writes peer-diag-<timestamp>.txt to -OutputDirectory (default: Desktop\peer-diag) and copies
+it to the clipboard. The file holds private network details; never put it in a public repository.
 #>
-[CmdletBinding()]
 param(
-    [string]$OutputDirectory = $PSScriptRoot
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $OutputDirectory) {
+    $OutputDirectory = Join-Path ([Environment]::GetFolderPath('Desktop')) 'peer-diag'
+}
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $outFile = Join-Path $OutputDirectory "peer-diag-$stamp.txt"
 $lines = New-Object System.Collections.Generic.List[string]
@@ -195,4 +198,9 @@ Add-Section 'Free space on fixed volumes' {
 }
 
 $lines | Set-Content -Path $outFile -Encoding UTF8
-Write-Host "Wrote $outFile"
+try {
+    Get-Content -LiteralPath $outFile -Raw | Set-Clipboard
+    Write-Host "Done: $outFile (also copied to the clipboard)"
+} catch {
+    Write-Host "Done: $outFile (clipboard copy failed: $($_.Exception.Message))"
+}
