@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import pathlib
 import shutil
@@ -30,18 +29,19 @@ from lane_box.toolchain import PROBE_TIMEOUT
 
 from .common import INSTANCE_NAME, UUID_PATTERN, Refusal, new_instance_name, write_new_with_digest
 from .declaration import DECLARATION_RULES, Declaration, load_declaration
+from .output_disk import MIB, disk_bytes
 from .teardown import QUERY_TIMEOUT, verify_receipt
 
 PLAN_SCHEMA = "projectbuddy/lane-plan@2"
 BOX_ADD_TIMEOUT = 1800
 UP_TIMEOUT = 1800
 GIT_TIMEOUT = 120
+READ_TIMEOUT = 1800
 # The host's outer deadline for a phase: the guest's own phase timeout fires first, and the phase
 # then has this long to end before the host records the timeout itself.
 HOST_DEADLINE_GRACE = 300
 RECORD_SUFFIX = ".teardown.json"
 REMOVAL_OUTCOMES = ("removed", "absent")
-MIB = 1024 ** 2
 GIB = 1024 ** 3
 SSH_GUEST_PORT = 22
 PORT_RANGE = range(1024, 65536)
@@ -376,7 +376,7 @@ def check_disk(needs: list[tuple[pathlib.Path, int]]) -> tuple[list[dict], list[
 
 def output_disk(run_dir: pathlib.Path, max_output_bytes: int) -> dict:
     """REQ-106: a fixed-size disk that holds at most ``maxOutputBytes``, in whole MiB."""
-    return {"path": str(run_dir / OUTPUT_DISK_NAME), "sizeMb": math.ceil(max_output_bytes / MIB), "format": "VDI",
+    return {"path": str(run_dir / OUTPUT_DISK_NAME), "sizeMb": disk_bytes(max_output_bytes) // MIB, "format": "VDI",
             "variant": "Fixed", "controller": OUTPUT_DISK_CONTROLLER, "port": OUTPUT_DISK_PORT, "device": 0}
 
 
@@ -443,7 +443,9 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
               QUERY_TIMEOUT),
         _step("verify-network-off", "build", "host", show, QUERY_TIMEOUT),
         _step("await-poweroff", "build", "engine", None, declaration.build.timeout + HOST_DEADLINE_GRACE),
-        _step("read-outputs", "collect", "engine", None, None),
+        _step("read-outputs", "collect", "host", [
+            host.vboxmanage, "mediumio", f"--disk={run_dir / OUTPUT_DISK_NAME}", "cat", "--output=-",
+        ], READ_TIMEOUT),
         _step("write-evidence", "collect", "engine", None, None),
         _step("teardown", "teardown", "host", [
             sys.executable, str(request.engine / "scripts" / "Invoke-Lane.py"), "teardown", "--uuid", UUID_PLACEHOLDER,

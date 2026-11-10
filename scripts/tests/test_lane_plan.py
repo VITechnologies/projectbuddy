@@ -359,8 +359,13 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
         assert step["environment"] == {"VAGRANT_HOME": f"{run_dir}/vagrant-home", "TMPDIR": f"{run_dir}/tmp"}
     assert by_name["network-off"]["argv"] == [str(lane.vboxmanage), "controlvm", "{uuid}", "setlinkstate1", "off"]
     assert by_name["probe-node"]["argv"] == ["node", "--version"] and by_name["probe-node"]["runs"] == "guest"
-    # Every VirtualBox command after `vagrant up` names the instance by its verified UUID.
-    assert all("{uuid}" in step["argv"] for step in steps[2:] if step["runs"] == "host")
+    # Every VirtualBox command after `vagrant up` names the instance by its verified UUID, except the
+    # read of the output disk, which names the disk at the path the Vagrantfile attaches it from.
+    assert all("{uuid}" in step["argv"] for step in steps[2:]
+               if step["runs"] == "host" and step["name"] != "read-outputs")
+    assert by_name["read-outputs"]["argv"] == [
+        str(lane.vboxmanage), "mediumio", f"--disk={value['outputDisk']['path']}", "cat", "--output=-"]
+    assert by_name["read-outputs"]["timeoutSeconds"] == plan.READ_TIMEOUT
     teardown_argv = by_name["teardown"]["argv"]
     assert teardown_argv[:2] == [sys.executable, str(lane.engine / "scripts" / "Invoke-Lane.py")]
     parsed = cli.build_parser().parse_args(teardown_argv[2:])
@@ -604,7 +609,11 @@ CASES = [
     Case("output-parent", rules("output-path"), declared(outputs=["../out.tgz"])),
     Case("output-twice", rules("output-path"), declared(outputs=["a.tgz", "a.tgz"])),
     Case("outputs-number", rules("output-path"), declared(outputs=[1])),
+    Case("output-name-long", rules("output-path"), declared(outputs=["d/" + "é" * 50]), "longer than 100 bytes"),
+    Case("output-below-output", rules("output-path"), declared(outputs=["dist", "dist/a.tgz"]),
+         "output 'dist/a.tgz' is below another output"),
     Case("output-size-zero", rules("output-size"), declared(maxOutputBytes=0)),
+    Case("output-size-small", rules("output-size"), declared(maxOutputBytes=2047), "at least 2048"),
     Case("output-size-bool", rules("output-size"), declared(maxOutputBytes=True)),
     Case("output-size-string", rules("output-size"), declared(maxOutputBytes="64M")),
     *[Case(f"output-{name}", rules("output-forbidden"), declared(outputs=["ok.tgz", name]))
