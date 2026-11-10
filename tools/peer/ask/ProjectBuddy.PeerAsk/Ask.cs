@@ -1,0 +1,177 @@
+using System.Text;
+using System.Text.Json;
+
+namespace ProjectBuddy.PeerAsk;
+
+// The workstation client: one fixed ssh invocation, then classification of the result.
+public static class Ask
+{
+    public const int DefaultConnectTimeout = 5;
+    public static readonly TimeSpan CommandAllowance = TimeSpan.FromSeconds(30);
+
+    public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh);
+
+    public static int Execute(string[] args, IProcessRunner runner, TextWriter stdout, TextWriter stderr)
+    {
+        var options = Parse(args, out var problem);
+        if (options is null)
+        {
+            stderr.WriteLine($"projectbuddy-ask: {problem}");
+            stderr.WriteLine(Program.Usage);
+            return ExitCodes.Usage;
+        }
+
+        var timeout = TimeSpan.FromSeconds(options.ConnectTimeout) + CommandAllowance;
+        var result = runner.Run(options.Ssh, SshArguments(options), timeout);
+        var (code, message) = Classify(result, options.Verb);
+        if (code == 0)
+        {
+            stdout.WriteLine(result.Stdout.Trim());
+            return 0;
+        }
+
+        stderr.WriteLine($"projectbuddy-ask: {message}");
+        return code;
+    }
+
+    public static Options? Parse(string[] args, out string problem)
+    {
+        problem = "";
+        if (args.Length == 0 || args[0].StartsWith('-'))
+        {
+            problem = "missing verb";
+            return null;
+        }
+
+        var verb = args[0];
+        if (!Serve.Verbs.Contains(verb))
+        {
+            problem = $"unknown verb '{verb}'";
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        string[] known = ["--host", "--user", "--identity", "--known-hosts", "--connect-timeout", "--ssh"];
+        for (var i = 1; i < args.Length; i += 2)
+        {
+            if (!known.Contains(args[i]) || i + 1 >= args.Length || values.ContainsKey(args[i]))
+            {
+                problem = $"bad option '{args[i]}'";
+                return null;
+            }
+
+            values[args[i]] = args[i + 1];
+        }
+
+        foreach (var required in known[..4])
+        {
+            if (!values.TryGetValue(required, out var value) || value.Length == 0)
+            {
+                problem = $"missing {required}";
+                return null;
+            }
+        }
+
+        var connectTimeout = DefaultConnectTimeout;
+        if (values.TryGetValue("--connect-timeout", out var text)
+            && (!int.TryParse(text, out connectTimeout) || connectTimeout is < 1 or > 60))
+        {
+            problem = "--connect-timeout must be 1..60";
+            return null;
+        }
+
+        return new Options(verb, values["--host"], values["--user"], values["--identity"], values["--known-hosts"],
+            connectTimeout, values.GetValueOrDefault("--ssh", "ssh"));
+    }
+
+    public static IReadOnlyList<string> SshArguments(Options options) =>
+    [
+        "-F", "none",
+        "-o", $"IdentityFile={options.Identity}",
+        "-o", "IdentitiesOnly=yes",
+        "-o", "IdentityAgent=none",
+        "-o", $"UserKnownHostsFile={options.KnownHosts}",
+        "-o", "GlobalKnownHostsFile=none",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "UpdateHostKeys=no",
+        "-o", "CheckHostIP=no",
+        "-o", "BatchMode=yes",
+        "-o", $"ConnectTimeout={options.ConnectTimeout}",
+        "-o", "ConnectionAttempts=1",
+        "-o", "ServerAliveInterval=5",
+        "-o", "ServerAliveCountMax=2",
+        "-o", "ClearAllForwardings=yes",
+        "-o", "ForwardAgent=no",
+        "-o", "ForwardX11=no",
+        "-o", "RequestTTY=no",
+        "-o", "PermitLocalCommand=no",
+        "-o", "LogLevel=ERROR",
+        "-l", options.User,
+        "--", options.Host, options.Verb,
+    ];
+
+    public static (int Code, string Message) Classify(ProcessResult result, string verb)
+    {
+        if (!result.Started)
+        {
+            return (ExitCodes.SshError, "ssh-error: ssh could not be started");
+        }
+
+        var detail = Serve.Field(result.Stderr);
+        if (result.TimedOut)
+        {
+            return (ExitCodes.Unreachable, "unreachable: timed out");
+        }
+
+        switch (result.ExitCode)
+        {
+            case 0:
+                return Validate(result.Stdout, verb);
+            case ExitCodes.Refused:
+                return (ExitCodes.PeerRefused, "refused: the peer refused the request");
+            case 255 when detail.Contains("Host key verification failed", StringComparison.Ordinal)
+                       || detail.Contains("REMOTE HOST IDENTIFICATION", StringComparison.Ordinal)
+                       || detail.Contains("No ED25519 host key is known", StringComparison.Ordinal):
+                return (ExitCodes.HostKey, $"host-key: {detail}");
+            case 255 when detail.Contains("Permission denied", StringComparison.Ordinal):
+                return (ExitCodes.Auth, $"auth: {detail}");
+            case 255 when detail.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+                       || detail.Contains("No route to host", StringComparison.Ordinal)
+                       || detail.Contains("Network is unreachable", StringComparison.Ordinal)
+                       || detail.Contains("Connection refused", StringComparison.Ordinal)
+                       || detail.Contains("Connection closed", StringComparison.Ordinal)
+                       || detail.Contains("Connection reset", StringComparison.Ordinal):
+                return (ExitCodes.Unreachable, $"unreachable: {detail}");
+            case 255:
+                return (ExitCodes.SshError, $"ssh-error: {detail}");
+            default:
+                return (ExitCodes.PeerError, $"peer-error: exit {result.ExitCode}: {detail}");
+        }
+    }
+
+    private static (int Code, string Message) Validate(string stdout, string verb)
+    {
+        if (Encoding.UTF8.GetByteCount(stdout) > Serve.MaxOutputBytes + 2)
+        {
+            return (ExitCodes.Protocol, "protocol: answer exceeds the output limit");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(stdout);
+            var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.String && schema.GetString() == Versions.Schema
+                && root.TryGetProperty("verb", out var answered) && answered.ValueKind == JsonValueKind.String && answered.GetString() == verb
+                && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                return (0, "");
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return (ExitCodes.Protocol, "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb");
+    }
+}
