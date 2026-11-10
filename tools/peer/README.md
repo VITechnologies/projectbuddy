@@ -27,7 +27,7 @@ The report contains private network details, so keep it out of public
 repositories. To run it:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Get-PeerLinkDiagnostics.ps1 -OutputDirectory <folder>
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Get-PeerLinkDiagnostics.ps1 -OutputDirectory <folder> [-CopyToClipboard]
 ```
 
 ## `ask/`: `projectbuddy-ask`
@@ -56,10 +56,19 @@ A self-contained, single-file C# (.NET 10) tool with two modes.
     | 5 | authentication |
     | 6 | unreachable |
     | 7 | ssh error |
-    | 8 | peer error |
+    | 8 | peer error (including the peer's output limit, exit 65, and internal errors, exit 66) |
     | 9 | protocol |
 
 The key on the peer carries `from="<workstation address>",restrict,command="<path>\projectbuddy-ask.exe serve"`.
+Windows OpenSSH runs the forced command through `cmd.exe`, so use a path
+without spaces. Keep the file in a directory such as
+`C:\ProgramData\ProjectBuddy\peer-ask` that only Administrators and SYSTEM can
+write to.
+
+The tools that `serve` runs (VBoxManage, Ollama and lbabus) are started by
+absolute path, never by bare name. The client requires absolute paths for
+`--identity`, `--known-hosts` and `--ssh`. `--ssh` defaults to the system
+OpenSSH client.
 The peer's `sshd_config` is key-only and denies every other source address.
 A firewall rule limits port 22 to the cable adapter and the workstation
 address.

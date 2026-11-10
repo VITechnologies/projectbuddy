@@ -31,8 +31,12 @@ internal sealed class FakeFacts : IHostFacts
     public int OsBuild => 26200;
     public long UptimeSeconds => 4242;
     public string VBoxManagePath => "VBoxManage.exe";
+    public string OllamaPath => "ollama";
+    public string LbabusPath => "lbabus";
+    public string SshPath => "/usr/bin/ssh";
     public List<Volume> Volumes { get; } = [new("C:\\", 100, 200)];
-    public IReadOnlyList<Volume> FixedVolumes() => Volumes;
+    public Exception? VolumesError { get; set; }
+    public IReadOnlyList<Volume> FixedVolumes() => VolumesError is null ? Volumes : throw VolumesError;
 }
 
 public class ServeTests
@@ -119,6 +123,36 @@ public class ServeTests
         Assert.Equal([false, true], vms.Select(vm => vm.GetProperty("running").GetBoolean()));
         Assert.Equal(1, data.GetProperty("otherVmCount").GetInt32());
         Assert.All(runner.Calls, call => Assert.Equal(PeerAsk.Serve.ToolTimeout, call.Timeout));
+    }
+
+    [Fact]
+    public void Vbox_counts_unparsed_lines_and_matches_running_by_id()
+    {
+        var runner = new FakeRunner()
+            .On("VBoxManage.exe --version", FakeRunner.Ok("7.2.14"))
+            .On("VBoxManage.exe list vms", FakeRunner.Ok(
+                "\"projectbuddy-a\" {aaaaaaaa-0000-0000-0000-000000000000}\n" +
+                "garbage line with a \"name\"\n\n" +
+                "\"projectbuddy-b\" {bbbbbbbb-0000-0000-0000-000000000000}\n"))
+            .On("VBoxManage.exe list runningvms", FakeRunner.Ok(
+                "\"projectbuddy-a\" {cccccccc-0000-0000-0000-000000000000}\n" +
+                "\"renamed\" {BBBBBBBB-0000-0000-0000-000000000000}\n"));
+        var (_, output, _) = Serve("vbox", runner);
+        Assert.DoesNotContain("garbage", output);
+        var data = Data(output);
+        var vms = data.GetProperty("vms").EnumerateArray().ToList();
+        Assert.Equal([false, true], vms.Select(vm => vm.GetProperty("running").GetBoolean()));
+        Assert.Equal(1, data.GetProperty("otherVmCount").GetInt32());
+    }
+
+    [Fact]
+    public void Internal_errors_never_reach_the_client()
+    {
+        var facts = new FakeFacts { VolumesError = new IOException("secret path D:\\customer\\x") };
+        var (code, output, error) = Serve("disk", facts: facts);
+        Assert.Equal(ExitCodes.Internal, code);
+        Assert.Equal("", output);
+        Assert.Equal(PeerAsk.Serve.InternalMessage + Environment.NewLine, error);
     }
 
     [Fact]

@@ -6,13 +6,14 @@ public static class Program
         "usage: projectbuddy-ask serve | ask <verb> --host <address> --user <name> --identity <file> --known-hosts <file> [--connect-timeout <seconds>] [--ssh <path>] | --version";
 
     public static int Main(string[] args) =>
-        Run(args, Environment.GetEnvironmentVariable, new SystemProcessRunner(), new SystemFacts(), Console.Out, Console.Error);
+        Run(args, Environment.GetEnvironmentVariable, new SystemProcessRunner(), new SystemFacts(), File.Exists, Console.Out, Console.Error);
 
     public static int Run(
         string[] args,
         Func<string, string?> environment,
         IProcessRunner runner,
         IHostFacts facts,
+        Func<string, bool> fileExists,
         TextWriter stdout,
         TextWriter stderr)
     {
@@ -23,7 +24,7 @@ public static class Program
 
         if (args is ["ask", .. var rest])
         {
-            return Ask.Execute(rest, runner, stdout, stderr);
+            return Ask.Execute(rest, runner, facts.SshPath, fileExists, stdout, stderr);
         }
 
         if (args is ["--version"])
@@ -39,7 +40,7 @@ public static class Program
 
 public static class Versions
 {
-    public const string Tool = "0.1.0";
+    public const string Tool = "0.2.0";
     public const string Schema = "projectbuddy/peer-ask@1";
 }
 
@@ -48,6 +49,7 @@ public static class ExitCodes
     public const int Usage = 2;
     public const int Refused = 64;
     public const int OutputLimit = 65;
+    public const int Internal = 66;
 
     // Client-side classification of a failed round trip.
     public const int PeerRefused = 3;

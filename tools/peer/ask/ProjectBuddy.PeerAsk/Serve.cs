@@ -11,8 +11,11 @@ public static partial class Serve
     public const int MaxFieldChars = 200;
     public const string RefusedMessage = "projectbuddy-ask: request refused";
     public const string OutputLimitMessage = "projectbuddy-ask: output limit exceeded";
+    public const string InternalMessage = "projectbuddy-ask: internal error";
     public const string VmPrefix = "projectbuddy-";
-    public static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(10);
+
+    // At most three tool calls per verb, so a verb finishes well inside the client's 30 s allowance.
+    public static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(5);
     public static readonly IReadOnlyList<string> Verbs = ["identity", "vbox", "disk", "ollama", "lbabus"];
 
     public static int Execute(string? command, IProcessRunner runner, IHostFacts facts, TextWriter stdout, TextWriter stderr)
@@ -23,7 +26,18 @@ public static partial class Serve
             return ExitCodes.Refused;
         }
 
-        var json = Render(command, runner, facts);
+        byte[] json;
+        try
+        {
+            json = Render(command, runner, facts);
+        }
+        catch (Exception)
+        {
+            // The client sees stderr, so never let a stack trace or exception message reach it.
+            stderr.WriteLine(InternalMessage);
+            return ExitCodes.Internal;
+        }
+
         if (json.Length > MaxOutputBytes)
         {
             stderr.WriteLine(OutputLimitMessage);
@@ -58,10 +72,10 @@ public static partial class Serve
                     WriteDisk(writer, facts);
                     break;
                 case "ollama":
-                    WriteOllama(writer, runner);
+                    WriteOllama(writer, runner, facts.OllamaPath);
                     break;
                 default:
-                    WriteTool(writer, runner, "lbabus");
+                    WriteTool(writer, runner, facts.LbabusPath);
                     break;
             }
 
@@ -78,31 +92,31 @@ public static partial class Serve
         return line.Length <= MaxFieldChars ? line : line[..MaxFieldChars];
     }
 
+    private static bool Succeeded(ProcessResult result) => result is { Started: true, TimedOut: false, ExitCode: 0 };
+
     private static void WriteTool(Utf8JsonWriter writer, IProcessRunner runner, string tool)
     {
         var result = runner.Run(tool, ["--version"], ToolTimeout);
-        var installed = result is { Started: true, TimedOut: false, ExitCode: 0 };
-        writer.WriteBoolean("installed", installed);
-        if (installed)
+        writer.WriteBoolean("installed", Succeeded(result));
+        if (Succeeded(result))
         {
             writer.WriteString("version", Field(result.Stdout));
         }
     }
 
-    private static void WriteOllama(Utf8JsonWriter writer, IProcessRunner runner)
+    private static void WriteOllama(Utf8JsonWriter writer, IProcessRunner runner, string ollama)
     {
-        var version = runner.Run("ollama", ["--version"], ToolTimeout);
-        var installed = version is { Started: true, TimedOut: false, ExitCode: 0 };
-        writer.WriteBoolean("installed", installed);
-        if (!installed)
+        var version = runner.Run(ollama, ["--version"], ToolTimeout);
+        writer.WriteBoolean("installed", Succeeded(version));
+        if (!Succeeded(version))
         {
             return;
         }
 
         writer.WriteString("version", Field(version.Stdout));
-        var ps = runner.Run("ollama", ["ps"], ToolTimeout);
+        var ps = runner.Run(ollama, ["ps"], ToolTimeout);
         writer.WriteStartArray("loadedModels");
-        if (ps is { Started: true, TimedOut: false, ExitCode: 0 })
+        if (Succeeded(ps))
         {
             foreach (var line in ps.Stdout.Split('\n').Skip(1))
             {
@@ -135,9 +149,8 @@ public static partial class Serve
     private static void WriteVbox(Utf8JsonWriter writer, IProcessRunner runner, string vboxManage)
     {
         var version = runner.Run(vboxManage, ["--version"], ToolTimeout);
-        var installed = version is { Started: true, TimedOut: false, ExitCode: 0 };
-        writer.WriteBoolean("installed", installed);
-        if (!installed)
+        writer.WriteBoolean("installed", Succeeded(version));
+        if (!Succeeded(version))
         {
             return;
         }
@@ -151,13 +164,14 @@ public static partial class Serve
             return;
         }
 
-        var owned = all.Where(name => name.StartsWith(VmPrefix, StringComparison.Ordinal)).ToList();
+        var runningIds = running.Select(vm => vm.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var owned = all.Where(vm => vm.Name is not null && vm.Name.StartsWith(VmPrefix, StringComparison.Ordinal)).ToList();
         writer.WriteStartArray("vms");
-        foreach (var name in owned)
+        foreach (var vm in owned)
         {
             writer.WriteStartObject();
-            writer.WriteString("name", Field(name));
-            writer.WriteBoolean("running", running.Contains(name));
+            writer.WriteString("name", Field(vm.Name!));
+            writer.WriteBoolean("running", runningIds.Contains(vm.Id!));
             writer.WriteEndObject();
         }
 
@@ -165,17 +179,24 @@ public static partial class Serve
         writer.WriteNumber("otherVmCount", all.Count - owned.Count);
     }
 
-    private static List<string>? ListVms(IProcessRunner runner, string vboxManage, string what)
+    // Every non-empty line is a VM; a line that does not parse still counts, without a name.
+    private static List<(string? Name, string? Id)>? ListVms(IProcessRunner runner, string vboxManage, string what)
     {
         var result = runner.Run(vboxManage, ["list", what], ToolTimeout);
-        if (result is not { Started: true, TimedOut: false, ExitCode: 0 })
+        if (!Succeeded(result))
         {
             return null;
         }
 
-        return VmLine().Matches(result.Stdout).Select(match => match.Groups[1].Value).ToList();
+        return result.Stdout.Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.Trim().Length > 0)
+            .Select(line => VmLine().Match(line) is { Success: true } match
+                ? (match.Groups[1].Value, match.Groups[2].Value)
+                : ((string?)null, (string?)null))
+            .ToList();
     }
 
-    [GeneratedRegex("^\"(.*)\" \\{[0-9a-fA-F-]+\\}\\r?$", RegexOptions.Multiline)]
+    [GeneratedRegex("^\"(.*)\" \\{([0-9a-fA-F-]+)\\}$")]
     private static partial Regex VmLine();
 }

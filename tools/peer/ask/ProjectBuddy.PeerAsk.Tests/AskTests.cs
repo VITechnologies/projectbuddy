@@ -12,18 +12,18 @@ public class AskTests
     private static (int Code, string Out, string Err, FakeRunner Runner) Ask(ProcessResult result, params string[] extra)
     {
         var runner = new FakeRunner();
-        var options = PeerAsk.Ask.Parse(["identity", .. Required, .. extra], out _)!;
+        var options = PeerAsk.Ask.Parse(["identity", .. Required, .. extra], "/usr/bin/ssh", _ => true, out _)!;
         runner.On($"{options.Ssh} {string.Join(' ', PeerAsk.Ask.SshArguments(options))}", result);
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        var code = PeerAsk.Ask.Execute(["identity", .. Required, .. extra], runner, stdout, stderr);
+        var code = PeerAsk.Ask.Execute(["identity", .. Required, .. extra], runner, "/usr/bin/ssh", _ => true, stdout, stderr);
         return (code, stdout.ToString(), stderr.ToString(), runner);
     }
 
     [Fact]
     public void Builds_one_fixed_locked_down_ssh_invocation()
     {
-        var options = PeerAsk.Ask.Parse(["vbox", .. Required], out var problem)!;
+        var options = PeerAsk.Ask.Parse(["vbox", .. Required], "/usr/bin/ssh", _ => true, out var problem)!;
         Assert.Equal("", problem);
         var argv = PeerAsk.Ask.SshArguments(options);
         Assert.Equal(["-F", "none"], argv.Take(2));
@@ -37,8 +37,9 @@ public class AskTests
         Assert.Contains("ConnectTimeout=5", argv);
         Assert.Contains("ClearAllForwardings=yes", argv);
         Assert.Contains("RequestTTY=no", argv);
+        Assert.Contains("PasswordAuthentication=no", argv);
         Assert.Equal(["-l", "peer", "--", "10.0.0.2", "vbox"], argv.TakeLast(5));
-        Assert.Equal("ssh", options.Ssh);
+        Assert.Equal("/usr/bin/ssh", options.Ssh);
     }
 
     [Fact]
@@ -61,15 +62,26 @@ public class AskTests
     [InlineData(new[] { "identity", "--host" }, "bad option '--host'")]
     [InlineData(new[] { "identity", "--host", "a", "--host", "b" }, "bad option '--host'")]
     [InlineData(new[] { "identity", "--host", "a" }, "missing --user")]
-    [InlineData(new[] { "identity", "--host", "", "--user", "u", "--identity", "i", "--known-hosts", "k" }, "missing --host")]
-    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "i", "--known-hosts", "k", "--connect-timeout", "0" }, "--connect-timeout must be 1..60")]
-    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "i", "--known-hosts", "k", "--connect-timeout", "61" }, "--connect-timeout must be 1..60")]
-    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "i", "--known-hosts", "k", "--connect-timeout", "x" }, "--connect-timeout must be 1..60")]
+    [InlineData(new[] { "identity", "--host", "", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "ssh://h:2222", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "-oProxyCommand=x", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "u@h", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "-x", "--identity", "/i", "--known-hosts", "/k" }, "--user must be a plain account name")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u@h", "--identity", "/i", "--known-hosts", "/k" }, "--user must be a plain account name")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "i", "--known-hosts", "/k" }, "--identity must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k ~/.ssh/known_hosts" }, "--known-hosts must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/%d/i", "--known-hosts", "/k" }, "--identity must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/missing", "--known-hosts", "/k" }, "--identity must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--ssh", "" }, "--ssh must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--ssh", "ssh" }, "--ssh must be an existing absolute path without spaces, quotes or %")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "0" }, "--connect-timeout must be 1..60")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "61" }, "--connect-timeout must be 1..60")]
+    [InlineData(new[] { "identity", "--host", "fe80::1", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "x" }, "--connect-timeout must be 1..60")]
     public void Rejects_bad_arguments_without_running_ssh(string[] args, string problem)
     {
         var runner = new FakeRunner();
         var stderr = new StringWriter();
-        var code = PeerAsk.Ask.Execute(args, runner, new StringWriter(), stderr);
+        var code = PeerAsk.Ask.Execute(args, runner, "/usr/bin/ssh", path => path != "/missing", new StringWriter(), stderr);
         Assert.Equal(ExitCodes.Usage, code);
         Assert.StartsWith($"projectbuddy-ask: {problem}{Environment.NewLine}{Program.Usage}", stderr.ToString());
         Assert.Empty(runner.Calls);
@@ -95,6 +107,9 @@ public class AskTests
     [InlineData(true, false, 255, "** WARNING: only a banner", ExitCodes.SshError, "ssh-error: ")]
     [InlineData(true, false, 2, "", ExitCodes.PeerError, "peer-error: exit 2: ")]
     [InlineData(true, false, 1, "boom\nmore", ExitCodes.PeerError, "peer-error: exit 1: boom")]
+    [InlineData(true, false, 65, "projectbuddy-ask: output limit exceeded", ExitCodes.PeerError, "peer-error: the answer exceeded the output limit")]
+    [InlineData(true, false, 66, "projectbuddy-ask: internal error", ExitCodes.PeerError, "peer-error: internal error on the peer")]
+    [InlineData(true, false, 255, "ssh: Could not resolve hostname peer: Name or service not known", ExitCodes.Unreachable, "unreachable: ssh: Could not resolve hostname peer: Name or service not known")]
     public void Classifies_failures(bool started, bool timedOut, int exit, string stderrText, int expected, string message)
     {
         var (code, output, error, _) = Ask(new ProcessResult(started, timedOut, exit, "", stderrText));
@@ -136,7 +151,7 @@ public class ProgramTests
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        var code = Program.Run(args, name => name == "SSH_ORIGINAL_COMMAND" ? sshCommand : null, new FakeRunner(), new FakeFacts(), stdout, stderr);
+        var code = Program.Run(args, name => name == "SSH_ORIGINAL_COMMAND" ? sshCommand : null, new FakeRunner(), new FakeFacts(), _ => true, stdout, stderr);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -211,13 +226,37 @@ public class HostTests
     }
 
     [Fact]
+    public void Runner_reports_an_unstartable_program()
+    {
+        Assert.False(new SystemProcessRunner().Run("", [], Short).Started);
+    }
+
+    [Fact]
+    public void Runner_is_bounded_when_a_grandchild_holds_the_pipes()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var result = new SystemProcessRunner().Run("/bin/sh", ["-c", "(sleep 20 &); echo hi"], TimeSpan.FromSeconds(1));
+        Assert.True(result.TimedOut);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public void Remaining_never_goes_negative()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Thread.Sleep(20);
+        Assert.Equal(TimeSpan.Zero, SystemProcessRunner.Remaining(TimeSpan.FromMilliseconds(1), watch));
+    }
+
+    [Fact]
     public void Facts_describe_this_host()
     {
         var facts = new SystemFacts();
         Assert.Equal("linux", facts.Platform);
         Assert.True(facts.UptimeSeconds > 0);
         Assert.True(facts.OsBuild >= 0);
-        Assert.Equal("VBoxManage", facts.VBoxManagePath);
+        Assert.Equal("/usr/bin/VBoxManage", facts.VBoxManagePath);
+        Assert.Equal("/usr/bin/ssh", facts.SshPath);
         Assert.Contains(facts.FixedVolumes(), volume => volume.Name == "/" && volume.TotalBytes > 0);
     }
 }

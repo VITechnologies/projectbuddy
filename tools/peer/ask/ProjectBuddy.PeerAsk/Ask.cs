@@ -1,19 +1,21 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.PeerAsk;
 
 // The workstation client: one fixed ssh invocation, then classification of the result.
-public static class Ask
+public static partial class Ask
 {
     public const int DefaultConnectTimeout = 5;
     public static readonly TimeSpan CommandAllowance = TimeSpan.FromSeconds(30);
 
     public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh);
 
-    public static int Execute(string[] args, IProcessRunner runner, TextWriter stdout, TextWriter stderr)
+    public static int Execute(string[] args, IProcessRunner runner, string defaultSsh, Func<string, bool> fileExists, TextWriter stdout, TextWriter stderr)
     {
-        var options = Parse(args, out var problem);
+        var options = Parse(args, defaultSsh, fileExists, out var problem);
         if (options is null)
         {
             stderr.WriteLine($"projectbuddy-ask: {problem}");
@@ -34,7 +36,7 @@ public static class Ask
         return code;
     }
 
-    public static Options? Parse(string[] args, out string problem)
+    public static Options? Parse(string[] args, string defaultSsh, Func<string, bool> fileExists, out string problem)
     {
         problem = "";
         if (args.Length == 0 || args[0].StartsWith('-'))
@@ -65,9 +67,32 @@ public static class Ask
 
         foreach (var required in known[..4])
         {
-            if (!values.TryGetValue(required, out var value) || value.Length == 0)
+            if (!values.ContainsKey(required))
             {
                 problem = $"missing {required}";
+                return null;
+            }
+        }
+
+        var host = values["--host"];
+        if (!IPAddress.TryParse(host, out _) && !HostName().IsMatch(host))
+        {
+            problem = "--host must be an IP address or a host name";
+            return null;
+        }
+
+        if (!UserName().IsMatch(values["--user"]))
+        {
+            problem = "--user must be a plain account name";
+            return null;
+        }
+
+        var ssh = values.GetValueOrDefault("--ssh", defaultSsh);
+        foreach (var (option, path) in new[] { ("--identity", values["--identity"]), ("--known-hosts", values["--known-hosts"]), ("--ssh", ssh) })
+        {
+            if (!SafePath().IsMatch(path) || !Path.IsPathFullyQualified(path) || !fileExists(path))
+            {
+                problem = $"{option} must be an existing absolute path without spaces, quotes or %";
                 return null;
             }
         }
@@ -80,8 +105,7 @@ public static class Ask
             return null;
         }
 
-        return new Options(verb, values["--host"], values["--user"], values["--identity"], values["--known-hosts"],
-            connectTimeout, values.GetValueOrDefault("--ssh", "ssh"));
+        return new Options(verb, host, values["--user"], values["--identity"], values["--known-hosts"], connectTimeout, ssh);
     }
 
     public static IReadOnlyList<string> SshArguments(Options options) =>
@@ -96,6 +120,8 @@ public static class Ask
         "-o", "UpdateHostKeys=no",
         "-o", "CheckHostIP=no",
         "-o", "BatchMode=yes",
+        "-o", "PasswordAuthentication=no",
+        "-o", "KbdInteractiveAuthentication=no",
         "-o", $"ConnectTimeout={options.ConnectTimeout}",
         "-o", "ConnectionAttempts=1",
         "-o", "ServerAliveInterval=5",
@@ -111,12 +137,15 @@ public static class Ask
     ];
 
     public static readonly IReadOnlyList<string> HostKeyPhrases =
-        ["Host key verification failed", "REMOTE HOST IDENTIFICATION", "No ED25519 host key is known"];
+        ["Host key verification failed", "REMOTE HOST IDENTIFICATION", "host key is known for"];
 
     public static readonly IReadOnlyList<string> AuthPhrases = ["Permission denied"];
 
     public static readonly IReadOnlyList<string> UnreachablePhrases =
-        ["timed out", "No route to host", "Network is unreachable", "Connection refused", "Connection closed", "Connection reset"];
+    [
+        "timed out", "No route to host", "Network is unreachable", "Connection refused", "Connection closed",
+        "Connection reset", "Could not resolve hostname",
+    ];
 
     public static (int Code, string Message) Classify(ProcessResult result, string verb)
     {
@@ -130,14 +159,16 @@ public static class Ask
             return (ExitCodes.Unreachable, "unreachable: timed out");
         }
 
-        if (result.ExitCode == 0)
+        switch (result.ExitCode)
         {
-            return Validate(result.Stdout, verb);
-        }
-
-        if (result.ExitCode == ExitCodes.Refused)
-        {
-            return (ExitCodes.PeerRefused, "refused: the peer refused the request");
+            case 0:
+                return Validate(result.Stdout, verb);
+            case ExitCodes.Refused:
+                return (ExitCodes.PeerRefused, "refused: the peer refused the request");
+            case ExitCodes.OutputLimit:
+                return (ExitCodes.PeerError, "peer-error: the answer exceeded the output limit");
+            case ExitCodes.Internal:
+                return (ExitCodes.PeerError, "peer-error: internal error on the peer");
         }
 
         // OpenSSH prints advisory "** WARNING" banners before the real error, so match on every line.
@@ -190,4 +221,13 @@ public static class Ask
 
         return (ExitCodes.Protocol, "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb");
     }
+
+    [GeneratedRegex("^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$")]
+    private static partial Regex HostName();
+
+    [GeneratedRegex("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")]
+    private static partial Regex UserName();
+
+    [GeneratedRegex("^[^\\s\"'%\\p{Cc}]+$")]
+    private static partial Regex SafePath();
 }

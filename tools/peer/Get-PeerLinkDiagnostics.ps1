@@ -1,13 +1,13 @@
 <#
 Read-only diagnostics for the ProjectBuddy peer link (VITechnologies/projectbuddy#211, P0).
-Changes nothing on this machine. In an elevated Windows PowerShell, either run the file:
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\Get-PeerLinkDiagnostics.ps1
-or pipe it from a commit-pinned raw URL: irm <url> | iex
-Writes peer-diag-<timestamp>.txt to -OutputDirectory (default: Desktop\peer-diag) and copies
-it to the clipboard. The file holds private network details; never put it in a public repository.
+Changes nothing on this machine. Run the file in an elevated Windows PowerShell:
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Get-PeerLinkDiagnostics.ps1 [-OutputDirectory <folder>] [-CopyToClipboard]
+Writes peer-diag-<timestamp>.txt to -OutputDirectory (default: Desktop\peer-diag). The file holds
+private network details; never put it in a public repository.
 #>
 param(
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$CopyToClipboard
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +33,7 @@ function Add-Section {
 
 function Invoke-Native {
     param([string]$Path, [string[]]$Arguments)
-    $cmd = Get-Command $Path -ErrorAction SilentlyContinue
+    $cmd = Get-Command $Path -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $cmd) { return "not found: $Path" }
     # Windows PowerShell 5.1 turns redirected native stderr into a terminating error under Stop.
     $ErrorActionPreference = 'Continue'
@@ -51,8 +51,12 @@ Add-Section 'Identity and elevation' {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     "Elevated: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $admins = Get-LocalGroupMember -SID 'S-1-5-32-544' | Select-Object -ExpandProperty Name
-    "Current user is in local Administrators: $($admins -contains $user)"
+    try {
+        $admins = Get-LocalGroupMember -SID 'S-1-5-32-544' | Select-Object -ExpandProperty Name
+        "Current user is in local Administrators: $($admins -contains $user)"
+    } catch {
+        "Current user is in local Administrators: unknown ($($_.Exception.Message))"
+    }
 }
 
 Add-Section 'Network adapters (all, including hidden)' {
@@ -64,8 +68,8 @@ Add-Section 'Wired adapter power management and advanced properties' {
     $wired = Get-NetAdapter -Physical | Where-Object { $_.MediaType -eq '802.3' }
     foreach ($a in $wired) {
         "--- $($a.Name) ($($a.InterfaceDescription))"
-        Get-NetAdapterPowerManagement -Name $a.Name | Format-List *
-        Get-NetAdapterAdvancedProperty -Name $a.Name | Format-Table DisplayName, DisplayValue -AutoSize
+        Get-NetAdapterPowerManagement -Name $a.Name -ErrorAction SilentlyContinue | Format-List *
+        Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue | Format-Table DisplayName, DisplayValue -AutoSize
     }
 }
 
@@ -102,7 +106,7 @@ Add-Section 'Firewall profiles' {
 
 Add-Section 'Firewall rules touching SSH or TCP 22' {
     $ports = Get-NetFirewallPortFilter -Protocol TCP | Where-Object { $_.LocalPort -contains '22' }
-    $byPort = $ports | Get-NetFirewallRule
+    $byPort = if ($ports) { $ports | Get-NetFirewallRule } else { @() }
     $byName = Get-NetFirewallRule | Where-Object { $_.Name -match 'ssh' -or $_.DisplayName -match 'ssh' }
     $rules = @($byPort) + @($byName) | Sort-Object Name -Unique
     if ($rules.Count -eq 0) { 'none' }
@@ -169,6 +173,7 @@ Add-Section 'Recent wired link events (last 6 hours)' {
 }
 
 Add-Section 'VirtualBox (counts only; VM names stay on this machine)' {
+    $ErrorActionPreference = 'Continue'
     $vbm = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
     if (-not (Test-Path $vbm)) { "absent: $vbm"; return }
     "version: $(& $vbm --version)"
@@ -215,9 +220,9 @@ Add-Section 'Free space on fixed volumes' {
 }
 
 $lines | Set-Content -Path $outFile -Encoding UTF8
-try {
+if ($CopyToClipboard) {
     Get-Content -LiteralPath $outFile -Raw | Set-Clipboard
     Write-Host "Done: $outFile (also copied to the clipboard)"
-} catch {
-    Write-Host "Done: $outFile (clipboard copy failed: $($_.Exception.Message))"
+} else {
+    Write-Host "Done: $outFile"
 }

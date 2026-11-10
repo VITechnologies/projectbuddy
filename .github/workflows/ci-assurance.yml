@@ -73,6 +73,7 @@ jobs:
     # tools/peer/ask (projectbuddy-ask, #211): unit tests with a 100% line and branch gate.
     name: Peer Ask Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -82,13 +83,14 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: "10.0.x"
+          global-json-file: tools/peer/ask/global.json
 
       - name: Test With Coverage
         shell: bash
         working-directory: tools/peer/ask
         run: |
-          dotnet test ProjectBuddy.PeerAsk.Tests --nologo --settings coverage.runsettings \
+          dotnet restore ProjectBuddy.PeerAsk.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.PeerAsk.Tests --no-restore --nologo --settings coverage.runsettings \
             --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-ask-coverage"
 
       - name: Enforce 100% Line And Branch Coverage
@@ -99,7 +101,9 @@ jobs:
           import sys
           from xml.etree import ElementTree
 
-          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"))
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-ask coverage report was produced")
           root = ElementTree.parse(report).getroot()
           line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
           print(f"projectbuddy-ask coverage: line {line:.1%}, branch {branch:.1%}")
