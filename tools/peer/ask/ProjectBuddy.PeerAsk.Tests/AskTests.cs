@@ -66,6 +66,9 @@ public class AskTests
     [InlineData(new[] { "identity", "--host", "ssh://h:2222", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
     [InlineData(new[] { "identity", "--host", "-oProxyCommand=x", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
     [InlineData(new[] { "identity", "--host", "u@h", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "a-", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "[::1]:22", "--user", "u", "--identity", "/i", "--known-hosts", "/k" }, "--host must be an IP address or a host name")]
+    [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/a/${HOME}/k", "--known-hosts", "/k" }, "--identity must be an existing absolute path without spaces, quotes or %")]
     [InlineData(new[] { "identity", "--host", "a", "--user", "-x", "--identity", "/i", "--known-hosts", "/k" }, "--user must be a plain account name")]
     [InlineData(new[] { "identity", "--host", "a", "--user", "u@h", "--identity", "/i", "--known-hosts", "/k" }, "--user must be a plain account name")]
     [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "i", "--known-hosts", "/k" }, "--identity must be an existing absolute path without spaces, quotes or %")]
@@ -77,11 +80,17 @@ public class AskTests
     [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "0" }, "--connect-timeout must be 1..60")]
     [InlineData(new[] { "identity", "--host", "a", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "61" }, "--connect-timeout must be 1..60")]
     [InlineData(new[] { "identity", "--host", "fe80::1", "--user", "u", "--identity", "/i", "--known-hosts", "/k", "--connect-timeout", "x" }, "--connect-timeout must be 1..60")]
-    public void Rejects_bad_arguments_without_running_ssh(string[] args, string problem)
+    public void Rejects_bad_arguments_without_running_ssh(string[] args, string problem) => AssertRejected(args, problem, "/usr/bin/ssh");
+
+    [Fact]
+    public void Reports_a_missing_default_ssh_client() =>
+        AssertRejected(["identity", .. Required], "no ssh client at /missing; pass --ssh", "/missing");
+
+    private static void AssertRejected(string[] args, string problem, string defaultSsh)
     {
         var runner = new FakeRunner();
         var stderr = new StringWriter();
-        var code = PeerAsk.Ask.Execute(args, runner, "/usr/bin/ssh", path => path != "/missing", new StringWriter(), stderr);
+        var code = PeerAsk.Ask.Execute(args, runner, defaultSsh, path => path != "/missing", new StringWriter(), stderr);
         Assert.Equal(ExitCodes.Usage, code);
         Assert.StartsWith($"projectbuddy-ask: {problem}{Environment.NewLine}{Program.Usage}", stderr.ToString());
         Assert.Empty(runner.Calls);
@@ -235,7 +244,7 @@ public class HostTests
     public void Runner_is_bounded_when_a_grandchild_holds_the_pipes()
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var result = new SystemProcessRunner().Run("/bin/sh", ["-c", "(sleep 20 &); echo hi"], TimeSpan.FromSeconds(1));
+        var result = new SystemProcessRunner().Run("/bin/sh", ["-c", "(sleep 4 &); echo hi"], TimeSpan.FromSeconds(1));
         Assert.True(result.TimedOut);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10));
     }

@@ -75,7 +75,7 @@ public static partial class Ask
         }
 
         var host = values["--host"];
-        if (!IPAddress.TryParse(host, out _) && !HostName().IsMatch(host))
+        if (!(IPAddress.TryParse(host, out var address) && address.ToString() == host) && !HostName().IsMatch(host))
         {
             problem = "--host must be an IP address or a host name";
             return null;
@@ -84,6 +84,12 @@ public static partial class Ask
         if (!UserName().IsMatch(values["--user"]))
         {
             problem = "--user must be a plain account name";
+            return null;
+        }
+
+        if (!values.ContainsKey("--ssh") && !fileExists(defaultSsh))
+        {
+            problem = $"no ssh client at {defaultSsh}; pass --ssh";
             return null;
         }
 
@@ -222,12 +228,13 @@ public static partial class Ask
         return (ExitCodes.Protocol, "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb");
     }
 
-    [GeneratedRegex("^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$")]
+    [GeneratedRegex("^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")]
     private static partial Regex HostName();
 
     [GeneratedRegex("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")]
     private static partial Regex UserName();
 
-    [GeneratedRegex("^[^\\s\"'%\\p{Cc}]+$")]
+    // OpenSSH expands %tokens and ${VAR} in these paths, so neither may appear.
+    [GeneratedRegex("^[^\\s\"'%$\\p{Cc}]+$")]
     private static partial Regex SafePath();
 }

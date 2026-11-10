@@ -73,7 +73,10 @@ The peer's `sshd_config` is key-only and denies every other source address.
 A firewall rule limits port 22 to the cable adapter and the workstation
 address.
 
-Build and test it (`ci-assurance.yml` requires 100% line and branch coverage):
+Build and test it (`ci-assurance.yml` requires 100% line and branch coverage).
+`global.json` pins the .NET SDK exactly, because the NuGet lock files record
+the SDK's bundled trimming package. After a deliberate SDK bump, regenerate the
+lock files with `dotnet restore --force-evaluate`.
 
 ```bash
 cd tools/peer/ask
