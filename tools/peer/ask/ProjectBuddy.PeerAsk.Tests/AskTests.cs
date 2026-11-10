@@ -90,6 +90,10 @@ public class AskTests
     [InlineData(true, false, 255, "Connection closed by 10.0.0.2 port 22", ExitCodes.Unreachable, "unreachable: Connection closed by 10.0.0.2 port 22")]
     [InlineData(true, false, 255, "kex_exchange_identification: read: Connection reset by peer", ExitCodes.Unreachable, "unreachable: kex_exchange_identification: read: Connection reset by peer")]
     [InlineData(true, false, 255, "something else", ExitCodes.SshError, "ssh-error: something else")]
+    [InlineData(true, false, 255, "** WARNING: connection is not using a post-quantum key exchange algorithm.\n** The server may need to be upgraded.\nuser@10.0.0.2: Permission denied (publickey).", ExitCodes.Auth, "auth: user@10.0.0.2: Permission denied (publickey).")]
+    [InlineData(true, false, 255, "@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n@@@@@@@@@@@@", ExitCodes.HostKey, "host-key: @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @")]
+    [InlineData(true, false, 255, "** WARNING: only a banner", ExitCodes.SshError, "ssh-error: ")]
+    [InlineData(true, false, 2, "", ExitCodes.PeerError, "peer-error: exit 2: ")]
     [InlineData(true, false, 1, "boom\nmore", ExitCodes.PeerError, "peer-error: exit 1: boom")]
     public void Classifies_failures(bool started, bool timedOut, int exit, string stderrText, int expected, string message)
     {

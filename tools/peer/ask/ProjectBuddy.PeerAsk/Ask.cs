@@ -110,6 +110,14 @@ public static class Ask
         "--", options.Host, options.Verb,
     ];
 
+    public static readonly IReadOnlyList<string> HostKeyPhrases =
+        ["Host key verification failed", "REMOTE HOST IDENTIFICATION", "No ED25519 host key is known"];
+
+    public static readonly IReadOnlyList<string> AuthPhrases = ["Permission denied"];
+
+    public static readonly IReadOnlyList<string> UnreachablePhrases =
+        ["timed out", "No route to host", "Network is unreachable", "Connection refused", "Connection closed", "Connection reset"];
+
     public static (int Code, string Message) Classify(ProcessResult result, string verb)
     {
         if (!result.Started)
@@ -117,36 +125,44 @@ public static class Ask
             return (ExitCodes.SshError, "ssh-error: ssh could not be started");
         }
 
-        var detail = Serve.Field(result.Stderr);
         if (result.TimedOut)
         {
             return (ExitCodes.Unreachable, "unreachable: timed out");
         }
 
-        switch (result.ExitCode)
+        if (result.ExitCode == 0)
         {
-            case 0:
-                return Validate(result.Stdout, verb);
-            case ExitCodes.Refused:
-                return (ExitCodes.PeerRefused, "refused: the peer refused the request");
-            case 255 when detail.Contains("Host key verification failed", StringComparison.Ordinal)
-                       || detail.Contains("REMOTE HOST IDENTIFICATION", StringComparison.Ordinal)
-                       || detail.Contains("No ED25519 host key is known", StringComparison.Ordinal):
-                return (ExitCodes.HostKey, $"host-key: {detail}");
-            case 255 when detail.Contains("Permission denied", StringComparison.Ordinal):
-                return (ExitCodes.Auth, $"auth: {detail}");
-            case 255 when detail.Contains("timed out", StringComparison.OrdinalIgnoreCase)
-                       || detail.Contains("No route to host", StringComparison.Ordinal)
-                       || detail.Contains("Network is unreachable", StringComparison.Ordinal)
-                       || detail.Contains("Connection refused", StringComparison.Ordinal)
-                       || detail.Contains("Connection closed", StringComparison.Ordinal)
-                       || detail.Contains("Connection reset", StringComparison.Ordinal):
-                return (ExitCodes.Unreachable, $"unreachable: {detail}");
-            case 255:
-                return (ExitCodes.SshError, $"ssh-error: {detail}");
-            default:
-                return (ExitCodes.PeerError, $"peer-error: exit {result.ExitCode}: {detail}");
+            return Validate(result.Stdout, verb);
         }
+
+        if (result.ExitCode == ExitCodes.Refused)
+        {
+            return (ExitCodes.PeerRefused, "refused: the peer refused the request");
+        }
+
+        // OpenSSH prints advisory "** WARNING" banners before the real error, so match on every line.
+        var lines = result.Stderr.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith("**", StringComparison.Ordinal)).ToList();
+        var detail = Serve.Field(lines.FirstOrDefault() ?? "");
+        if (result.ExitCode != 255)
+        {
+            return (ExitCodes.PeerError, $"peer-error: exit {result.ExitCode}: {detail}");
+        }
+
+        foreach (var (code, label, phrases) in new[]
+                 {
+                     (ExitCodes.HostKey, "host-key", HostKeyPhrases),
+                     (ExitCodes.Auth, "auth", AuthPhrases),
+                     (ExitCodes.Unreachable, "unreachable", UnreachablePhrases),
+                 })
+        {
+            var match = lines.FirstOrDefault(line => phrases.Any(phrase => line.Contains(phrase, StringComparison.OrdinalIgnoreCase)));
+            if (match is not null)
+            {
+                return (code, $"{label}: {Serve.Field(match)}");
+            }
+        }
+
+        return (ExitCodes.SshError, $"ssh-error: {detail}");
     }
 
     private static (int Code, string Message) Validate(string stdout, string verb)
