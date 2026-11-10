@@ -1,8 +1,7 @@
 # Ubuntu Lane Box Procedure
 
-- Status: built and fixture-tested offline (`VITechnologies/projectbuddy#183`);
-  not yet live-proven. A lane base VM cannot be built with the lane
-  hardware until `VITechnologies/projectbuddy#186` lands.
+- Status: built and fixture-tested offline (`VITechnologies/projectbuddy#183`,
+  `VITechnologies/projectbuddy#186`); not yet live-proven.
 - Last substantive update: 2026-11-09
 - Owner: svelderrainruiz
 
@@ -123,17 +122,47 @@ and the packager compares it.
 
 ### 1. Build the base VM (host)
 
-Build an Ubuntu 24.04 VM with
-[`vm/ubuntu-labview/build-virtualbox.sh`](../../vm/ubuntu-labview/build-virtualbox.sh)
+Build an Ubuntu 24.04 VM from the lane profile with
+[`vm/ubuntu-labview/build-virtualbox.sh`](../../vm/ubuntu-labview/build-virtualbox.sh),
 so that its first boot writes
 `/var/lib/projectbuddy/base-bootstrap-receipt.json`
-(`projectbuddy/ubuntu-base-bootstrap@2`, outcome `PASS`). Its memory, CPUs,
-VRAM, and the disk at SATA port 0 must match the profile's `virtualBox`
-block.
+(`projectbuddy/ubuntu-base-bootstrap@2`, outcome `PASS`):
 
-`build-virtualbox.sh` accepts only the appliance hardware (80 GB, 12288 MB,
-6 CPUs) today, so it cannot yet build the example profile's 40 GB, 8192 MB,
-4 CPU VM. That is `VITechnologies/projectbuddy#186`.
+```bash
+LANE_PROFILE=vm/ubuntu-lane/lane-profile.example.json \
+VM_NAME=<VM name> BASEFOLDER=<NVMe directory> \
+GUEST_FULLNAME=<full name> GUEST_HOSTNAME=<host name> \
+  vm/ubuntu-labview/build-virtualbox.sh
+```
+
+This prints the plan and changes nothing. To build, add `--run` and set
+`ISO` to the downloaded ISO and `GUEST_PASSWORD_FILE` to a non-empty file
+with mode `0600` or stricter.
+
+With `LANE_PROFILE` set, the builder:
+
+- validates the profile with the same code as `validate-profile` and prints
+  its name and SHA-256, which the readiness receipt and the packager must see
+  unchanged;
+- takes the memory, CPUs, VRAM, and SATA port 0 disk size from the profile's
+  `virtualBox` block, so the VM matches what the packager checks;
+- keeps the appliance's OS and ISO pins: the profile must name
+  `Ubuntu24_LTS_64` and the appliance manifest's ISO filename, URL, and
+  SHA-256, the only ISO the unattended install and `base-bootstrap.sh` are
+  tested with;
+- keeps the appliance's other refusals: the VM name, guest user, and SSH
+  port checks, and, with `--run`, an existing VM of the same name, the ISO
+  digest, the password file's mode, and a `BASEFOLDER` that is not on a
+  writable internal NVMe filesystem;
+- refuses `LANE_PROFILE` together with `PROVISIONING_MANIFEST`.
+
+A refused profile, OS or ISO pin, or identity value exits 2, and a missing
+`VBoxManage` with `--run` exits 2. The other `--run` checks exit 3, except
+the ISO digest check, where `sha256sum --check` fails with exit 1. All of
+these checks run before the plan is printed and before any VM is created.
+Without
+`LANE_PROFILE`, the builder reads the appliance manifest and still requires
+the appliance hardware (80 GB, 12288 MB, 6 CPUs, 128 MB VRAM).
 
 Power off and take a snapshot before step 2, so that a failed install can be
 undone.
@@ -338,5 +367,5 @@ exactly.
   receipt.
 - `VITechnologies/projectbuddy#185`: the lane plan, teardown, and clone
   verifier that use the box.
-- `VITechnologies/projectbuddy#186`: building a lane base VM from a lane
-  profile.
+- `VITechnologies/projectbuddy#186`: building the lane base VM from a lane
+  profile (step 1).
