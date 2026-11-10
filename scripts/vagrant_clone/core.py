@@ -76,11 +76,16 @@ def check_instance(info: Mapping[str, str], name: str, uuid: str, ssh_port: int)
         raise CloneError("clone VM name does not match expected identity")
     if info.get("VMState") != "running":
         raise CloneError("clone VM must be running")
+    check_ssh_forward(info, ssh_port, "clone")
+
+
+def check_ssh_forward(info: Mapping[str, str], ssh_port: int, what: str) -> None:
+    """Exactly one NAT rule forwards to guest port 22, from ``127.0.0.1:<ssh_port>`` over TCP."""
     rules = [value.split(",") for key, value in info.items() if key.startswith("Forwarding(")]
     guest_ssh = [rule for rule in rules if len(rule) == 6 and rule[5] == SSH_GUEST_PORT]
     expected = [rule for rule in guest_ssh if rule[1:] == ["tcp", "127.0.0.1", str(ssh_port), "", SSH_GUEST_PORT]]
     if len(expected) != 1 or guest_ssh != expected:
-        raise CloneError("clone does not have exactly one loopback SSH forwarding rule for the expected port")
+        raise CloneError(f"{what} does not have exactly one loopback SSH forwarding rule for the expected port")
 
 
 def runner_units(results: Sequence[tuple[int, str]]) -> list[str]:

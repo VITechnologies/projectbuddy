@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lane_box.readiness import RUNNER_UNIT  # noqa: E402
-from vagrant_clone import core, live, profile, receipt  # noqa: E402
+from vagrant_clone import core, guest, live, profile, receipt  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 DOCS = REPOSITORY / "docs"
@@ -78,8 +78,8 @@ def test_schemas_paths_and_timing_are_documented():
     assert f"`{receipt.RECEIPT_FILENAME}`" in PROCEDURE and f"`{receipt.RECEIPT_FILENAME}.sha256`" in PROCEDURE
     assert f"`{live.SCRATCH}`" in PROCEDURE
     assert f"`{live.TEMPORARY_PREFIX}*`" in PROCEDURE
-    assert f"trying {live.ENROLL_ATTEMPTS} times, {live.ENROLL_INTERVAL} seconds apart" in UNWRAPPED
-    assert f"after {live.POWEROFF_POLLS} state checks, {live.POWEROFF_INTERVAL} seconds apart" in UNWRAPPED
+    assert f"trying {guest.ENROLL_ATTEMPTS} times, {guest.ENROLL_INTERVAL} seconds apart" in UNWRAPPED
+    assert f"after {guest.POWEROFF_POLLS} state checks, {guest.POWEROFF_INTERVAL} seconds apart" in UNWRAPPED
     assert "`V1_PROFILE_SHA256`" in PROCEDURE
     receipt_adapter = ADAPTERS[1].read_text(encoding="utf-8")
     assert "V1_PROFILE_SHA256 = " in receipt_adapter

@@ -2,7 +2,7 @@
 
 - Status: built and fixture-tested offline (`VITechnologies/projectbuddy#185`);
   the `@2` receipt is not yet live-proven.
-- Last substantive update: 2026-11-09
+- Last substantive update: 2026-11-10
 - Owner: svelderrainruiz
 
 The clone check powers on nothing itself. It checks a clone that Vagrant has
@@ -30,6 +30,8 @@ with the same arguments as before plus `--profile`, which defaults to the
 in `verify-vagrant-clone.py`: the evidence directory must be on internal NVMe,
 the expected host key comes from the base receipt that the box receipt binds,
 and the box receipt is verified again with `verify-vagrant-box-receipt.py`.
+Only a `projectbuddy/ubuntu-vagrant-box@2` box receipt, which records a clean
+runner scan, passes; a box with an `@1` receipt must be packaged again.
 
 The lane plan's `check-runner-units` step names the same runner unit check
 (see [the Ubuntu lane procedure](ubuntu-lane.md#the-plan)); the lane executor
@@ -95,10 +97,11 @@ The appliance profile refuses runner units (`#192`). A clone with a runner
 unit would start a copy of the source VM's runner, with its registration, so
 every clone check of such a box fails before the capture runs. The appliance's
 `register-runner` phase installs that unit on the source VM and takes no
-snapshot, and `package-vagrant-box.py` packages the source VM's current state
-with `vagrant package --base`: its current-snapshot check does not exclude
-changes made after the snapshot. Package the box before registering a runner
-on the source VM.
+snapshot. `package-vagrant-box.py` packages the source VM's current state with
+`vagrant package --base`, so it scans that state first and refuses a source VM
+with a runner unit or runner configuration ([REQ-105](https://github.com/VITechnologies/projectbuddy/wiki/REQ-105); see
+[Packaging the appliance box](procedure.md#packaging-the-appliance-box)).
+Package the box before registering a runner on the source VM.
 
 `clone-profile.v1.json` is the appliance profile as it was before `#192`: the
 same checks, with `runnerUnits` set to `record`, plus `receiptV1Runtime`. It
