@@ -184,6 +184,7 @@ The plan (`projectbuddy/lane-plan@2`) holds:
 | `network` | one NAT adapter, its link off from the `build` phase on and never turned on again, and the SSH forward from `127.0.0.1` |
 | `outputDisk` | the output disk's `path` in the run directory, its `sizeMb`, `format`, and `variant`, and the `controller`, `port`, and `device` it is attached at, or `null` |
 | `vagrantfile` | the generated Vagrantfile's `text` and its `sha256` |
+| `guestUnits` | for `fetch` and `build`, the declared `timeoutSeconds` after which the guest stops that phase's unit, or `null` |
 | `steps` | the steps below, in order |
 | `earlierInstances` | the UUIDs that earlier lane records name |
 | `refusals` | each refusal's `rule` and `detail`, in order |
@@ -208,7 +209,8 @@ it receives by name, and its `timeoutSeconds`. `{uuid}` in an argv is the
 instance's UUID, which exists only after `vagrant up`. The phases are
 `prepare`, `fetch`, `build`, `collect`, and `teardown`; `fetch` has no steps
 when the declaration's fetch phase has none. A phase's guest steps run in
-order, in one unit that the guest stops after the phase's `timeoutSeconds`.
+order, in one unit that the guest stops after that phase's `timeoutSeconds`
+in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
 The plan names these steps; the executor that runs them, on the host and in
 the guest, is still to come.
 

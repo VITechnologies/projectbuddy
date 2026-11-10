@@ -63,8 +63,9 @@ RULES = DECLARATION_RULES + (
 )
 PLAN_FIELDS = (
     "schema", "engine", "instance", "declaration", "candidate", "box", "host", "hardware", "network",
-    "outputDisk", "vagrantfile", "steps", "earlierInstances", "refusals", "outcome",
+    "outputDisk", "vagrantfile", "guestUnits", "steps", "earlierInstances", "refusals", "outcome",
 )
+GUEST_PHASES = ("fetch", "build")
 OUTPUT_DISK_FIELDS = ("path", "sizeMb", "format", "variant", "controller", "port", "device")
 STEP_FIELDS = ("name", "phase", "runs", "argv", "cwd", "environment", "secrets", "timeoutSeconds")
 VAGRANTFILE = """\
@@ -410,7 +411,8 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
     """The ordered steps of a run (#166 design, section 4). Secret names appear; values never do.
 
     ``engine`` steps are done by the lane executor itself and have no argv. A phase's guest steps run
-    in order in one unit that the guest stops after the phase's timeout. The build unit starts first and
+    in order in one unit that the guest stops after the phase's declared timeout, which the plan keeps in
+    ``guestUnits``; the guest steps themselves have no timeout. The build unit starts first and
     waits for carrier loss, because SSH runs over the adapter whose link goes off; the link never comes
     back, so the guest writes its outputs to the output disk and powers itself off (REQ-106, C1).
     """
@@ -534,6 +536,8 @@ def make_plan(request: Request, host: Host, environ: Mapping[str, str]) -> dict:
         "outputDisk": disk,
         "vagrantfile": None if vagrantfile is None else {
             "text": vagrantfile, "sha256": hashlib.sha256(vagrantfile.encode("utf-8")).hexdigest()},
+        "guestUnits": None if declaration is None else {
+            phase: {"timeoutSeconds": getattr(declaration, phase).timeout} for phase in GUEST_PHASES},
         "steps": plan_steps(request, host, declaration, name, box["sha256"]) if ready else [],
         "earlierInstances": sorted(records.outcomes),
         "refusals": [refusal._asdict() for refusal in refusals],

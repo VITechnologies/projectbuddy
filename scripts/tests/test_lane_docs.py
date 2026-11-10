@@ -121,6 +121,10 @@ def test_the_plan_fields_are_the_code():
     assert plan.LINK_OFF_FROM == "build"
     assert "its link off from the `build` phase on and never turned on again" in UNWRAPPED
     disk = names(dict((names(row[0])[0], row[1]) for row in rows)["outputDisk"])
+    units = names(dict((names(row[0])[0], row[1]) for row in rows)["guestUnits"])
+    assert tuple(units) == plan.GUEST_PHASES + ("timeoutSeconds", "null")
+    assert set(plan.GUEST_PHASES) < set(plan.PHASES)
+    assert "a guest step's own `timeoutSeconds` is `null`" in UNWRAPPED
     assert tuple(disk) == plan.OUTPUT_DISK_FIELDS + ("null",)
     assert plan.output_disk(Path("/run"), plan.MIB + 1)["sizeMb"] == 2
     assert "a fixed-size VDI of `maxOutputBytes` rounded up to whole MiB" in UNWRAPPED

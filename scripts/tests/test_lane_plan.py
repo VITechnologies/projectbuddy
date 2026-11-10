@@ -342,6 +342,8 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
         "name": "build-2", "phase": "build", "runs": "guest", "argv": ["npm", "run", "package"], "cwd": "src",
         "environment": {}, "secrets": ["LANE_TEST_SECRET"], "timeoutSeconds": None,
     }
+    # The guest stops each unit at the declared limit; the engine waits that long plus its grace.
+    assert value["guestUnits"] == {"fetch": {"timeoutSeconds": 300}, "build": {"timeoutSeconds": 600}}
     assert by_name["await-fetch"]["timeoutSeconds"] == 300 + plan.HOST_DEADLINE_GRACE
     assert by_name["await-poweroff"]["timeoutSeconds"] == 600 + plan.HOST_DEADLINE_GRACE
     assert all(step["argv"] is None for step in steps if step["runs"] == "engine")
@@ -693,6 +695,8 @@ def test_each_failed_check_is_a_named_refusal(lane, capsys, case):
     if case.rules & {"declaration-json", "declaration-fields", "box-digest", "box-receipt"} or \
             case.rules & set(lane_declaration.DECLARATION_RULES):
         assert value["steps"] == []
+    if case.rules & set(lane_declaration.DECLARATION_RULES):
+        assert value["guestUnits"] is None and value["outputDisk"] is None
 
 
 def test_every_rule_has_a_negative_control():
