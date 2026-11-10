@@ -1,8 +1,9 @@
 """Lane profile (``projectbuddy/ubuntu-lane-profile@1``): OS, hardware, and a pinned toolchain.
 
 The ``os`` and ``virtualBox`` blocks have the same shape as the LabVIEW appliance's
-``provisioning-manifest.json``. ``vm/ubuntu-labview/build-virtualbox.sh`` still requires the
-appliance's own hardware values, so it cannot yet build a lane base VM from a lane profile.
+``provisioning-manifest.json``. ``vm/ubuntu-labview/build-virtualbox.sh`` builds a lane base VM
+from a lane profile (``LANE_PROFILE``): it validates the profile with ``load_profile`` and takes
+the hardware from it, while keeping the appliance's OS and ISO pins.
 A lane profile carries no LabVIEW, VIPM, license, or runner field or component.
 """
 from __future__ import annotations
