@@ -272,10 +272,15 @@ def test_a_ready_plan_names_every_step_and_changes_nothing(lane, capsys):
                                  "evidenceDirectory": str(lane.evidence / name)}
     assert value["host"]["virtualBox"] == "7.2.6r172322" and value["host"]["vagrant"] == "2.4.9"
     assert value["host"]["machineFolder"] == str(lane.machine_folder)
-    # The work directory and the machine folder share a file system, so one instance needs both amounts there.
+    # REQ-106: the plan names the fixed output disk; only `vagrant up` creates it.
+    assert value["outputDisk"] == {"path": str(lane.work / name / "lane-output.vdi"), "sizeMb": 64, "format": "VDI",
+                                   "variant": "Fixed", "controller": "SATA", "port": 1, "device": 0}
+    assert set(value["outputDisk"]) == set(plan.OUTPUT_DISK_FIELDS)
+    # The work, evidence, and machine folders share a file system, so one instance needs every amount there.
     [disk] = value["host"]["disks"]
     assert disk["requiredBytes"] == (lane.box.stat().st_size + value["box"]["extractedBytes"]
-                                     + value["hardware"]["diskGb"] * plan.GIB)
+                                     + value["hardware"]["diskGb"] * plan.GIB + 64 * plan.MIB
+                                     + lane.data()["maxOutputBytes"])
     assert disk["freeBytes"] == TIB
     assert value["earlierInstances"] == []
 
@@ -286,7 +291,8 @@ def test_the_generated_vagrantfile_pins_the_instance_hardware_and_one_loopback_f
     hardware = value["hardware"]
     text = value["vagrantfile"]["text"]
     assert value["vagrantfile"]["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
-    assert text == plan.render_vagrantfile(name, port, hardware)
+    assert text == plan.render_vagrantfile(name, port, hardware, value["outputDisk"])
+    disk = value["outputDisk"]["path"]
     for line in (
         f'config.vm.box = "{name}"', "config.vm.box_check_update = false", 'config.vm.communicator = "none"',
         'config.vm.synced_folder ".", "/vagrant", disabled: true',
@@ -295,37 +301,54 @@ def test_the_generated_vagrantfile_pins_the_instance_hardware_and_one_loopback_f
         f'vb.name = "{name}"', "vb.gui = false", "vb.linked_clone = false", "vb.destroy_unused_network_interfaces = false",
         f"vb.memory = {hardware['memoryMb']}", f"vb.cpus = {hardware['cpus']}",
         f'vb.customize ["modifyvm", :id, "--vram", "{hardware["vramMb"]}", "--nat-localhostreachable1", "off"]',
+        f'vb.customize ["createmedium", "disk", "--filename", \'{disk}\', "--size", "64", "--format", "VDI", '
+        '"--variant", "Fixed"]',
+        f'vb.customize ["storageattach", :id, "--storagectl", "SATA", "--port", "1", "--device", "0", "--type", "hdd", '
+        f'"--medium", \'{disk}\']',
     ):
         assert f"\n  {line}\n" in text or f"\n    {line}\n" in text, line
     assert text.count("forwarded_port") == 1
-    assert value["network"] == {"adapter": 1, "mode": "nat", "localhostReachable": False, "linkOffDuring": ["build"],
+    assert value["network"] == {"adapter": 1, "mode": "nat", "localhostReachable": False, "linkOffFrom": "build",
+                                "linkRestored": False,
                                 "sshForward": {"hostIp": "127.0.0.1", "hostPort": port, "guestPort": 22,
                                                "autoCorrect": False}}
 
 
 def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, capsys, monkeypatch):
     monkeypatch.setenv("LANE_TEST_SECRET", CANARY)
-    lane.declare(secrets=["LANE_TEST_SECRET"], workingDirectory="src", timeoutSeconds=600)
+    lane.declare(secrets=["LANE_TEST_SECRET"], workingDirectory="src",
+                 fetch={"steps": [["npm", "ci", "--ignore-scripts"]], "timeoutSeconds": 300},
+                 build={"steps": [["npm", "rebuild"], ["npm", "run", "package"]], "timeoutSeconds": 600})
     code, value, out, err = lane.run(capsys)
     assert code == 0, err
     assert CANARY not in lane.plan_out.read_text(encoding="utf-8") + out + err
     steps = value["steps"]
     assert [step["name"] for step in steps] == [
         "box-add", "up", "verify-instance", "connect", "check-runner-units", "probe-node", "probe-npm", "probe-git",
-        "probe-ca-certificates", "transfer-candidate", "workload", "network-off", "verify-network-off",
-        "await-workload", "network-on", "collect-outputs", "write-evidence", "teardown",
+        "probe-ca-certificates", "transfer-candidate", "fetch-1", "await-fetch", "build-1", "build-2", "network-off",
+        "verify-network-off", "await-poweroff", "read-outputs", "write-evidence", "teardown",
     ]
     assert all(set(step) == set(plan.STEP_FIELDS) for step in steps)
     phases = [plan.PHASES.index(step["phase"]) for step in steps]
-    assert phases == sorted(phases) and "fetch" not in {step["phase"] for step in steps}
+    assert phases == sorted(phases)
     by_name = {step["name"]: step for step in steps}
-    assert [name for name, step in by_name.items() if step["secrets"]] == ["workload"]
-    assert by_name["workload"] == {
-        "name": "workload", "phase": "build", "runs": "guest", "argv": ["npm", "run", "package"], "cwd": "src",
-        "environment": {}, "secrets": ["LANE_TEST_SECRET"], "timeoutSeconds": 600,
+    # REQ-093 / REQ-106: secret names go to the build phase only.
+    assert [name for name, step in by_name.items() if step["secrets"]] == ["build-1", "build-2"]
+    assert by_name["fetch-1"] == {
+        "name": "fetch-1", "phase": "fetch", "runs": "guest", "argv": ["npm", "ci", "--ignore-scripts"], "cwd": "src",
+        "environment": {}, "secrets": [], "timeoutSeconds": None,
     }
-    assert by_name["await-workload"]["timeoutSeconds"] == 600 + plan.HOST_DEADLINE_GRACE
+    assert by_name["build-2"] == {
+        "name": "build-2", "phase": "build", "runs": "guest", "argv": ["npm", "run", "package"], "cwd": "src",
+        "environment": {}, "secrets": ["LANE_TEST_SECRET"], "timeoutSeconds": None,
+    }
+    # The guest stops each unit at the declared limit; the engine waits that long plus its grace.
+    assert value["guestUnits"] == {"fetch": {"timeoutSeconds": 300}, "build": {"timeoutSeconds": 600}}
+    assert by_name["await-fetch"]["timeoutSeconds"] == 300 + plan.HOST_DEADLINE_GRACE
+    assert by_name["await-poweroff"]["timeoutSeconds"] == 600 + plan.HOST_DEADLINE_GRACE
     assert all(step["argv"] is None for step in steps if step["runs"] == "engine")
+    # REQ-106, C1: the link goes off once and no step turns it on again.
+    assert [step["argv"][-1] for step in steps if step["argv"] and "setlinkstate1" in step["argv"]] == ["off"]
     name, run_dir = value["instance"]["name"], value["instance"]["runDirectory"]
     sha256 = value["box"]["sha256"]
     assert by_name["box-add"]["argv"] == [
@@ -335,7 +358,6 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
         assert step["cwd"] == run_dir
         assert step["environment"] == {"VAGRANT_HOME": f"{run_dir}/vagrant-home", "TMPDIR": f"{run_dir}/tmp"}
     assert by_name["network-off"]["argv"] == [str(lane.vboxmanage), "controlvm", "{uuid}", "setlinkstate1", "off"]
-    assert by_name["network-on"]["argv"] == [str(lane.vboxmanage), "controlvm", "{uuid}", "setlinkstate1", "on"]
     assert by_name["probe-node"]["argv"] == ["node", "--version"] and by_name["probe-node"]["runs"] == "guest"
     # Every VirtualBox command after `vagrant up` names the instance by its verified UUID.
     assert all("{uuid}" in step["argv"] for step in steps[2:] if step["runs"] == "host")
@@ -396,6 +418,14 @@ def without(field: str) -> Callable[[Lane], None]:
         del value[field]
         lane.declaration.write_text(json.dumps(value), encoding="utf-8")
     return arrange
+
+
+def phased(name: str, **changes: object) -> Callable[[Lane], None]:
+    return lambda lane: lane.declare(**{name: {**lane.data()[name], **changes}})
+
+
+def phase_without(name: str, field: str) -> Callable[[Lane], None]:
+    return lambda lane: lane.declare(**{name: {key: value for key, value in lane.data()[name].items() if key != field}})
 
 
 def toolchain(change: Callable[[list[dict]], list[dict]]) -> Callable[[Lane], None]:
@@ -521,37 +551,48 @@ CASES = [
     Case("not-json", rules("declaration-json"), written("{")),
     Case("not-utf-8", rules("declaration-json"), written(b"\xff{}")),
     Case("missing-file", rules("declaration-json"), lambda lane: lane.declaration.unlink()),
-    Case("duplicate-key", rules("declaration-json"), replaced('"argv"', '"argv": [], "argv"')),
+    Case("duplicate-key", rules("declaration-json"), replaced('"build"', '"build": {}, "build"')),
     Case("fraction", rules("declaration-json"), replaced('"timeoutSeconds": 1800', '"timeoutSeconds": 1800.0')),
     Case("exponent", rules("declaration-json"), replaced('"timeoutSeconds": 1800', '"timeoutSeconds": 18e2')),
     Case("nan", rules("declaration-json"), replaced('"timeoutSeconds": 1800', '"timeoutSeconds": NaN')),
     Case("integer-too-long", rules("declaration-json"),
          replaced('"timeoutSeconds": 1800', '"timeoutSeconds": ' + "1" * 5000)),
     Case("null", rules("declaration-json"), declared(secrets=None)),
-    Case("unsafe-integer", rules("declaration-json"), declared(timeoutSeconds=2 ** 53)),
+    Case("unsafe-integer", rules("declaration-json"), phased("build", timeoutSeconds=2 ** 53)),
     Case("lone-surrogate", rules("declaration-json"), replaced('"package"]', '"\\ud800"]')),
     Case("too-deep", rules("declaration-json"), written("[" * 100000 + "]" * 100000)),
     Case("not-an-object", rules("declaration-json"), written("[]")),
-    Case("unknown-field", rules("declaration-fields"), declared(fetch=[["npm", "ci"]])),
+    Case("unknown-field", rules("declaration-fields"), declared(argv=["npm", "run", "package"])),
     Case("missing-field", rules("declaration-fields", "secret-name"), without("secrets")),
-    Case("other-schema", rules("declaration-fields"), declared(schema="projectbuddy/lane-workload@2")),
+    Case("retired-schema", rules("declaration-fields"), declared(schema="projectbuddy/lane-workload@1"),
+         "schema projectbuddy/lane-workload@1 is retired; use projectbuddy/lane-workload@2"),
+    Case("other-schema", rules("declaration-fields"), declared(schema="projectbuddy/lane-workload@3"),
+         "schema must be projectbuddy/lane-workload@2"),
+    Case("phase-missing", rules("declaration-fields", "phase"), without("fetch")),
+    Case("phase-string", rules("phase"), declared(build="npm run package")),
+    Case("phase-unknown-field", rules("phase"), phased("build", argv=["npm"]), "build has unknown fields argv"),
+    Case("phase-steps-missing", rules("phase"), phase_without("build", "steps")),
+    Case("phase-steps-string", rules("phase"), phased("fetch", steps="npm ci")),
+    Case("build-no-steps", rules("phase"), phased("build", steps=[]),
+         "build.steps must be a list of at least 1 argument vectors"),
     Case("branch", rules("commit"), declared(commit="main")),
     Case("short-sha", rules("commit"), lambda lane: lane.declare(commit=lane.commit[:12])),
     Case("upper-sha", rules("commit"), lambda lane: lane.declare(commit=lane.commit.upper())),
-    Case("argv-string", rules("argv"), declared(argv="npm run package")),
-    Case("argv-empty", rules("argv"), declared(argv=[])),
-    Case("argv-empty-word", rules("argv"), declared(argv=["npm", ""])),
-    Case("argv-number", rules("argv"), declared(argv=["sleep", 1])),
+    Case("argv-string", rules("argv"), phased("build", steps=["npm run package"]), "build.steps[0]"),
+    Case("argv-empty", rules("argv"), phased("build", steps=[["npm"], []]), "build.steps[1]"),
+    Case("argv-empty-word", rules("argv"), phased("fetch", steps=[["npm", ""]]), "fetch.steps[0]"),
+    Case("argv-number", rules("argv"), phased("build", steps=[["sleep", 1]])),
     Case("cwd-absolute", rules("working-directory"), declared(workingDirectory="/src")),
     Case("cwd-parent", rules("working-directory"), declared(workingDirectory="../src")),
     Case("cwd-not-normal", rules("working-directory"), declared(workingDirectory="./src")),
     Case("cwd-trailing-slash", rules("working-directory"), declared(workingDirectory="src/")),
     Case("cwd-backslash", rules("working-directory"), declared(workingDirectory="src\\lib")),
     Case("cwd-empty", rules("working-directory"), declared(workingDirectory="")),
-    Case("timeout-zero", rules("timeout"), declared(timeoutSeconds=0)),
-    Case("timeout-negative", rules("timeout"), declared(timeoutSeconds=-5)),
-    Case("timeout-bool", rules("timeout"), declared(timeoutSeconds=True)),
-    Case("timeout-string", rules("timeout"), declared(timeoutSeconds="60")),
+    Case("timeout-zero", rules("timeout"), phased("build", timeoutSeconds=0), "build.timeoutSeconds"),
+    Case("timeout-negative", rules("timeout"), phased("fetch", timeoutSeconds=-5), "fetch.timeoutSeconds"),
+    Case("timeout-bool", rules("timeout"), phased("build", timeoutSeconds=True)),
+    Case("timeout-string", rules("timeout"), phased("fetch", timeoutSeconds="60")),
+    Case("timeout-missing", rules("phase", "timeout"), phase_without("fetch", "timeoutSeconds")),
     Case("input-absolute", rules("input-path"), declared(inputs=["/etc/passwd"])),
     Case("input-parent", rules("input-path"), declared(inputs=["src/../../x"])),
     Case("input-dot", rules("input-path"), declared(inputs=["src/./index.js"])),
@@ -563,6 +604,9 @@ CASES = [
     Case("output-parent", rules("output-path"), declared(outputs=["../out.tgz"])),
     Case("output-twice", rules("output-path"), declared(outputs=["a.tgz", "a.tgz"])),
     Case("outputs-number", rules("output-path"), declared(outputs=[1])),
+    Case("output-size-zero", rules("output-size"), declared(maxOutputBytes=0)),
+    Case("output-size-bool", rules("output-size"), declared(maxOutputBytes=True)),
+    Case("output-size-string", rules("output-size"), declared(maxOutputBytes="64M")),
     *[Case(f"output-{name}", rules("output-forbidden"), declared(outputs=["ok.tgz", name]))
       for name in ("disk.VDI", "vm/disk.vmdk", "a.vhd", "a.VHDX", "state.sav", "vm.vbox", "known_hosts",
                    ".ssh/KNOWN_HOSTS")],
@@ -651,6 +695,8 @@ def test_each_failed_check_is_a_named_refusal(lane, capsys, case):
     if case.rules & {"declaration-json", "declaration-fields", "box-digest", "box-receipt"} or \
             case.rules & set(lane_declaration.DECLARATION_RULES):
         assert value["steps"] == []
+    if case.rules & set(lane_declaration.DECLARATION_RULES):
+        assert value["guestUnits"] is None and value["outputDisk"] is None
 
 
 def test_every_rule_has_a_negative_control():
@@ -659,7 +705,7 @@ def test_every_rule_has_a_negative_control():
 
 
 def test_independent_refusals_are_all_reported(lane, capsys, monkeypatch):
-    lane.declare(commit="main", timeoutSeconds=0, outputs=["disk.vdi"])
+    lane.declare(commit="main", build={"steps": [["npm"]], "timeoutSeconds": 0}, outputs=["disk.vdi"])
     appended_box(lane)
     dirty_engine(lane)
     lane.set_host(modes=("vagrant-fail",))
@@ -689,6 +735,19 @@ def test_outputs_named_like_but_not_forbidden_are_allowed(lane, capsys):
     assert lane.run(capsys)[0] == 0
 
 
+def test_a_declaration_without_fetch_steps_has_no_fetch_phase(lane, capsys):
+    lane.declare(fetch={"steps": [], "timeoutSeconds": 60})
+    code, value, _, err = lane.run(capsys)
+    assert code == 0, err
+    assert "fetch" not in {step["phase"] for step in value["steps"]}
+    assert [step["name"] for step in value["steps"] if step["phase"] == "build"][:2] == ["build-1", "build-2"]
+
+
+def test_the_output_disk_is_whole_mib_and_holds_max_output_bytes(lane, capsys):
+    for limit, size in ((1, 1), (plan.MIB, 1), (plan.MIB + 1, 2)):
+        assert plan.output_disk(lane.work / FIXED_NAME, limit)["sizeMb"] == size
+
+
 def test_a_declaration_with_no_inputs_needs_only_the_commit(lane, capsys):
     lane.declare(inputs=[], outputs=[])
     assert lane.run(capsys)[0] == 0
@@ -713,7 +772,8 @@ def test_nested_inputs_and_working_directory_are_found_in_the_commit(lane, capsy
     lane.declare(inputs=["src/index.js", "src", "package.json"], workingDirectory="src")
     code, value, _, err = lane.run(capsys)
     assert code == 0, err
-    assert [step["cwd"] for step in value["steps"] if step["name"] == "workload"] == ["src"]
+    assert [step["cwd"] for step in value["steps"] if step["phase"] in ("fetch", "build") and step["runs"] == "guest"] \
+        == ["src"] * 3
     assert listings == [["package.json", "src"], ["src/index.js"]]
 
 
@@ -872,12 +932,25 @@ def test_check_disk_adds_needs_that_share_a_file_system(tmp_path):
     assert disks[0]["requiredBytes"] == 12 and disks[0]["path"] == str(tmp_path / "a")
 
 
-def test_render_vagrantfile_refuses_values_it_cannot_quote():
+def test_render_vagrantfile_refuses_values_it_cannot_quote(tmp_path):
     hardware = box_tests.example()["virtualBox"]
-    for name, port, values in ((f'{FIXED_NAME}"', 2222, hardware), (FIXED_NAME, 22, hardware),
-                               (FIXED_NAME, 2222, dict(hardware, cpus=True)), (FIXED_NAME, 2222, dict(hardware, vramMb="8"))):
+    disk = plan.output_disk(tmp_path, 1)
+    for name, port, values, output in (
+        (f'{FIXED_NAME}"', 2222, hardware, disk), (FIXED_NAME, 22, hardware, disk),
+        (FIXED_NAME, 2222, dict(hardware, cpus=True), disk), (FIXED_NAME, 2222, dict(hardware, vramMb="8"), disk),
+        (FIXED_NAME, 2222, hardware, dict(disk, sizeMb=0)), (FIXED_NAME, 2222, hardware, dict(disk, sizeMb=True)),
+        (FIXED_NAME, 2222, hardware, dict(disk, path=None)), (FIXED_NAME, 2222, hardware, dict(disk, path="/a\nb")),
+        (FIXED_NAME, 2222, hardware, dict(disk, path="/a\x7fb")),
+    ):
         with pytest.raises(LaneBoxError):
-            plan.render_vagrantfile(name, port, values)
+            plan.render_vagrantfile(name, port, values, output)
+
+
+def test_an_output_disk_path_is_one_ruby_single_quoted_literal(tmp_path):
+    assert plan.ruby_string("/work/it's\\here/lane-output.vdi") == "'/work/it\\'s\\\\here/lane-output.vdi'"
+    text = plan.render_vagrantfile(FIXED_NAME, 2222, box_tests.example()["virtualBox"],
+                                   plan.output_disk(Path("/w'k"), 1))
+    assert text.count("'/w\\'k/lane-output.vdi'") == 2
 
 
 def test_host_queries_fail_closed(tmp_path, monkeypatch):

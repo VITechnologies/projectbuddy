@@ -1,9 +1,11 @@
 # Ubuntu Lane Procedure
 
 - Status: the dry-run lane plan and teardown are built and fixture-tested
-  offline (`VITechnologies/projectbuddy#185`); neither is live-proven yet. The
-  clone verifier is still to come under the same issue.
-- Last substantive update: 2026-11-09
+  offline (`VITechnologies/projectbuddy#185`); the plan's fetch and build
+  phases and its output disk follow REQ-106
+  (`VITechnologies/projectbuddy#200`). Neither is live-proven yet. The clone
+  verifier is still to come under `VITechnologies/projectbuddy#185`.
+- Last substantive update: 2026-11-10
 - Owner: svelderrainruiz
 
 The Ubuntu lane runs one disposable VM per job from a verified
@@ -11,7 +13,8 @@ The Ubuntu lane runs one disposable VM per job from a verified
 [REQ-090](https://github.com/VITechnologies/projectbuddy/wiki/REQ-090) to
 [REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093) and
 [REQ-101](https://github.com/VITechnologies/projectbuddy/wiki/REQ-101) to
-[REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103) set its
+[REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103), and
+[REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106) set its
 rules. This guide covers the parts that exist so far:
 
 - **The plan** checks every input of one run and writes the run's steps,
@@ -32,7 +35,7 @@ The pieces:
 ## Plan
 
 `Invoke-Lane.py plan` checks every input of one lane run and writes a
-`projectbuddy/lane-plan@1` plan. It is a dry run. It runs only read-only
+`projectbuddy/lane-plan@2` plan. It is a dry run. It runs only read-only
 queries: `VBoxManage --version`, `list vms`, and `list systemproperties`;
 `vagrant --version`; and `git rev-parse`, `status`, `cat-file`, and
 `ls-tree`. It never adds a box, starts or changes a VM, opens a connection,
@@ -40,7 +43,7 @@ or writes a secret's value anywhere.
 
 ### The workload declaration
 
-A consumer gives its workload as data, in a `projectbuddy/lane-workload@1`
+A consumer gives its workload as data, in a `projectbuddy/lane-workload@2`
 JSON file
 ([REQ-090](https://github.com/VITechnologies/projectbuddy/wiki/REQ-090)).
 The [example](../../vm/ubuntu-lane/lane-workload.example.json) names no
@@ -48,15 +51,20 @@ consumer; its commit is a placeholder.
 
 | Field | Meaning |
 | --- | --- |
-| `schema` | `projectbuddy/lane-workload@1` |
+| `schema` | `projectbuddy/lane-workload@2` |
 | `commit` | the full 40-digit lowercase candidate commit SHA |
-| `workingDirectory` | where the workload runs, in the candidate checkout; `.` is its root |
-| `argv` | the one argument vector the workload runs, without a shell |
-| `timeoutSeconds` | the workload's limit in the guest, a positive integer |
+| `workingDirectory` | where every step runs, in the candidate checkout; `.` is its root |
+| `fetch` | the fetch phase: its `steps`, which may be none, and its `timeoutSeconds`; it has the network and no secrets |
+| `build` | the build phase: at least one step, and its `timeoutSeconds`; it runs with the link off and receives the secrets ([REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106)) |
 | `inputs` | the files and directories the workload reads, which must be in the commit |
-| `outputs` | the files the run copies into its evidence directory |
-| `secrets` | the names of the secrets the workload receives ([REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093)) |
+| `outputs` | the files the guest leaves on the output disk, which the run copies into its evidence directory |
+| `maxOutputBytes` | the most bytes the guest may write to the output disk, a positive integer |
+| `secrets` | the names of the secrets the build phase receives ([REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093)) |
 | `toolchain` | each tool's `name` and `probe`, as in the [lane profile](ubuntu-lane-box.md#the-lane-profile) ([REQ-091](https://github.com/VITechnologies/projectbuddy/wiki/REQ-091)) |
+
+A phase's `steps` is a list of argument vectors, each a non-empty list of
+non-empty strings that runs without a shell. Its `timeoutSeconds`, a positive
+integer, is the guest's limit for all of the phase's steps together.
 
 Every path is relative, uses `/`, and is in normalized form without `..`. An
 output is never a VM disk, saved state, VM settings file, or known-hosts
@@ -69,9 +77,11 @@ declaration with no canonical form is refused: one that holds a `null`, a
 number with a fraction or an exponent, an integer beyond 2^53 - 1, a key
 that appears twice, or an unpaired surrogate.
 
-Declaration `@1` has one argument vector and no fetch steps. A workload that
-needs the network, such as `npm ci`, waits for the fetch phase
-(`VITechnologies/projectbuddy#182`).
+Declaration `@1`, which had one argument vector and no fetch phase, is
+refused: it draws no line between the steps that need the network and the
+steps that receive secrets. A workload such as an npm package fetches with
+`npm ci --ignore-scripts` and then runs `npm rebuild` and its own scripts in
+the build phase, as the example does.
 
 ### Run the plan (host)
 
@@ -124,14 +134,16 @@ there is none.
 | Rule | Refused when |
 | --- | --- |
 | `declaration-json` | the declaration cannot be read, is not a JSON object, or has no canonical form |
-| `declaration-fields` | a field is missing or unknown, or `schema` is not `projectbuddy/lane-workload@1` |
+| `declaration-fields` | a field is missing or unknown, or `schema` is not `projectbuddy/lane-workload@2`; `@1` is refused as retired |
 | `commit` | `commit` is not a full 40-digit lowercase SHA: a branch, a tag, or an abbreviated SHA |
-| `argv` | `argv` is not a non-empty list of non-empty strings |
+| `phase` | `fetch` or `build` is not an object with exactly `steps` and `timeoutSeconds`, its `steps` is not a list, or `build` has no step |
+| `argv` | a step is not a non-empty list of non-empty strings |
+| `timeout` | a phase's `timeoutSeconds` is not a positive integer |
 | `working-directory` | `workingDirectory` is not a relative path in normalized form |
-| `timeout` | `timeoutSeconds` is not a positive integer |
 | `input-path` | `inputs` is not a list of strings, or an input is not a relative path below the checkout, or appears twice |
 | `output-path` | `outputs` is not a list of strings, or an output is not a relative path below the evidence directory, or appears twice |
 | `output-forbidden` | an output is a VM disk, saved state, VM settings file, or known-hosts file |
+| `output-size` | `maxOutputBytes` is not a positive integer |
 | `secret-name` | `secrets` is not a list of strings, or a name is not an environment variable name, or appears twice |
 | `toolchain` | `toolchain` is not a non-empty list, or an entry is not a valid `name` and `probe`, or a name appears twice |
 | `box-digest` | the box's SHA-256 differs from the one its receipt records ([TEST-103](https://github.com/VITechnologies/projectbuddy/wiki/TEST-103)) |
@@ -150,14 +162,15 @@ there is none.
 | `ssh-port` | the SSH forward's host port is in use |
 
 A plan refused by a declaration rule, `box-digest`, or `box-receipt` has no
-steps. The disk check adds up, for each file system, the box file and its
-extracted size under the work directory, and the box receipt's full
-`diskGb` in VirtualBox's default machine folder, because a dynamic disk
-never grows past its capacity.
+steps. The disk check adds up, for each file system, the box file, its
+extracted size, and the output disk under the work directory; the box
+receipt's full `diskGb` in VirtualBox's default machine folder, because a
+dynamic disk never grows past its capacity; and `maxOutputBytes` under the
+evidence directory.
 
 ### The plan
 
-The plan (`projectbuddy/lane-plan@1`) holds:
+The plan (`projectbuddy/lane-plan@2`) holds:
 
 | Field | Meaning |
 | --- | --- |
@@ -168,8 +181,10 @@ The plan (`projectbuddy/lane-plan@1`) holds:
 | `box` | the box `path` and `sha256`, the `receiptSha256`, the `extractedBytes`, and the receipt's `profile` and `sshHostKey` |
 | `host` | the `virtualBox` and `vagrant` versions, the `machineFolder`, and the `disks` the space check compared |
 | `hardware` | the box receipt's `virtualBox` block, or `null` |
-| `network` | one NAT adapter, its link off during the `build` phase, and the SSH forward from `127.0.0.1` |
+| `network` | one NAT adapter, its link off from the `build` phase on and never turned on again, and the SSH forward from `127.0.0.1` |
+| `outputDisk` | the output disk's `path` in the run directory, its `sizeMb`, `format`, and `variant`, and the `controller`, `port`, and `device` it is attached at, or `null` |
 | `vagrantfile` | the generated Vagrantfile's `text` and its `sha256` |
+| `guestUnits` | for `fetch` and `build`, the declared `timeoutSeconds` after which the guest stops that phase's unit, or `null` |
 | `steps` | the steps below, in order |
 | `earlierInstances` | the UUIDs that earlier lane records name |
 | `refusals` | each refusal's `rule` and `detail`, in order |
@@ -181,13 +196,23 @@ unused network interfaces. It forwards only SSH, from `127.0.0.1`, turns off
 the NAT's access to the host's loopback, and sets the box receipt's
 hardware. Vagrant does not connect to the guest; the lane does that itself.
 
+Before the guest first boots, the Vagrantfile creates the output disk, a
+fixed-size VDI of `maxOutputBytes` rounded up to whole MiB, in the run
+directory, and attaches it to the `SATA` controller at port 1. The lane
+box's VM has that controller with two ports and its system disk on port 0. A
+box without that port fails `vagrant up` before the guest boots. The plan
+itself creates no disk.
+
 Each step has a `name`, a `phase`, where it `runs` (`host`, `guest`, or
 `engine`, the lane itself), its `argv`, `cwd`, `environment`, the `secrets`
 it receives by name, and its `timeoutSeconds`. `{uuid}` in an argv is the
 instance's UUID, which exists only after `vagrant up`. The phases are
 `prepare`, `fetch`, `build`, `collect`, and `teardown`; `fetch` has no steps
-at declaration `@1`. The plan names these steps; the executor that runs them
-is still to come.
+when the declaration's fetch phase has none. A phase's guest steps run in
+order, in one unit that the guest stops after that phase's `timeoutSeconds`
+in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
+The plan names these steps; the executor that runs them, on the host and in
+the guest, is still to come.
 
 | Step | Phase | Runs | What it does |
 | --- | --- | --- | --- |
@@ -198,17 +223,24 @@ is still to come.
 | `check-runner-units` | `prepare` | engine | lists the guest's units with `systemctl list-unit-files` and `systemctl list-units --all`, and stops the run if any is an `actions.runner.*` unit ([REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103), [clone check](ubuntu-vagrant-clone.md#runner-units)) |
 | `probe-<tool>` | `prepare` | guest | runs one declared tool probe, for up to 60 seconds |
 | `transfer-candidate` | `prepare` | engine | sends the candidate commit to the guest |
-| `workload` | `build` | guest | starts the declared `argv` in the working directory, with only the declared secrets; it waits for the link to go off before it runs |
+| `fetch-<n>` | `fetch` | guest | runs fetch step `n` in the working directory, with the network and no secrets |
+| `await-fetch` | `fetch` | engine | waits for the fetch steps to end, for up to the fetch timeout plus 300 seconds; there is none when the fetch phase has no step |
+| `build-<n>` | `build` | guest | runs build step `n` in the working directory, with only the declared secrets; the build waits for the link to go off before its first step runs |
 | `network-off` | `build` | host | `VBoxManage controlvm {uuid} setlinkstate1 off` |
 | `verify-network-off` | `build` | host | checks that the link is off |
-| `await-workload` | `build` | engine | waits for the workload, for up to its timeout plus 300 seconds |
-| `network-on` | `collect` | host | `VBoxManage controlvm {uuid} setlinkstate1 on` |
-| `collect-outputs` | `collect` | engine | copies the declared outputs into the evidence directory |
+| `await-poweroff` | `build` | engine | waits for the guest to leave its outputs on the output disk and power itself off, for up to the build timeout plus 300 seconds; after that the run timed out, no output is read, and teardown powers the instance off |
+| `read-outputs` | `collect` | engine | reads the declared outputs and the build's exit status from the output disk without booting the guest, and copies the outputs into the evidence directory; anything else on the disk fails the run |
 | `write-evidence` | `collect` | engine | writes the run's evidence record |
 | `teardown` | `teardown` | host | [teardown](#teardown) with `--run`, writing its receipt to the records directory |
 
-The workload starts before the link goes off because SSH reaches the guest
-through the only adapter (`VITechnologies/projectbuddy#182`, option N2).
+The build starts before the link goes off because SSH reaches the guest
+through the only adapter (`VITechnologies/projectbuddy#182`, option N2). The
+link is never turned on again
+([REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106),
+completion channel C1): any guest process can set a VirtualBox guest
+property, so nothing the guest reports could safely reopen it. The guest
+therefore leaves its outputs on the output disk and powers itself off, and
+no secret-bearing process ever has the network.
 Host queries time out after 120 seconds, `git` after 120 seconds, and
 `box-add` and `up` after 1800 seconds each.
 
@@ -289,6 +321,11 @@ state outside the allow-list, such as `saved`, is refused.
 - **Windows hosts.** The lock uses POSIX `fcntl`.
 - **Orphan cleanup.** Nothing yet finds lane VMs that lost their run
   directory. Teardown refuses a present VM when no run directory binds it.
+- **An output disk that was never attached.** `vagrant up` creates the output
+  disk and then attaches it. If the attach fails, VirtualBox keeps the disk in
+  its media registry with no VM: `unregistervm --delete` does not delete it,
+  and removing the run directory leaves the registry naming a missing file.
+  Close it with `VBoxManage closemedium disk <path>`.
 - **A live proof.** No lane instance has been torn down on a real host yet.
 
 ### Run teardown (host)

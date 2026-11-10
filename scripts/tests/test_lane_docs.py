@@ -118,7 +118,17 @@ def test_the_plan_fields_are_the_code():
     assert all(f"`{field}`" in step_fields for field in plan.STEP_FIELDS)
     phases = UNWRAPPED.split("The phases are", 1)[1].split(";", 1)[0]
     assert tuple(names(phases)) == plan.PHASES
-    assert plan.LINK_OFF_PHASES == ("build",) and "its link off during the `build` phase" in UNWRAPPED
+    assert plan.LINK_OFF_FROM == "build"
+    assert "its link off from the `build` phase on and never turned on again" in UNWRAPPED
+    disk = names(dict((names(row[0])[0], row[1]) for row in rows)["outputDisk"])
+    units = names(dict((names(row[0])[0], row[1]) for row in rows)["guestUnits"])
+    assert tuple(units) == plan.GUEST_PHASES + ("timeoutSeconds", "null")
+    assert set(plan.GUEST_PHASES) < set(plan.PHASES)
+    assert "a guest step's own `timeoutSeconds` is `null`" in UNWRAPPED
+    assert tuple(disk) == plan.OUTPUT_DISK_FIELDS + ("null",)
+    assert plan.output_disk(Path("/run"), plan.MIB + 1)["sizeMb"] == 2
+    assert "a fixed-size VDI of `maxOutputBytes` rounded up to whole MiB" in UNWRAPPED
+    assert f"`{plan.OUTPUT_DISK_CONTROLLER}` controller at port {plan.OUTPUT_DISK_PORT}" in UNWRAPPED
     assert f"`{plan.UUID_PLACEHOLDER}` in an argv" in UNWRAPPED
 
 
@@ -126,13 +136,16 @@ def test_the_step_table_is_the_code():
     request = SimpleNamespace(work_dir=Path("/work"), box=Path("/box"), engine=Path("/engine"),
                               records_dir=Path("/records"))
     tool = {"name": "<tool>", "probe": {"argv": ["tool", "--version"]}}
-    workload = SimpleNamespace(toolchain=(tool,), argv=("run",), timeout=1, secrets=(), working_directory=".")
+    phase = declaration.Phase(steps=(("run",),), timeout=1)
+    workload = SimpleNamespace(toolchain=(tool,), fetch=phase, build=phase, secrets=(), working_directory=".")
     steps = plan.plan_steps(request, SimpleNamespace(vboxmanage="VBoxManage", vagrant="vagrant"), workload,
                             "pb-lane-0123456789ab", "0" * 64)
+    for step in steps:
+        step["name"] = re.sub(r"^(fetch|build)-1$", r"\1-<n>", step["name"])
     rows = table("| Step | Phase | Runs | What it does |")
     assert [(names(row[0])[0], names(row[1])[0], row[2]) for row in rows] == [
         (step["name"], step["phase"], step["runs"]) for step in steps]
-    assert {step["phase"] for step in steps} == set(plan.PHASES) - {"fetch"}
+    assert {step["phase"] for step in steps} == set(plan.PHASES)
     documented = {names(row[0])[0]: row[3] for row in rows}
     for step in steps:
         if step["runs"] == "host" and step["argv"][0] == "VBoxManage" and step["name"] != "verify-network-off":
@@ -141,7 +154,8 @@ def test_the_step_table_is_the_code():
 
 def test_plan_timeouts_are_documented():
     assert PROBE_TIMEOUT == 60 and "for up to 60 seconds" in UNWRAPPED
-    assert plan.HOST_DEADLINE_GRACE == 300 and "its timeout plus 300 seconds" in UNWRAPPED
+    assert plan.HOST_DEADLINE_GRACE == 300
+    assert "the fetch timeout plus 300 seconds" in UNWRAPPED and "the build timeout plus 300 seconds" in UNWRAPPED
     assert plan.QUERY_TIMEOUT == 120 and plan.GIT_TIMEOUT == 120
     assert "Host queries time out after 120 seconds, `git` after 120 seconds" in UNWRAPPED
     assert plan.BOX_ADD_TIMEOUT == plan.UP_TIMEOUT == 1800
