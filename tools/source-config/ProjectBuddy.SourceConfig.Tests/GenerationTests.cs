@@ -12,6 +12,8 @@ public class GenerationTests
     public async Task ReviewIsRequiredAndNeverProvesANativeBuild(bool accepted)
     {
         var settings = await Fixture();
+        var pinnedManifest = await Generation.ReadPinned(settings.Root, settings.Manifest);
+        Assert.Equal(Configuration.Hash(ConfigurationTests.Manifest), pinnedManifest.Sha256);
         var valid = await Generation.RunAsync(settings, (_, _) => Task.FromResult(Verdict(accepted)));
         Assert.Equal(accepted, valid);
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
@@ -107,10 +109,10 @@ public class GenerationTests
         var directory = Path.Combine(Path.GetTempPath(), "projectbuddy-source-config-" + Guid.NewGuid().ToString("N"));
         var root = Path.Combine(directory, "source");
         Directory.CreateDirectory(Path.Combine(root, "src"));
-        await File.WriteAllTextAsync(Path.Combine(root, "vipm.toml"), ConfigurationTests.Manifest);
-        await File.WriteAllTextAsync(Path.Combine(root, "src/fixture.lvproj"), ConfigurationTests.Xml);
+        await File.WriteAllTextAsync(Path.Combine(root, "vipm.toml"), ConfigurationTests.Manifest.Replace("\n", "\r\n", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(Path.Combine(root, "src/fixture.lvproj"), ConfigurationTests.Xml.Replace("\n", "\r\n", StringComparison.Ordinal));
         await Generation.Git(root, "init");
-        await Generation.Git(root, "add", "vipm.toml", "src/fixture.lvproj");
+        await Generation.Git(root, "-c", "core.autocrlf=true", "add", "vipm.toml", "src/fixture.lvproj");
         await Generation.Git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Fixture");
         var revision = await Generation.Git(root, "rev-parse", "HEAD");
         return new Settings(root, "vipm.toml", "ppl", "https://example.org/fixture.git", revision,

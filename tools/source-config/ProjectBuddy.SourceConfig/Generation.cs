@@ -90,12 +90,23 @@ public static class Generation
         var expected = await Git(root, "rev-parse", "--verify", $"HEAD:{relative}");
         var bytes = await File.ReadAllBytesAsync(path);
         Configuration.Require(bytes.Length <= 8 * 1024 * 1024, "Source metadata exceeds the size limit.");
-        var blob = Encoding.ASCII.GetBytes($"blob {bytes.Length}\0").Concat(bytes).ToArray();
-        var actual = Convert.ToHexStringLower(expected.Length == 64 ? SHA256.HashData(blob) : SHA1.HashData(blob));
+        var text = new UTF8Encoding(false, true).GetString(bytes);
+        var canonicalBytes = bytes;
+        var actual = GitBlobHash(bytes, expected.Length == 64);
+        if (actual != expected)
+        {
+            canonicalBytes = Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n", StringComparison.Ordinal));
+            actual = GitBlobHash(canonicalBytes, expected.Length == 64);
+        }
         Configuration.Require(expected == actual, $"Source metadata differs from Git: {relative}.");
-        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-        var text = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF');
-        return new InputFile(text, hash);
+        var hash = Convert.ToHexStringLower(SHA256.HashData(canonicalBytes));
+        return new InputFile(text.TrimStart('\uFEFF'), hash);
+    }
+
+    private static string GitBlobHash(byte[] bytes, bool sha256)
+    {
+        var blob = Encoding.ASCII.GetBytes($"blob {bytes.Length}\0").Concat(bytes).ToArray();
+        return Convert.ToHexStringLower(sha256 ? SHA256.HashData(blob) : SHA1.HashData(blob));
     }
 
     public static bool Inside(string root, string path)

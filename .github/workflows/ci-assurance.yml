@@ -141,12 +141,13 @@ jobs:
     # itself (REQ-008): proves scripts/Test-ToolchainPresence.ps1's real
     # CI-dispatch path actually runs in this repo's own CI, not just in a
     # hypothetical consumer's. `projectbuddy-ref: ${{ github.sha }}`
-    # resolves dynamically to the exact commit under test on every run,
-    # so this never needs a hardcoded SHA to keep up to date.
+    # resolves to the PR head (or pushed commit) in the repository under test,
+    # so the reusable workflow can check out fork-only commits too.
     name: Toolchain Smoke Test (self-check)
     uses: ./.github/workflows/toolchain-smoke-test.yml
     with:
-      projectbuddy-ref: ${{ github.sha }}
+      projectbuddy-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      projectbuddy-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       tool-names: "git,pwsh,python3,jq"
       runs-on-json: '"ubuntu-latest"'
 
