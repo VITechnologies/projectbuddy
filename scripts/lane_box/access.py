@@ -2,7 +2,7 @@
 
 ``configure-access`` installs the files under ``guest/`` and enables the unit; the readiness scan attests them.
 At each boot of a lane instance, the unit writes root's only authorized key from a guest property that the
-host sets read-only for the guest before the VM starts.
+host sets before the VM starts, under /VirtualBox/HostInfo/, where VirtualBox refuses every guest write.
 """
 from __future__ import annotations
 

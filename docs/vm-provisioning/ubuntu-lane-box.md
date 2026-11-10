@@ -73,9 +73,10 @@ The pieces:
 - **Key-only SSH on the base VM before it reboots.** `configure-access`
   restarts nothing, so the base VM keeps accepting password logins until it
   reboots. Lane instances boot from the box, so this does not affect them.
-- **Which key the host sets.** The guest accepts any key that the host set
-  read-only for the guest. Generating it and connecting with it are the lane
-  run's job (`VITechnologies/projectbuddy#206`), which is still to come.
+- **Which key the host sets.** The guest accepts any key the host sets in the
+  property. Generating it, setting it on every instance before it boots, and
+  connecting with it are the lane run's job
+  (`VITechnologies/projectbuddy#206`), which is still to come.
 - **A live proof.** No lane box has been built from a real VM yet.
 
 ## The lane profile
@@ -222,11 +223,14 @@ it reads for most of these settings; `AllowUsers` lines add up instead. The
 readiness scan checks the values that result. At each boot the helper:
 
 - removes the key file if an earlier run in the same boot left one;
-- reads the guest property `/ProjectBuddy/Lane/ClientKey` with
-  `/usr/sbin/VBoxControl`;
-- requires that the host set the property read-only for the guest (flag
-  `RDONLYGUEST` or `READONLY`), because any guest process can set a property
-  that the guest may write;
+- reads the guest property `/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey`
+  with `/usr/sbin/VBoxControl`. VirtualBox refuses every guest write under
+  `/VirtualBox/HostInfo/`, whether the property exists or not, and marks a
+  value the host sets there read-only for the guest. A property under any
+  other name is not safe: a guest process, root or not, can create it with
+  flags of its choosing, including read-only ones;
+- requires the property to be read-only for the guest (flag `RDONLYGUEST` or
+  `READONLY`), as a second check;
 - requires one `ssh-ed25519` public key, optionally with a comment, and
   writes it to `/run/projectbuddy-ssh/root` (mode 644, in a directory with
   mode 755) as `restrict,from="10.0.2.2" ssh-ed25519 <key>`, so that it
@@ -238,9 +242,10 @@ still starts.
 `configure-access` neither reloads systemd nor restarts sshd. The running
 sshd keeps the configuration it loaded when it started, so password SSH still
 works for steps 4 and 5. Do not reboot the guest, restart sshd, or install
-packages before the snapshot in step 6. After the snapshot, the base VM
-accepts SSH only when the host sets the property before it boots; use the VM
-console instead.
+packages before the snapshot in step 6. After the snapshot, use the VM
+console to reach the base VM. Do not set the property on the base VM: it is
+stored in the VM's configuration, not on its disk, so the clone that step 7
+packages, and the box, can carry it.
 
 It refuses with exit 2 and changes nothing when `/etc/ssh/sshd_config.d` is
 missing or any of the four paths exists. A failure after it installed

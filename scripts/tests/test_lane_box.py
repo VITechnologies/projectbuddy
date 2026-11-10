@@ -1076,6 +1076,13 @@ def test_guest_files_agree_with_each_other():
     assert "import lane_box" not in access.ACCESS_FILES[2].content().decode("ascii")
 
 
+def test_the_key_property_is_reserved_for_the_host():
+    # VirtualBox refuses guest writes only under its host-reserved prefixes (VBoxGuestPropSvc checkHostReserved);
+    # under any other name a guest process can create the property with RDONLYGUEST itself.
+    name = lane_access_helper().PROPERTY
+    assert name.startswith("/VirtualBox/HostInfo/") and len(name) < 64
+
+
 def test_the_helper_accepts_one_guest_read_only_key():
     helper = lane_access_helper()
     blob = ed25519_blob()
@@ -1114,7 +1121,7 @@ def test_the_helper_writes_roots_only_key(tmp_path, monkeypatch, capsys):
                         subprocess.CompletedProcess(argv, 0, shown(public_key()), ""))
     assert helper.main("/usr/sbin/VBoxControl", str(directory)) == 0
     assert seen[0][0] == ["/usr/sbin/VBoxControl", "--nologo", "guestproperty", "get",
-                          "/ProjectBuddy/Lane/ClientKey", "--verbose"]
+                          "/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey", "--verbose"]
     assert seen[0][1]["timeout"] == 30 and seen[0][1]["stdin"] == subprocess.DEVNULL
     assert (directory / "root").read_text(encoding="ascii") == f'restrict,from="10.0.2.2" {public_key()}\n'
     assert stat.S_IMODE((directory / "root").stat().st_mode) == 0o644 and stat.S_IMODE(directory.stat().st_mode) == 0o755
@@ -1123,7 +1130,7 @@ def test_the_helper_writes_roots_only_key(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("run, message", [
-    (completed(2), "/ProjectBuddy/Lane/ClientKey is not set (VBoxControl exit code 2)"),
+    (completed(2), "/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey is not set (VBoxControl exit code 2)"),
     (completed(0, shown(public_key(), "TRANSIENT")), "is writable by the guest"),
     (lambda argv, **_: (_ for _ in ()).throw(FileNotFoundError(2, "No such file", argv[0])), "cannot run VBoxControl"),
     (lambda argv, **_: (_ for _ in ()).throw(subprocess.TimeoutExpired(argv, 30)), "cannot run VBoxControl"),

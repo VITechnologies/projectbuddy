@@ -2,9 +2,11 @@
 
 ``Invoke-LaneBox.py configure-access`` installs this file as /usr/local/libexec/projectbuddy-lane-access.py, and
 projectbuddy-lane-access.service runs it as root once per boot. It reads the guest property
-/ProjectBuddy/Lane/ClientKey. When the host set the property read-only for the guest and it holds exactly one
-ssh-ed25519 public key, that key becomes root's only authorized key, usable only from the NAT gateway. Anything
-else leaves root with no key, so every SSH login fails.
+/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey. VirtualBox refuses every guest write under /VirtualBox/HostInfo/,
+so only the host can have set it; a property under any other name could have been created by a guest process,
+with flags of its choosing. When the property is read-only for the guest and holds exactly one ssh-ed25519 public
+key, that key becomes root's only authorized key, usable only from the NAT gateway. Anything else leaves root with
+no key, so every SSH login fails.
 
 Standard library only; it must not import the lane_box package, which is deleted from the guest.
 """
@@ -18,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 
-PROPERTY = "/ProjectBuddy/Lane/ClientKey"
+PROPERTY = "/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey"
 VBOXCONTROL = "/usr/sbin/VBoxControl"
 KEY_DIRECTORY = "/run/projectbuddy-ssh"
 NAT_GATEWAY = "10.0.2.2"
