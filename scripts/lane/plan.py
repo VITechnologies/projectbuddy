@@ -56,6 +56,7 @@ LINK_OFF_FROM = "build"
 OUTPUT_DISK_NAME = "lane-output.vdi"
 OUTPUT_DISK_CONTROLLER = "SATA"
 OUTPUT_DISK_PORT = 1
+OUTPUT_DEVICE_PREFIX = "/dev/disk/by-id/ata-VBOX_HARDDISK_VB"
 RULES = DECLARATION_RULES + (
     "box-digest", "box-receipt", "toolchain-contract", "candidate-missing", "candidate-path", "secret-missing",
     "engine-commit", "earlier-record-invalid", "reused-instance-uuid", "instance-name-in-use",
@@ -380,6 +381,20 @@ def output_disk(run_dir: pathlib.Path, max_output_bytes: int) -> dict:
             "variant": "Fixed", "controller": OUTPUT_DISK_CONTROLLER, "port": OUTPUT_DISK_PORT, "device": 0}
 
 
+def output_device(medium_uuid: str) -> str:
+    """The guest's stable path to the output disk whose medium UUID is ``medium_uuid``.
+
+    VirtualBox's AHCI controller (``DevAHCI.cpp``) names the disk ``VBOX HARDDISK`` with the serial
+    ``VB%08x-%08x`` of the medium UUID's first and last 32-bit words. A little-endian host holds those as
+    the UUID's first eight hex digits and its last four bytes in reverse, and udev joins the model and
+    serial, with ``_`` for the space, into the disk's ``by-id`` name.
+    """
+    if not UUID_PATTERN.fullmatch(medium_uuid):
+        raise LaneBoxError(f"{medium_uuid!r} is not a medium UUID")
+    raw = bytes.fromhex(medium_uuid.replace("-", ""))
+    return f"{OUTPUT_DEVICE_PREFIX}{raw[:4].hex()}-{raw[12:][::-1].hex()}"
+
+
 def ruby_string(value: str) -> str:
     """A Ruby single-quoted literal; a control character is refused rather than escaped."""
     if any(unicodedata.category(character) == "Cc" for character in value):
@@ -412,8 +427,9 @@ def plan_steps(request: Request, host: Host, declaration: Declaration, name: str
 
     ``engine`` steps are done by the lane executor itself and have no argv. A phase's guest steps run
     in order in one unit that the guest stops after the phase's declared timeout, which the plan keeps in
-    ``guestUnits``; the guest steps themselves have no timeout. The build unit starts first and
-    waits for carrier loss, because SSH runs over the adapter whose link goes off; the link never comes
+    ``guestUnits``; the guest steps themselves have no timeout. The build's supervisor starts first and
+    waits for carrier loss before it starts the build unit, because SSH runs over the adapter whose link
+    goes off; the link never comes
     back, so the guest writes its outputs to the output disk and powers itself off (REQ-106, C1).
     """
     run_dir = request.work_dir / name

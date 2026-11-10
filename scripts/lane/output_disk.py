@@ -113,16 +113,16 @@ def result_from_unit(properties: Mapping[str, str]) -> str | None:
     return None
 
 
-def unit_properties(unit: str, run: Run) -> dict[str, str]:
-    """The build unit's result properties, read with ``systemctl show``; empty when they cannot be read."""
-    argv = ["systemctl", "show", *(f"--property={name}" for name in UNIT_PROPERTIES), "--", unit]
+def unit_properties(unit: str, run: Run, names: Sequence[str] = UNIT_PROPERTIES) -> dict[str, str]:
+    """A unit's ``names`` properties, by default its result, read with ``systemctl show``; empty when unreadable."""
+    argv = ["systemctl", "show", *(f"--property={name}" for name in names), "--", unit]
     completed = run(argv, capture_output=True, text=True, check=False, timeout=60)
     if completed.returncode != 0:
         return {}
     found: dict[str, str] = {}
     for line in completed.stdout.splitlines():
         name, separator, value = line.partition("=")
-        if not separator or name not in UNIT_PROPERTIES or name in found:
+        if not separator or name not in names or name in found:
             return {}
         found[name] = value
     return found

@@ -215,7 +215,8 @@ when the declaration's fetch phase has none. A phase's guest steps run in
 order, in one unit that the guest stops after that phase's `timeoutSeconds`
 in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
 The plan names these steps; the executor that runs them, on the host and in
-the guest, is still to come, apart from the output disk's launcher and reader.
+the guest, is still to come, apart from the [guest supervisor](#guest-phases)
+and the output disk's launcher and reader.
 
 | Step | Phase | Runs | What it does |
 | --- | --- | --- | --- |
@@ -246,6 +247,153 @@ therefore leaves its outputs on the output disk and powers itself off, and
 no secret-bearing process ever has the network.
 Host queries time out after 120 seconds, `git` after 120 seconds, and
 `box-add`, `up`, and `read-outputs` after 1800 seconds each.
+
+### Guest phases
+
+The guest supervisor
+([`scripts/lane/supervisor.py`](../../scripts/lane/supervisor.py)) runs the
+`fetch` and `build` phases in the guest and hands off to the output disk's
+launcher ([REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106)).
+Like the launcher, it is one file that uses only the Python standard library.
+The engine places both files in `/run/projectbuddy-lane`, which root owns
+with mode 0755, beside the run's spec, `lane-guest.json`, with mode 0644, so
+the workload account can read them but not change them. Only root can create
+an entry in `/run`, so the workload account cannot claim that directory
+first. Outside a lane guest every mode changes nothing and exits 2. The host
+side, which writes the spec and the secrets file and runs these modes over
+SSH, is still to come.
+
+| Mode | Runs as | What it does |
+| --- | --- | --- |
+| `fetch` | root, over SSH | starts `pb-lane-fetch.service`, waits until it ends, empties its control group, and prints `fetch: <result>`; it exits 0 only when the result is `exited 0` |
+| `start-build` | root, over SSH while the link is on | makes every check that does not need carrier loss, then starts the `build` mode in `pb-lane-supervisor.service`, which outlives the SSH connection |
+| `build` | root, in `pb-lane-supervisor.service` | waits for carrier loss, starts `pb-lane-build.service` with the secrets on its standard input, deletes the secrets file, waits until the unit ends, empties its control group, and replaces itself with the launcher; any failure before that powers the guest off without writing, so the host refuses the disk |
+| `phase` | the workload account | runs one phase's steps in order, as that phase's unit; it refuses to run as root |
+
+The spec (`projectbuddy/lane-guest@1`) holds exactly these fields, and a key
+that repeats refuses it:
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | `projectbuddy/lane-guest@1` |
+| `account` | the workload account, which must exist and must not be root |
+| `root` | the working directory, an absolute path without empty, `.`, or `..` components |
+| `fetch` | the fetch phase's `steps`, each a nonempty argument vector, and its `timeoutSeconds`; the `fetch` mode refuses a spec without a fetch step |
+| `build` | the build phase's `steps`, at least one, and its `timeoutSeconds` |
+| `secrets` | the distinct environment variable names the build steps receive |
+| `outputs` | the declared outputs, for the launcher |
+| `maxOutputBytes` | the output disk's size, for the launcher |
+| `device` | the output disk's `/dev/disk/by-id` path |
+
+Each phase runs in its own transient unit in `system.slice`, as the
+workload account. The build unit is started with:
+
+```text
+systemd-run --unit=pb-lane-build.service --slice=system.slice \
+  --service-type=exec --uid=<uid> --working-directory=<root> \
+  --expand-environment=no --quiet --property=RemainAfterExit=yes \
+  --property=RuntimeMaxSec=<timeoutSeconds> --property=TimeoutStopSec=30 \
+  --property=NoNewPrivileges=yes --property=LimitCORE=0 \
+  --property=StandardInput=file:/run/projectbuddy-lane/secrets \
+  -- /usr/bin/python3 /run/projectbuddy-lane/supervisor.py phase build
+```
+
+The fetch unit differs only in its name, `pb-lane-fetch.service`, its own
+phase's `timeoutSeconds`, `StandardInput=null`, and `phase fetch`. Each
+property has one purpose:
+
+- `--service-type=exec` makes `systemd-run` return only after systemd has
+  started the phase runner, so after it has opened the standard input. It
+  opens it as root, before it changes to the workload account, so the
+  secrets file can stay closed to that account, and the supervisor deletes
+  it as soon as `systemd-run` returns.
+- `RemainAfterExit=yes` keeps a unit whose runner ended cleanly loaded, as
+  `active` and `exited`. systemd counts an exit 0 as clean, and also a death
+  by `SIGHUP`, `SIGINT`, `SIGTERM`, or `SIGPIPE`. A nonzero exit, any other
+  signal, or the timeout leaves the unit `failed`, which systemd also keeps.
+  Either way the launcher can read the result, which it takes from how the
+  runner ended, not from whether systemd counted that clean.
+- `RuntimeMaxSec` is the phase's `timeoutSeconds`. When it passes, systemd
+  stops the unit with the result `timeout`, and kills what is left after
+  `TimeoutStopSec`, 30 seconds.
+- `NoNewPrivileges=yes` means no step gains privileges, through `sudo` or
+  any other setuid program.
+- `LimitCORE=0` sets every step's core file size limit to 0, so the kernel
+  writes no core file of a step's memory, which holds the secrets. When the
+  kernel's `core_pattern` pipes to a crash handler instead, that handler
+  decides whether to keep a copy; either way the copy stays in the guest,
+  which teardown deletes.
+- `--expand-environment=no` keeps systemd from expanding `$` in the
+  command, and `--working-directory` starts every step in `root`.
+
+The secrets never reach a unit through `StandardInputData=`, which any
+local account can read as a unit property, or through `systemd-run --pipe`,
+which does not wait for the unit to start. A step's standard output and
+error go to the journal.
+
+The phase runner, the `phase` mode:
+
+1. reads its whole standard input and closes it. That payload is one
+   `NAME=VALUE` followed by a NUL byte for each declared secret, in declared
+   order, and nothing else; the fetch unit's payload is empty. A payload that
+   does not match refuses before any step, and the refusal never holds a
+   value;
+2. runs each step with no shell, its standard input from `/dev/null`, and
+   its own environment plus the secrets;
+3. stops at the first step that does not exit 0 and exits with that step's
+   code. A step it cannot find exits 127, and a step it cannot run for any
+   other reason exits 126;
+4. when a step is killed by a signal, kills itself with the same signal, so
+   the unit's result is `killed <signal>`.
+
+As root, the supervisor:
+
+- requires the unified cgroup v2 hierarchy, `/sys/fs/cgroup/cgroup.controllers`;
+- waits until a unit is `failed`, or `active` and `exited`. A unit in any
+  other state than `active` or `deactivating` has lost its result. It gives
+  up when the phase's `timeoutSeconds` plus 30 plus 60 seconds have passed;
+- then always empties the unit's control group: it repeats
+  `systemctl kill --kill-whom=all --signal=SIGKILL -- <unit>` until
+  `/sys/fs/cgroup/system.slice/<unit>/cgroup.events` holds the line
+  `populated 0` or the group is gone, for up to 30 seconds. The kernel
+  refuses to remove a control group that holds a process, so a missing one
+  is empty. No process that a step left behind runs beside the next phase
+  or the launcher;
+- finds the guest's network interface as the only entry in
+  `/sys/class/net` that has a `device` link, and refuses unless there is
+  exactly one. The carrier is lost only when that interface's `carrier`
+  reads `0`; any other value or a read error means it may still be up. The
+  `build` mode waits up to 300 seconds for that, because the build's own
+  timeout cannot cover a wait before the build starts;
+- checks that the secrets file, `/run/projectbuddy-lane/secrets`, which the
+  engine writes while the link is on and leaves empty when no secret is
+  declared, is root's own regular file with one link and no group or other
+  access, and holds exactly the declared names. Both `start-build` and
+  `build` check it, and `build` deletes it on every path.
+
+Once the build unit's control group is empty, `build` replaces itself with
+the launcher, with one `--output` for each declared output:
+
+```text
+/usr/bin/python3 /run/projectbuddy-lane/output_disk.py --device=<device> \
+  --root=<root> --uid=<uid> --unit=pb-lane-build.service \
+  --max-output-bytes=<maxOutputBytes> --output=<output>
+```
+
+The output disk's `device` is `/dev/disk/by-id/ata-VBOX_HARDDISK_VB`, then
+the first eight hex digits of the disk's medium UUID, a `-`, and the UUID's
+last four bytes in reverse order, because VirtualBox's AHCI controller
+reports that serial. For the medium UUID
+`aabbccdd-eeff-0011-2233-445566778899` it is
+`/dev/disk/by-id/ata-VBOX_HARDDISK_VBaabbccdd-99887766`. The launcher still
+checks that it is a block device of exactly the output disk's size.
+
+A fetch step can schedule work through another service, such as `cron` or
+`at`, and that work runs outside the fetch unit's control group, so emptying
+the group does not remove it. It has no network during the build, so, like
+any fetch step, it can only change what a build step later sees. Turning
+such services off for the workload account belongs to the lane box's
+readiness check.
 
 ### The output disk
 

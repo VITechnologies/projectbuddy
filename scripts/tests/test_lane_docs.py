@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lane import cli, common, declaration, output_disk, outputs, plan, teardown  # noqa: E402
+from lane import cli, common, declaration, output_disk, outputs, plan, supervisor, teardown  # noqa: E402
 from lane_box.toolchain import PROBE_TIMEOUT  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -30,6 +30,13 @@ def table(heading: str) -> list[list[str]]:
 
 def names(cell: str) -> list[str]:
     return re.findall(r"`([^`]+)`", cell)
+
+
+def code_blocks(heading: str, until: str) -> list[str]:
+    """The text code blocks between ``heading`` and ``until``, each with its line continuations joined."""
+    section = PROCEDURE.split(heading, 1)[1].split(until, 1)[0]
+    blocks = re.findall(r"```text\n(.*?)\n```", section, re.S)
+    return [" ".join(block.replace("\\\n", " ").split()) for block in blocks]
 
 
 def commands() -> dict[str, argparse.ArgumentParser]:
@@ -176,3 +183,64 @@ def test_the_output_disk_is_documented():
     properties = UNWRAPPED.split("reads the build unit's", 1)[1].split("with `systemctl show`", 1)[0]
     assert tuple(names(properties)) == output_disk.UNIT_PROPERTIES
     assert output_disk.header("a", 0)[100:108] == b"0000600\0" and "mode 0600, owner and group 0" in UNWRAPPED
+
+
+def test_the_guest_phases_are_documented():
+    modes = next(action for action in supervisor.build_parser()._actions
+                 if isinstance(action, argparse._SubParsersAction)).choices
+    assert [names(row[0])[0] for row in table("| Mode | Runs as | What it does |")] == list(modes)
+    assert supervisor.GUEST_PHASES == plan.GUEST_PHASES == ("fetch", "build")
+    assert f"`{supervisor.DIRECTORY}`" in PROCEDURE and f"`{supervisor.SPEC_NAME}`" in PROCEDURE
+    assert f"(`{supervisor.SPEC_SCHEMA}`) holds exactly these fields" in UNWRAPPED
+    fields = [names(row[0])[0] for row in table(f"`{supervisor.SPEC_SCHEMA}`) holds exactly these fields")]
+    assert fields == list(supervisor.SPEC_FIELDS)
+    assert all(f"`{field}`" in UNWRAPPED for field in supervisor.PHASE_FIELDS)
+    assert f"starts `{supervisor.UNITS['fetch']}`" in UNWRAPPED
+    assert f"starts `{supervisor.UNITS['build']}`" in UNWRAPPED
+    assert f"in `{supervisor.SUPERVISOR_UNIT}`" in UNWRAPPED
+    assert f"transient unit in `{supervisor.SLICE}`" in UNWRAPPED
+
+
+def test_the_guest_unit_commands_are_the_code():
+    blocks = code_blocks("### Guest phases", "### The output disk")
+    spec = SimpleNamespace(root="<root>", device="<device>", max_output_bytes="<maxOutputBytes>",
+                           outputs=("<output>",), fetch=SimpleNamespace(timeout="<fetchTimeout>"),
+                           build=SimpleNamespace(timeout="<timeoutSeconds>"))
+    build = supervisor.phase_unit_argv(spec, "build", supervisor.DIRECTORY, "<uid>")
+    launcher = supervisor.launcher_argv(spec, supervisor.DIRECTORY, "<uid>")
+    assert blocks == [" ".join(build), " ".join(launcher)]
+    fetch = supervisor.phase_unit_argv(spec, "fetch", supervisor.DIRECTORY, "<uid>")
+    differences = [(ours, theirs) for ours, theirs in zip(fetch, build) if ours != theirs]
+    assert len(fetch) == len(build) and differences == [
+        (f"--unit={supervisor.UNITS['fetch']}", f"--unit={supervisor.UNITS['build']}"),
+        ("--property=RuntimeMaxSec=<fetchTimeout>", "--property=RuntimeMaxSec=<timeoutSeconds>"),
+        ("--property=StandardInput=null", f"--property=StandardInput=file:{supervisor.DIRECTORY}/secrets"),
+        ("fetch", "build")]
+    assert f"`{supervisor.UNITS['fetch']}`, its own phase's `timeoutSeconds`, `StandardInput=null`, and " \
+           "`phase fetch`" in UNWRAPPED
+    started = " ".join(supervisor.supervisor_unit_argv(supervisor.DIRECTORY))
+    assert started == ("systemd-run --unit=pb-lane-supervisor.service --slice=system.slice --service-type=exec "
+                       "--expand-environment=no --quiet --property=TimeoutStopSec=30 -- /usr/bin/python3 "
+                       "/run/projectbuddy-lane/supervisor.py build")
+    assert f"`{' '.join(supervisor.kill_argv('<unit>'))}`" in UNWRAPPED
+    assert "with one `--output` for each declared output" in UNWRAPPED
+
+
+def test_the_guest_rules_are_documented():
+    assert supervisor.STOP_TIMEOUT == 30 and "after `TimeoutStopSec`, 30 seconds" in UNWRAPPED
+    assert supervisor.BACKSTOP_MARGIN == 60 and "`timeoutSeconds` plus 30 plus 60 seconds" in UNWRAPPED
+    assert supervisor.EMPTY_TIMEOUT == 30 and "`populated 0` or the group is gone, for up to 30 seconds" in UNWRAPPED
+    assert supervisor.CARRIER_TIMEOUT == 300 and "waits up to 300 seconds for that" in UNWRAPPED
+    assert supervisor.NOT_FOUND == 127 and "A step it cannot find exits 127" in UNWRAPPED
+    assert supervisor.NOT_EXECUTABLE == 126 and "other reason exits 126" in UNWRAPPED
+    assert supervisor.UNIT_RUNNING == ("active", "deactivating")
+    assert "other state than `active` or `deactivating` has lost its result" in UNWRAPPED
+    assert f"`{supervisor.SLICE}/<unit>/cgroup.events`" in UNWRAPPED.replace("/sys/fs/cgroup/", "")
+    assert "only entry in `/sys/class/net` that has a `device` link" in UNWRAPPED
+    assert f"`{supervisor.DIRECTORY}/{supervisor.SECRETS_NAME}`" in UNWRAPPED
+    assert "`NAME=VALUE` followed by a NUL byte for each declared secret, in declared order" in UNWRAPPED
+    assert "mode 0755" in UNWRAPPED and "with mode 0644" in UNWRAPPED
+    uuid = "aabbccdd-eeff-0011-2233-445566778899"
+    assert f"`{plan.OUTPUT_DEVICE_PREFIX}`" in UNWRAPPED
+    assert f"medium UUID `{uuid}` it is `{plan.output_device(uuid)}`" in UNWRAPPED
+    assert "the [guest supervisor](#guest-phases) and the output disk's launcher and reader" in UNWRAPPED
