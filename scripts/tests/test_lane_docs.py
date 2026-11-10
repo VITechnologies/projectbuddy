@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
+import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lane import channel, cli, common, declaration, output_disk, outputs, plan, supervisor, teardown  # noqa: E402
+from lane import (channel, cli, common, declaration, output_disk, outputs, placement, plan,  # noqa: E402
+                  supervisor, teardown)
 from vagrant_clone import guest as clone_guest  # noqa: E402
 from lane_box.toolchain import PROBE_TIMEOUT  # noqa: E402
 
@@ -244,8 +247,8 @@ def test_the_guest_rules_are_documented():
     uuid = "aabbccdd-eeff-0011-2233-445566778899"
     assert f"`{plan.OUTPUT_DEVICE_PREFIX}`" in UNWRAPPED
     assert f"medium UUID `{uuid}` it is `{plan.output_device(uuid)}`" in UNWRAPPED
-    assert ("apart from the [SSH channel](#the-ssh-channel), the [guest supervisor](#guest-phases), and the "
-            "output disk's launcher and reader") in UNWRAPPED
+    assert ("apart from the [SSH channel](#the-ssh-channel), the [workload placement](#workload-placement) steps, "
+            "the [guest supervisor](#guest-phases), and the output disk's launcher and reader") in UNWRAPPED
 
 
 def test_the_client_key_property_is_documented():
@@ -257,7 +260,7 @@ def test_the_client_key_property_is_documented():
 
 
 def test_the_ssh_channel_is_the_code(tmp_path):
-    [block] = code_blocks("### The SSH channel", "### Guest phases")
+    [block] = code_blocks("### The SSH channel", "### Workload placement")
     session = channel.Session(channel.Guest(Path("/RUNDIR"), 2222, "SHA256:" + "A" * 43))
     argv = " ".join(session.argv).replace("/RUNDIR", "<run directory>").replace(" 2222 ", " <port> ")
     assert block == f"{argv} <command>"
@@ -283,3 +286,93 @@ def test_the_ssh_channel_is_the_code(tmp_path):
     assert f"`[{clone_guest.GUEST_HOST}]:<port> ssh-ed25519 <key>`" in UNWRAPPED
     assert f"refuses a run directory that already has a `{channel.KNOWN_HOSTS}` file" in UNWRAPPED
     assert channel.ACCOUNT == "root" and "runs `id -u` as root" in UNWRAPPED
+
+
+class Recorder:
+    """A session that records each guest command and answers it from ``answers``, in order, by first word."""
+
+    def __init__(self, answers: dict[str, list[tuple[int, str]]] | None = None):
+        self.calls: list[list[str]] = []
+        self.answers = answers or {}
+
+    def command(self, argv, timeout, stdin=None):
+        self.calls.append(list(argv))
+        return self.answers.get(argv[0], []).pop(0) if self.answers.get(argv[0]) else (0, "")
+
+
+def recorded(step, *arguments, answers=None) -> list[str]:
+    """Each command ``step`` sends before it ends, as the procedure shows it."""
+    session = Recorder(answers)
+    try:
+        step(session, *arguments)
+    except common.LaneBoxError:
+        pass
+    return [" ".join(shlex.quote(word) for word in argv) for argv in session.calls]
+
+
+def test_the_workload_placement_is_the_code(tmp_path):
+    useradd, transfer, install, secrets = code_blocks("### Workload placement", "### Guest phases")
+    line = "pb-workload:x:1000:1000::/home/pb-workload:/usr/sbin/nologin\n"
+    getent, created, _, tee, grep_cron, grep_at = recorded(
+        placement.create_account, answers={"getent": [(placement.GETENT_NOT_FOUND, ""), (0, line)]})
+    assert useradd == created
+    assert placement.GETENT_NOT_FOUND == 2 and f"`{getent}` to exit 2" in UNWRAPPED
+    account = re.search(r"`(pb-workload:x:<uid>:<gid>:[^`]*)`", UNWRAPPED).group(1)
+    assert placement.ACCOUNT_LINE.fullmatch(account.replace("<uid>", "1000").replace("<gid>", "1000") + "\n")
+    assert not placement.ACCOUNT_LINE.fullmatch(account.replace("<uid>", "0").replace("<gid>", "1000") + "\n")
+    assert tee == f"tee --append -- {' '.join(placement.DENY_FILES)}"
+    assert f"`{placement.DENY_FILES[0]}` and `{placement.DENY_FILES[1]}` with `tee --append`" in UNWRAPPED
+    assert grep_cron.startswith("grep --fixed-strings --line-regexp ") and grep_at.endswith(placement.DENY_FILES[1])
+    assert "checks each file with `grep --fixed-strings --line-regexp`" in UNWRAPPED
+
+    tool = {"name": "t", "probe": {"argv": ["<argv>"], "pattern": "(.*)", "expected": "1"}}
+    [probe] = recorded(placement.probe, tool)
+    assert f"runs `{probe.replace(shlex.quote('<argv>'), '<argv>')}`, for up to 60 seconds" in UNWRAPPED
+
+    archive = tmp_path / placement.CANDIDATE_ARCHIVE
+    archive.write_bytes(b"")
+    assert transfer == " ".join(recorded(placement.transfer_candidate, archive))
+    assert placement.TRANSFER_TIMEOUT == 1800 and "from standard input, for up to 1800 seconds" in UNWRAPPED
+    assert f"to `{placement.CANDIDATE_ARCHIVE}` in the run directory, as a new file with mode 600" in UNWRAPPED
+    assert f"spec's `root` is the declared working directory in `{placement.CANDIDATE_DIRECTORY}`" in UNWRAPPED
+    arguments = []
+    original = placement._git
+    placement._git = lambda git, repository, args, data=b"": arguments.append(args) or b""
+    try:
+        placement.tree_entries("git", tmp_path, "0" * 40)
+        placement.blobs("git", tmp_path, [])
+    finally:
+        placement._git = original
+    assert arguments == [["ls-tree", "-r", "-t", "-z", "--full-tree", "0" * 40], ["cat-file", "--batch"]]
+    assert "from `git ls-tree -r -t -z --full-tree` and `git cat-file --batch`" in UNWRAPPED
+    assert "git runs with `--no-replace-objects` and without the caller's `GIT_*` variables" in UNWRAPPED
+    assert placement.TAR_MODES == {placement.TREE: 0o755, placement.FILE: 0o644, placement.EXECUTABLE: 0o755,
+                                   placement.SYMLINK: 0o777}
+    assert ("mode 0644 or 0755 for a file, by its executable bit, 0755 for a directory, and 0777 for a symbolic "
+            "link") in UNWRAPPED
+
+    disk = plan.output_disk(Path("/RUNDIR"), 1)
+    slot = f"{disk['controller']}-{disk['port']}-{disk['device']}"
+    assert f"the plan attaches the disk at, `{slot}`" in UNWRAPPED
+    assert f"The medium in `{disk['controller']}-ImageUUID-{disk['port']}-{disk['device']}`" in UNWRAPPED
+    mkdir, *installs, checked = recorded(placement.place_guest_files, placement.guest_files(b"{}"))
+    assert f"It then runs `{mkdir}`, which fails when the directory exists" in UNWRAPPED
+    assert [command.rsplit("/", 1)[0] + "/<file>" for command in installs] == [install] * 3
+    shown_stat = f"stat --printf={shlex.quote(placement.STAT_FORMAT)}"
+    assert shlex.split(checked)[:3] == [*shlex.split(shown_stat), "--"] and f"`{shown_stat}`" in UNWRAPPED
+    assert (int(placement.GUEST_DIRECTORY_MODE, 16), int(placement.GUEST_FILE_MODE, 16),
+            int(placement.SECRETS_MODE, 16)) == (stat.S_IFDIR | 0o755, stat.S_IFREG | 0o644, stat.S_IFREG | 0o600)
+
+    [fetch] = recorded(placement.run_fetch, SimpleNamespace(fetch=SimpleNamespace(timeout=1)))
+    assert f"`await-fetch` runs `{fetch}` for up to the fetch timeout plus 300 seconds" in UNWRAPPED
+    assert plan.HOST_DEADLINE_GRACE == 300 and "requires exit 0 and the output `fetch: exited 0`" in UNWRAPPED
+
+    [placed, _] = recorded(placement.place_secrets, [], {})
+    assert secrets == placed
+    assert "`NAME=VALUE` followed by a NUL byte for each declared secret, in declared order" in UNWRAPPED
+
+    [start] = recorded(placement.start_build)
+    assert placement.START_BUILD_TIMEOUT == 180
+    assert f"`start-build` runs `{start}` while the link is on, for up to 180 seconds" in UNWRAPPED
+    assert f"the output `start-build: {supervisor.SUPERVISOR_UNIT} started`" in UNWRAPPED
+    assert placement.QUERY_TIMEOUT == 60 and "times out after 60 seconds unless this section gives" in UNWRAPPED
