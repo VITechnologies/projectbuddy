@@ -362,11 +362,11 @@ unchanged. See the [Ubuntu lane box procedure](ubuntu-lane-box.md).
 ### Ubuntu lane plan and teardown (`scripts/Invoke-Lane.py`)
 
 The lane plan is a dry run. It checks a consumer's workload declaration
-(`projectbuddy/lane-workload@1`), the lane box against its receipt, the
+(`projectbuddy/lane-workload@2`), the lane box against its receipt, the
 candidate commit, the declared secret names, the engine checkout, earlier
 lane records, and the host, using read-only queries only. It writes a
-`projectbuddy/lane-plan@1` plan that names each refusal's rule, the
-generated Vagrantfile, and the ordered steps of a run.
+`projectbuddy/lane-plan@2` plan that names each refusal's rule, the
+generated Vagrantfile, the run's output disk, and the ordered steps of a run.
 
 Lane teardown removes one disposable lane instance by VM UUID. It powers off
 only from `running` or `paused`, deletes only from `poweroff` or `aborted`,

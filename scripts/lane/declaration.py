@@ -1,9 +1,10 @@
-"""Lane workload declaration (``projectbuddy/lane-workload@1``): REQ-090, REQ-091, and REQ-093 checks.
+"""Lane workload declaration (``projectbuddy/lane-workload@2``): REQ-090, REQ-091, REQ-093, and REQ-106 checks.
 
-A declaration is data: one argument vector, the full candidate commit, a working directory, a
-timeout, inputs, outputs, secret names, and a toolchain contract. ``load_declaration`` checks it
-offline and returns every refusal it finds. Its digest is the SHA-256 of its RFC 8785 canonical
-form, so the same content gives the same digest however the file is formatted.
+A declaration is data: the full candidate commit, a working directory, a fetch phase and a build
+phase of argument vectors with a timeout each, inputs, outputs and their byte limit, secret names,
+and a toolchain contract. ``load_declaration`` checks it offline and returns every refusal it finds.
+Its digest is the SHA-256 of its RFC 8785 canonical form, so the same content gives the same digest
+however the file is formatted.
 """
 from __future__ import annotations
 
@@ -17,9 +18,12 @@ from lane_box.profile import NAME_PATTERN, _check_fields, _check_probe
 
 from .common import Refusal
 
-WORKLOAD_SCHEMA = "projectbuddy/lane-workload@1"
-FIELDS = ("schema", "commit", "workingDirectory", "argv", "timeoutSeconds", "inputs", "outputs", "secrets",
-          "toolchain")
+WORKLOAD_SCHEMA = "projectbuddy/lane-workload@2"
+# REQ-106 split @1's single argument vector into a fetch and a build phase; @1 has no network boundary.
+RETIRED_SCHEMAS = ("projectbuddy/lane-workload@1",)
+FIELDS = ("schema", "commit", "workingDirectory", "fetch", "build", "inputs", "outputs", "maxOutputBytes",
+          "secrets", "toolchain")
+PHASE_FIELDS = ("steps", "timeoutSeconds")
 CONTRACT_FIELDS = ("name", "probe")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 SECRET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -28,8 +32,8 @@ FORBIDDEN_OUTPUT = re.compile(r".*\.(?:vdi|vmdk|vhd|vhdx|sav|vbox)|known_hosts",
 # RFC 8785 serializes numbers as IEEE 754 doubles; larger integers would lose precision.
 SAFE_INTEGER = 2 ** 53 - 1
 DECLARATION_RULES = (
-    "declaration-json", "declaration-fields", "commit", "argv", "working-directory", "timeout", "input-path",
-    "output-path", "output-forbidden", "secret-name", "toolchain",
+    "declaration-json", "declaration-fields", "commit", "phase", "argv", "timeout", "working-directory",
+    "input-path", "output-path", "output-forbidden", "output-size", "secret-name", "toolchain",
 )
 
 
@@ -38,13 +42,20 @@ class NotCanonical(ValueError):
 
 
 @dataclass(frozen=True)
+class Phase:
+    steps: tuple[tuple[str, ...], ...]
+    timeout: int
+
+
+@dataclass(frozen=True)
 class Declaration:
     commit: str
     working_directory: str
-    argv: tuple[str, ...]
-    timeout: int
+    fetch: Phase
+    build: Phase
     inputs: tuple[str, ...]
     outputs: tuple[str, ...]
+    max_output_bytes: int
     secrets: tuple[str, ...]
     toolchain: tuple[dict, ...]
     sha256: str
@@ -142,30 +153,54 @@ def _check_toolchain(value: object, refusals: list[Refusal]) -> tuple[dict, ...]
     return () if errors else tuple(value)
 
 
+def _positive(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int) and value > 0
+
+
+def _check_phase(value: object, name: str, minimum: int, refusals: list[Refusal]) -> Phase | None:
+    """REQ-106: a phase is ``steps``, a list of argument vectors, and a positive ``timeoutSeconds``."""
+    if not isinstance(value, dict):
+        refusals.append(Refusal("phase", f"{name} must be an object with steps and timeoutSeconds"))
+        return None
+    errors: list[str] = []
+    _check_fields(value, PHASE_FIELDS, name, errors)
+    found = [Refusal("phase", error) for error in errors]
+    steps = value.get("steps")
+    if not isinstance(steps, list) or len(steps) < minimum:
+        found.append(Refusal("phase", f"{name}.steps must be a list of at least {minimum} argument vectors"))
+        steps = []
+    for index, argv in enumerate(steps):
+        if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
+            found.append(Refusal("argv", f"{name}.steps[{index}] must be a non-empty argument vector (a list of "
+                                         "non-empty strings), not one shell string"))
+    if not _positive(value.get("timeoutSeconds")):
+        found.append(Refusal("timeout", f"{name}.timeoutSeconds must be a positive integer"))
+    refusals.extend(found)
+    return None if found else Phase(steps=tuple(tuple(argv) for argv in steps), timeout=value["timeoutSeconds"])
+
+
 def check_declaration(data: object, digest: str) -> tuple[Declaration | None, list[Refusal]]:
-    """Every REQ-090, REQ-091, and REQ-093 rule ``data`` breaks, and the declaration if it breaks none."""
+    """Every REQ-090, REQ-091, REQ-093, and REQ-106 rule ``data`` breaks, and the declaration if it breaks none."""
     if not isinstance(data, dict):
         return None, [Refusal("declaration-json", "the declaration must be a JSON object")]
     refusals: list[Refusal] = []
     errors: list[str] = []
     _check_fields(data, FIELDS, "declaration", errors)
-    if data.get("schema") != WORKLOAD_SCHEMA:
+    if data.get("schema") in RETIRED_SCHEMAS:
+        errors.append(f"schema {data['schema']} is retired; use {WORKLOAD_SCHEMA}, which splits the workload "
+                      "into a fetch phase and a build phase (REQ-106)")
+    elif data.get("schema") != WORKLOAD_SCHEMA:
         errors.append(f"schema must be {WORKLOAD_SCHEMA}")
     refusals.extend(Refusal("declaration-fields", error) for error in errors)
     commit = data.get("commit")
     if not isinstance(commit, str) or not COMMIT_PATTERN.fullmatch(commit):
         refusals.append(Refusal("commit", "commit must be a full 40-digit lowercase commit SHA, "
                                           "not a branch, a tag, or an abbreviated SHA"))
-    argv = data.get("argv")
-    if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
-        refusals.append(Refusal("argv", "argv must be a non-empty argument vector (a list of non-empty "
-                                        "strings), not one shell string"))
+    fetch = _check_phase(data.get("fetch"), "fetch", 0, refusals)
+    build = _check_phase(data.get("build"), "build", 1, refusals)
     problem = relative_path(data.get("workingDirectory"), "workingDirectory", allow_root=True)
     if problem:
         refusals.append(Refusal("working-directory", problem))
-    timeout = data.get("timeoutSeconds")
-    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
-        refusals.append(Refusal("timeout", "timeoutSeconds must be a positive integer"))
     inputs = _strings(data.get("inputs"), "inputs", "input-path", refusals)
     for item in inputs:
         problem = relative_path(item, "input")
@@ -179,16 +214,19 @@ def check_declaration(data: object, digest: str) -> tuple[Declaration | None, li
         elif FORBIDDEN_OUTPUT.fullmatch(pathlib.PurePosixPath(item).name):
             refusals.append(Refusal("output-forbidden", f"output {item!r} names a VM disk, saved state, VM "
                                                         "settings, or known-hosts file"))
+    max_output_bytes = data.get("maxOutputBytes")
+    if not _positive(max_output_bytes):
+        refusals.append(Refusal("output-size", "maxOutputBytes must be a positive integer"))
     secrets = _strings(data.get("secrets"), "secrets", "secret-name", refusals)
     for name in secrets:
         if not SECRET_NAME.fullmatch(name):
             refusals.append(Refusal("secret-name", f"secret name {name!r} must match {SECRET_NAME.pattern}"))
     toolchain = _check_toolchain(data.get("toolchain"), refusals)
-    if refusals:
+    if refusals or fetch is None or build is None:
         return None, refusals
     return Declaration(
-        commit=commit, working_directory=data["workingDirectory"], argv=tuple(argv), timeout=timeout,
-        inputs=inputs, outputs=outputs, secrets=secrets, toolchain=toolchain, sha256=digest,
+        commit=commit, working_directory=data["workingDirectory"], fetch=fetch, build=build, inputs=inputs,
+        outputs=outputs, max_output_bytes=max_output_bytes, secrets=secrets, toolchain=toolchain, sha256=digest,
     ), []
 
 

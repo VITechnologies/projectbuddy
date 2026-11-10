@@ -1,13 +1,31 @@
 {
-  "schema": "projectbuddy/lane-workload@1",
+  "schema": "projectbuddy/lane-workload@2",
   "commit": "0000000000000000000000000000000000000000",
   "workingDirectory": ".",
-  "argv": [
-    "npm",
-    "run",
-    "package"
-  ],
-  "timeoutSeconds": 1800,
+  "fetch": {
+    "steps": [
+      [
+        "npm",
+        "ci",
+        "--ignore-scripts"
+      ]
+    ],
+    "timeoutSeconds": 900
+  },
+  "build": {
+    "steps": [
+      [
+        "npm",
+        "rebuild"
+      ],
+      [
+        "npm",
+        "run",
+        "package"
+      ]
+    ],
+    "timeoutSeconds": 1800
+  },
   "inputs": [
     "package.json",
     "package-lock.json"
@@ -15,6 +33,7 @@
   "outputs": [
     "dist/package.tgz"
   ],
+  "maxOutputBytes": 67108864,
   "secrets": [],
   "toolchain": [
     {
