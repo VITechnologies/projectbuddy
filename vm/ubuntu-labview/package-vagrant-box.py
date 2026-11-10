@@ -339,8 +339,8 @@ def main() -> int:
         vagrant, "package", "--base", expected_vm_uuid,
         "--output", str(arguments.output), "--vagrantfile", str(embedded_vagrantfile),
     ]
-    # REQ-105: the scan covers the state that gets packaged, and the packager powers the VM off itself, so the
-    # guest cannot change between the scan and power-off.
+    # REQ-105: scan the boot that gets packaged. The packager starts nothing in the guest between the scan and its
+    # own power-off; the scan cannot see what a process already running in the guest writes before shutdown ends.
     target = guest.Guest(uuid=expected_vm_uuid, ssh_port=arguments.ssh_port, fingerprint=fingerprint,
                          password_file=arguments.guest_password_file, vboxmanage=vboxmanage)
     try:

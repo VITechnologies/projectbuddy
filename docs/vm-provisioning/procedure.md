@@ -336,9 +336,11 @@ A runner unit or configuration file, or any failed step, stops the packager
 with exit code `2` before it changes anything; the VM keeps running. A clean
 scan prints `runner_scan=clean boot_id=<boot ID>` in the plan. With `--run`,
 the packager then shuts the guest down itself with `sudo systemctl poweroff`,
-falling back to the ACPI power button, so nothing changes in the guest between
-the scan and packaging. It stops with exit code `1` unless VirtualBox then
-reports the same VM `poweroff` at the scanned snapshot.
+falling back to the ACPI power button, and starts nothing in the guest between
+the scan and the shutdown. The scan cannot see what a process already running
+in the guest writes before the shutdown ends. The packager stops with exit code
+`1` unless VirtualBox then reports the same VM `poweroff` at the scanned
+snapshot.
 
 The receipt's `runnerScan` block records the scan: `bootId`, the empty
 `runnerUnits` and `runnerConfigurations` lists, the `skippedRoots`, and
