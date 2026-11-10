@@ -419,7 +419,8 @@ def build(system: System) -> list[str]:
         uid = workload_uid(system, spec)
         require_cgroup2(system)
         interface = carrier_interface(system)
-        print(f"build: waiting for carrier loss on {interface}")
+        # execv discards Python's buffers, and stdout here is the journal, not a terminal.
+        print(f"build: waiting for carrier loss on {interface}", flush=True)
         wait_carrier_loss(system, interface)
         check_secrets(system, spec.secrets)
         start(system, phase_unit_argv(spec, "build", system.directory, uid), unit)

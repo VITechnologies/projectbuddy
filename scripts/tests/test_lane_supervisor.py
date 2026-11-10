@@ -501,6 +501,15 @@ def test_secrets_root_does_not_own_are_refused(tmp_path, capsys):
     assert "root's own regular file" in capsys.readouterr().err
 
 
+def test_the_build_writes_its_progress_before_the_hand_off(tmp_path, monkeypatch):
+    written = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(written, encoding="utf-8"))
+    at_exec = []
+    guest = Guest(tmp_path)
+    assert supervisor.main(["build"], guest.system(execv=lambda path, argv: at_exec.append(written.getvalue()))) == 0
+    assert at_exec == [b"build: waiting for carrier loss on enp0s3\n"]
+
+
 def test_the_build_waits_for_carrier_loss_then_hands_off_to_the_launcher(tmp_path, capsys):
     guest = Guest(tmp_path)
     assert supervisor.main(["build"], guest.system()) == 0
