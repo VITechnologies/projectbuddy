@@ -63,6 +63,14 @@ risks.
 
 See [CHANGELOG.md](CHANGELOG.md) for released versions.
 
+### Source-Derived Configuration Prototype
+
+The candidate [.NET source configuration CLI](tools/source-config/README.md)
+derives JSON/TOML drafts from a pinned checkout's existing VIPM manifest and a
+selected packed-library build. Configuration validity requires deterministic
+checks and local Ollama review; native-build proof remains separate. It does
+not register projects, overwrite existing outputs, or enable cleanup.
+
 ## What's in this engine
 
 ### VM provisioning (`vm/windows-labview/`, `vm/ubuntu-labview/`)
