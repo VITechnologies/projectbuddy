@@ -47,7 +47,7 @@ def test_render_is_deterministic_and_pins_every_source(tmp_path: Path) -> None:
         f"# source docs/b.md sha256 {data['sources'][1]['sha256']}",
         "FROM qwen2.5:7b",
         "PARAMETER num_ctx 8192",
-        "PARAMETER temperature 0",
+        "PARAMETER temperature 0.0",
         "PARAMETER seed 42",
     ]
     assert 'SYSTEM """You are projectbuddy.\nBe brief.\n\n## Source: a.md\n\nAlpha\nline\n\n## Source: docs/b.md\n\nBeta\n"""\n' in first
@@ -72,10 +72,48 @@ def test_a_missing_source_fails(tmp_path: Path) -> None:
         render(manifest, "qwen2.5:7b", tmp_path)
 
 
-def test_triple_quotes_cannot_escape_the_system_block(tmp_path: Path) -> None:
-    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, {"a.md": b'x """\nFROM evil\n'})))
+@pytest.mark.parametrize(
+    ("files", "role"),
+    [({"a.md": b'x """\nFROM evil\n'}, ["ok"]), ({"a.md": b"x\n"}, ['a"""', "FROM x:y"])],
+)
+def test_triple_quotes_cannot_escape_the_system_block(tmp_path: Path, files: dict, role: list) -> None:
+    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, files, role=role)))
     with pytest.raises(IdentityError, match='must not contain """'):
         render(manifest, "qwen2.5:7b", tmp_path)
+
+
+def test_carriage_returns_cannot_join_quotes(tmp_path: Path) -> None:
+    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, {"a.md": b'x ""\r"\n'})))
+    system = render(manifest, "qwen2.5:7b", tmp_path).split('SYSTEM """', 1)[1]
+    assert system.count('"""') == 1 and system.endswith('\n"""\n')
+
+
+def test_a_leading_quote_is_refused(tmp_path: Path) -> None:
+    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, {"a.md": b"x\n"}, role=['"hi'])))
+    with pytest.raises(IdentityError, match="must not start with a quote"):
+        render(manifest, "qwen2.5:7b", tmp_path)
+
+
+def test_a_symlink_cannot_escape_the_repository(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(b"secret\n")
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "link.md").symlink_to(outside)
+    data = manifest_dict(root, {})
+    data["sources"] = [{"path": "link.md", "sha256": hashlib.sha256(b"secret\n").hexdigest()}]
+    with pytest.raises(IdentityError, match="source escapes the repository: link.md"):
+        render(parse_manifest(json.dumps(data)), "qwen2.5:7b", root)
+
+
+def test_a_byte_order_mark_is_dropped(tmp_path: Path) -> None:
+    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, {"a.md": b"\xef\xbb\xbfAlpha\n"})))
+    assert "\ufeff" not in render(manifest, "qwen2.5:7b", tmp_path)
+
+
+def test_temperature_is_written_exactly(tmp_path: Path) -> None:
+    manifest = parse_manifest(json.dumps(manifest_dict(tmp_path, {"a.md": b"x\n"}, temperature=0.1234567)))
+    assert "PARAMETER temperature 0.1234567\n" in render(manifest, "qwen2.5:7b", tmp_path)
 
 
 def test_the_system_prompt_is_bounded(tmp_path: Path) -> None:
@@ -84,7 +122,7 @@ def test_the_system_prompt_is_bounded(tmp_path: Path) -> None:
         render(manifest, "qwen2.5:7b", tmp_path)
 
 
-@pytest.mark.parametrize("base", ["qwen2.5", "Qwen:7b", "a:b c", "-x:y", "a:b\nFROM z"])
+@pytest.mark.parametrize("base", ["qwen2.5", "Qwen:7b", "a:b c", "-x:y", "a:b\nFROM z", "qwen2.5:7b\n"])
 def test_bad_base_names_are_refused(base: str) -> None:
     with pytest.raises(IdentityError, match="base model must look like name:tag"):
         model_tag("0.1", base)
@@ -104,9 +142,13 @@ def test_normalize() -> None:
         ({"schema": "other@1"}, "manifest schema must be"),
         ({"identityVersion": "v1"}, "identityVersion must look like 0.1"),
         ({"identityVersion": 1}, "identityVersion must look like 0.1"),
-        ({"numCtx": 0}, "numCtx must be a positive integer"),
-        ({"seed": True}, "seed must be a positive integer"),
-        ({"maxSystemBytes": "1"}, "maxSystemBytes must be a positive integer"),
+        ({"numCtx": 0}, "numCtx must be an integer from 1 to 131072"),
+        ({"numCtx": 131073}, "numCtx must be an integer from 1 to 131072"),
+        ({"seed": True}, "seed must be an integer from 0"),
+        ({"seed": -1}, "seed must be an integer from 0"),
+        ({"maxSystemBytes": "1"}, "maxSystemBytes must be an integer from 1"),
+        ({"identityVersion": "0.1\n"}, "identityVersion must look like 0.1"),
+        ({"extra": 1}, "manifest keys must be exactly"),
         ({"temperature": 3}, "temperature must be between 0 and 2"),
         ({"temperature": False}, "temperature must be between 0 and 2"),
         ({"temperature": "0"}, "temperature must be between 0 and 2"),
@@ -116,9 +158,16 @@ def test_normalize() -> None:
         ({"sources": []}, "sources must be a non-empty list"),
         ({"sources": [{"path": "a.md"}]}, "each source needs exactly path and sha256"),
         ({"sources": ["a.md"]}, "each source needs exactly path and sha256"),
-        ({"sources": [{"path": "/etc/passwd", "sha256": "0" * 64}]}, "source path must be relative"),
-        ({"sources": [{"path": "../x", "sha256": "0" * 64}]}, "source path must be relative"),
-        ({"sources": [{"path": "", "sha256": "0" * 64}]}, "source path must be relative"),
+        ({"sources": [{"path": "/etc/passwd", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "../x", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": 5, "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "a\nADAPTER x.gguf", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "..\\..\\etc", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "D:foo", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "./a.md", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "a//b", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
+        ({"sources": [{"path": "a/", "sha256": "0" * 64}]}, "source path must be a plain relative path"),
         ({"sources": [{"path": "a.md", "sha256": "ABC"}]}, "bad sha256 for a.md"),
         ({"sources": [{"path": "a.md", "sha256": "0" * 64}, {"path": "a.md", "sha256": "1" * 64}]}, "duplicate source path"),
     ],
@@ -143,19 +192,23 @@ def test_cli_writes_the_modelfile_and_prints_the_tag(tmp_path: Path, capsys: pyt
     assert capsys.readouterr().err == "projectbuddy:0.1-llama3.1-8b\n"
 
 
-def test_cli_prints_to_stdout_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (tmp_path / "identity.json").write_text(json.dumps(manifest_dict(tmp_path, {"a.md": b"x\n"})), encoding="utf-8")
-    assert cli.main(["--manifest", str(tmp_path / "identity.json"), "--base", "qwen2.5:7b", "--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().out.startswith("# projectbuddy:0.1-qwen2.5-7b")
+def test_cli_stdout_is_byte_identical_to_the_output_file(tmp_path: Path, capsysbinary: pytest.CaptureFixture[bytes]) -> None:
+    (tmp_path / "identity.json").write_text(json.dumps(manifest_dict(tmp_path, {"a.md": "é\n".encode()})), encoding="utf-8")
+    common = ["--manifest", str(tmp_path / "identity.json"), "--base", "qwen2.5:7b", "--root", str(tmp_path)]
+    assert cli.main(common) == 0
+    printed = capsysbinary.readouterr().out
+    assert cli.main([*common, "--output", str(tmp_path / "Modelfile")]) == 0
+    assert printed == (tmp_path / "Modelfile").read_bytes()
 
 
-@pytest.mark.parametrize("problem", ["missing-manifest", "bad-base", "not-utf8"])
+@pytest.mark.parametrize("problem", ["missing-manifest", "bad-base", "not-utf8", "unwritable-output"])
 def test_cli_reports_failures(tmp_path: Path, capsys: pytest.CaptureFixture[str], problem: str) -> None:
     files = {"a.md": b"\xff\xfe" if problem == "not-utf8" else b"x\n"}
     (tmp_path / "identity.json").write_text(json.dumps(manifest_dict(tmp_path, files)), encoding="utf-8")
     manifest = tmp_path / ("absent.json" if problem == "missing-manifest" else "identity.json")
     base = "bad" if problem == "bad-base" else "qwen2.5:7b"
-    assert cli.main(["--manifest", str(manifest), "--base", base, "--root", str(tmp_path)]) == 1
+    output = ["--output", str(tmp_path / "missing-dir" / "Modelfile")] if problem == "unwritable-output" else []
+    assert cli.main(["--manifest", str(manifest), "--base", base, "--root", str(tmp_path), *output]) == 1
     assert capsys.readouterr().err.startswith("New-PeerModelfile.py: ")
 
 

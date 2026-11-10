@@ -18,12 +18,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         manifest = parse_manifest(args.manifest.read_text(encoding="utf-8"))
         text = render(manifest, args.base, args.root)
+        if args.output is None:
+            # Raw UTF-8 bytes keep stdout byte-identical to --output on every platform.
+            sys.stdout.buffer.write(text.encode("utf-8"))
+            sys.stdout.flush()
+        else:
+            args.output.write_text(text, encoding="utf-8", newline="\n")
     except (IdentityError, OSError, UnicodeDecodeError) as error:
         print(f"New-PeerModelfile.py: {error}", file=sys.stderr)
         return 1
-    if args.output is None:
-        sys.stdout.write(text)
-    else:
-        args.output.write_text(text, encoding="utf-8", newline="\n")
     print(model_tag(manifest.identity_version, args.base), file=sys.stderr)
     return 0
