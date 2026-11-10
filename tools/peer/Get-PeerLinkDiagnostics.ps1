@@ -179,6 +179,23 @@ Add-Section 'VirtualBox (counts only; VM names stay on this machine)' {
     Get-Process -Name VBoxSVC, VBoxSDS -IncludeUserName -ErrorAction SilentlyContinue | Format-Table Name, Id, UserName -AutoSize
 }
 
+Add-Section 'VirtualBox registries of all local profiles (counts only)' {
+    Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath } | ForEach-Object {
+        $profileDir = Get-Item -LiteralPath $_.LocalPath -ErrorAction SilentlyContinue
+        if (-not $profileDir) { return }
+        $xml = Join-Path $profileDir.FullName '.VirtualBox\VirtualBox.xml'
+        if (Test-Path -LiteralPath $xml) {
+            [xml]$doc = Get-Content -LiteralPath $xml -Raw
+            $sources = @($doc.VirtualBox.Global.MachineRegistry.MachineEntry | Where-Object { $_ -and $_.src } | ForEach-Object { $_.src })
+            $pb = @($sources | Where-Object { (Split-Path $_ -Leaf) -match '^(projectbuddy|pb-)' }).Count
+            $drives = ($sources | ForEach-Object { if ($_ -match '^([A-Za-z]):') { $Matches[1].ToUpper() } else { '?' } } | Sort-Object -Unique) -join ','
+            '{0}: registered={1} projectbuddy-prefixed={2} drives={3}' -f $profileDir.Name, $sources.Count, $pb, $drives
+        } else {
+            '{0}: no VirtualBox registry' -f $profileDir.Name
+        }
+    }
+}
+
 Add-Section 'Ollama' {
     Invoke-Native 'ollama' @('--version')
     Invoke-Native 'ollama' @('list')
