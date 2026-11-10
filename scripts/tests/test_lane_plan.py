@@ -296,7 +296,8 @@ def test_the_generated_vagrantfile_pins_the_instance_hardware_and_one_loopback_f
     hardware = value["hardware"]
     text = value["vagrantfile"]["text"]
     assert value["vagrantfile"]["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
-    assert text == plan.render_vagrantfile(name, port, hardware, value["outputDisk"])
+    public_key = f"{value['instance']['runDirectory']}/client-key.pub"
+    assert text == plan.render_vagrantfile(name, port, hardware, value["outputDisk"], public_key)
     disk = value["outputDisk"]["path"]
     for line in (
         f'config.vm.box = "{name}"', "config.vm.box_check_update = false", 'config.vm.communicator = "none"',
@@ -310,9 +311,12 @@ def test_the_generated_vagrantfile_pins_the_instance_hardware_and_one_loopback_f
         '"--variant", "Fixed"]',
         f'vb.customize ["storageattach", :id, "--storagectl", "SATA", "--port", "1", "--device", "0", "--type", "hdd", '
         f'"--medium", \'{disk}\']',
+        # #206: the run's public key, set before the first boot as a property the guest can only read.
+        f'vb.customize ["guestproperty", "set", :id, \'/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey\', '
+        f'File.read(\'{public_key}\').chomp, "--flags", "RDONLYGUEST"]',
     ):
         assert f"\n  {line}\n" in text or f"\n    {line}\n" in text, line
-    assert text.count("forwarded_port") == 1
+    assert text.count("forwarded_port") == 1 and text.count("guestproperty") == 1 and "TRANSIENT" not in text
     assert value["network"] == {"adapter": 1, "mode": "nat", "localhostReachable": False, "linkOffFrom": "build",
                                 "linkRestored": False,
                                 "sshForward": {"hostIp": "127.0.0.1", "hostPort": port, "guestPort": 22,
@@ -329,7 +333,7 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
     assert CANARY not in lane.plan_out.read_text(encoding="utf-8") + out + err
     steps = value["steps"]
     assert [step["name"] for step in steps] == [
-        "box-add", "up", "verify-instance", "connect", "check-runner-units", "probe-node", "probe-npm", "probe-git",
+        "client-key", "box-add", "up", "verify-instance", "connect", "check-runner-units", "probe-node", "probe-npm", "probe-git",
         "probe-ca-certificates", "transfer-candidate", "fetch-1", "await-fetch", "build-1", "build-2", "network-off",
         "verify-network-off", "await-poweroff", "read-outputs", "write-evidence", "teardown",
     ]
@@ -366,7 +370,7 @@ def test_the_steps_follow_the_run_sequence_and_carry_secret_names_only(lane, cap
     assert by_name["probe-node"]["argv"] == ["node", "--version"] and by_name["probe-node"]["runs"] == "guest"
     # Every VirtualBox command after `vagrant up` names the instance by its verified UUID, except the
     # read of the output disk, which names the disk at the path the Vagrantfile attaches it from.
-    assert all("{uuid}" in step["argv"] for step in steps[2:]
+    assert all("{uuid}" in step["argv"] for step in steps[[step["name"] for step in steps].index("up") + 1:]
                if step["runs"] == "host" and step["name"] != "read-outputs")
     assert by_name["read-outputs"]["argv"] == [
         str(lane.vboxmanage), "mediumio", f"--disk={value['outputDisk']['path']}", "cat", "--output=-"]
@@ -694,6 +698,9 @@ CASES = [
     Case("vagrant-version-form", rules("host-vagrant"), host(vagrant="2.4.9")),
     Case("disk-space", rules("host-disk-space"), little_disk),
     Case("port-taken", rules("ssh-port"), taken_port),
+    # #206: ssh would expand % in the client key's and known_hosts file's paths.
+    Case("run-directory-path", rules("run-directory-path"),
+         option("--work-dir", lambda lane: str(private_dir(lane.root / "work%h"))), "work%h"),
 ]
 
 
@@ -949,22 +956,23 @@ def test_check_disk_adds_needs_that_share_a_file_system(tmp_path):
 def test_render_vagrantfile_refuses_values_it_cannot_quote(tmp_path):
     hardware = box_tests.example()["virtualBox"]
     disk = plan.output_disk(tmp_path, 1)
-    for name, port, values, output in (
+    for name, port, values, output, *public_key in (
         (f'{FIXED_NAME}"', 2222, hardware, disk), (FIXED_NAME, 22, hardware, disk),
         (FIXED_NAME, 2222, dict(hardware, cpus=True), disk), (FIXED_NAME, 2222, dict(hardware, vramMb="8"), disk),
         (FIXED_NAME, 2222, hardware, dict(disk, sizeMb=0)), (FIXED_NAME, 2222, hardware, dict(disk, sizeMb=True)),
         (FIXED_NAME, 2222, hardware, dict(disk, path=None)), (FIXED_NAME, 2222, hardware, dict(disk, path="/a\nb")),
-        (FIXED_NAME, 2222, hardware, dict(disk, path="/a\x7fb")),
+        (FIXED_NAME, 2222, hardware, dict(disk, path="/a\x7fb")), (FIXED_NAME, 2222, hardware, disk, "/a\nb"),
     ):
         with pytest.raises(LaneBoxError):
-            plan.render_vagrantfile(name, port, values, output)
+            plan.render_vagrantfile(name, port, values, output, *(public_key or [str(tmp_path / "client-key.pub")]))
 
 
 def test_an_output_disk_path_is_one_ruby_single_quoted_literal(tmp_path):
     assert plan.ruby_string("/work/it's\\here/lane-output.vdi") == "'/work/it\\'s\\\\here/lane-output.vdi'"
     text = plan.render_vagrantfile(FIXED_NAME, 2222, box_tests.example()["virtualBox"],
-                                   plan.output_disk(Path("/w'k"), 1))
+                                   plan.output_disk(Path("/w'k"), 1), "/w'k/client-key.pub")
     assert text.count("'/w\\'k/lane-output.vdi'") == 2
+    assert text.count("File.read('/w\\'k/client-key.pub').chomp") == 1
 
 
 def test_host_queries_fail_closed(tmp_path, monkeypatch):

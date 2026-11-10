@@ -5,7 +5,9 @@
   phases and its output disk follow REQ-106
   (`VITechnologies/projectbuddy#200`), and the output disk's format, guest
   launcher, and host reader are fixture-tested
-  (`VITechnologies/projectbuddy#202`). None is live-proven yet. The clone
+  (`VITechnologies/projectbuddy#202`). The host's SSH channel to the
+  instance is fixture-tested and checked against a local `sshd`
+  (`VITechnologies/projectbuddy#206`). None is live-proven yet. The clone
   verifier is still to come under `VITechnologies/projectbuddy#185`.
 - Last substantive update: 2026-11-11
 - Owner: svelderrainruiz
@@ -30,7 +32,8 @@ The pieces:
 - [`scripts/Invoke-Lane.py`](../../scripts/Invoke-Lane.py): the host command
   line. It needs Python 3.11 or later on a POSIX host.
 - [`scripts/lane/`](../../scripts/lane/): the declaration, plan, teardown,
-  and receipt modules, and the output disk's guest launcher and host reader.
+  and receipt modules, the host's SSH channel, the guest supervisor, and the
+  output disk's guest launcher and host reader.
 - [`vm/ubuntu-lane/lane-workload.example.json`](../../vm/ubuntu-lane/lane-workload.example.json):
   a generic workload declaration.
 
@@ -163,6 +166,7 @@ there is none.
 | `host-vagrant` | `vagrant --version` fails or prints an unexpected form |
 | `host-disk-space` | a file system has less free space than one instance needs there |
 | `ssh-port` | the SSH forward's host port is in use |
+| `run-directory-path` | the run directory, `<work directory>/<instance name>`, does not match `/[A-Za-z0-9._/@+-]*`, so ssh would expand or split it ([the SSH channel](#the-ssh-channel)) |
 
 A plan refused by a declaration rule, `box-digest`, or `box-receipt` has no
 steps. The disk check adds up, for each file system, the box file, its
@@ -206,6 +210,17 @@ box's VM has that controller with two ports and its system disk on port 0. A
 box without that port fails `vagrant up` before the guest boots. The plan
 itself creates no disk.
 
+Before the guest first boots, the Vagrantfile also sets the run's public key,
+read from `client-key.pub` in the run directory, as the guest property
+`/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey` with the flag
+`RDONLYGUEST`. The guest cannot set a `/VirtualBox/HostInfo/` property, and
+the flag makes it read-only to the guest. The box's lane access service makes
+that key root's only authorized key
+([lane access](ubuntu-lane-box.md#3-configure-lane-access-guest-root)). Vagrant
+reads the key file when it reads the Vagrantfile, after `client-key` has
+written it, so the plan's Vagrantfile, and its `sha256`, names the file and
+not the key.
+
 Each step has a `name`, a `phase`, where it `runs` (`host`, `guest`, or
 `engine`, the lane itself), its `argv`, `cwd`, `environment`, the `secrets`
 it receives by name, and its `timeoutSeconds`. `{uuid}` in an argv is the
@@ -215,15 +230,17 @@ when the declaration's fetch phase has none. A phase's guest steps run in
 order, in one unit that the guest stops after that phase's `timeoutSeconds`
 in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
 The plan names these steps; the executor that runs them, on the host and in
-the guest, is still to come, apart from the [guest supervisor](#guest-phases)
-and the output disk's launcher and reader.
+the guest, is still to come, apart from the [SSH channel](#the-ssh-channel),
+the [guest supervisor](#guest-phases), and the output disk's launcher and
+reader.
 
 | Step | Phase | Runs | What it does |
 | --- | --- | --- | --- |
+| `client-key` | `prepare` | engine | generates the run's `ssh-ed25519` key pair, `client-key` and `client-key.pub`, in the run directory, without a passphrase and commented with the instance's name |
 | `box-add` | `prepare` | host | adds the box under the run's own `VAGRANT_HOME`, checked against its SHA-256 |
 | `up` | `prepare` | host | `vagrant up` in the run directory |
 | `verify-instance` | `prepare` | host | `VBoxManage showvminfo {uuid} --machinereadable` |
-| `connect` | `prepare` | engine | connects over SSH, accepting only the host key in the box receipt |
+| `connect` | `prepare` | engine | records the instance's host key only when its fingerprint is the box receipt's, then logs in as root with only the run's key ([the SSH channel](#the-ssh-channel)) |
 | `check-runner-units` | `prepare` | engine | lists the guest's units with `systemctl list-unit-files` and `systemctl list-units --all`, and stops the run if any is an `actions.runner.*` unit ([REQ-103](https://github.com/VITechnologies/projectbuddy/wiki/REQ-103), [clone check](ubuntu-vagrant-clone.md#runner-units)) |
 | `probe-<tool>` | `prepare` | guest | runs one declared tool probe, for up to 60 seconds |
 | `transfer-candidate` | `prepare` | engine | sends the candidate commit to the guest |
@@ -248,6 +265,64 @@ no secret-bearing process ever has the network.
 Host queries time out after 120 seconds, `git` after 120 seconds, and
 `box-add`, `up`, and `read-outputs` after 1800 seconds each.
 
+### The SSH channel
+
+The SSH channel
+([`scripts/lane/channel.py`](../../scripts/lane/channel.py)) runs the
+`client-key`, `connect`, and `check-runner-units` steps, and every later
+command the engine runs in the guest. It reaches the instance only through
+the SSH forward on `127.0.0.1`.
+
+Every clone of a lane box has the box's SSH host key, so the host key alone
+does not tell instances apart. The instance is bound by the client key
+instead: only the instance whose host-reserved property holds this run's
+public key accepts this run's private key, and only the host can set that
+property. A session that logs in therefore reaches this run's instance and no
+other.
+
+`client-key` refuses a run directory that is not an absolute directory whose
+group and others have no access, or that already has either key file. It runs
+`ssh-keygen -q -t ed25519 -N "" -C <instance name> -f <run directory>/client-key`,
+for up to 60 seconds, and accepts the result only when the private key is a
+regular file with one link, owned by the lane's account, that gives its
+group and others no access, as ssh itself requires, and the public key is one `ssh-ed25519` key commented with the
+instance's name. Teardown deletes the run directory, and the key with it.
+
+`connect` first records the instance's host key. It refuses a run directory
+that already has a `known_hosts` file, then runs
+[`enroll-ssh-host-key.py`](../../vm/ubuntu-labview/enroll-ssh-host-key.py)
+against the forward with the box receipt's fingerprint, up to 30 times, 5
+seconds apart, for up to 20 seconds each, until it succeeds. The resulting
+`known_hosts` must hold exactly one line, `[127.0.0.1]:<port> ssh-ed25519
+<key>`, whose fingerprint is the box receipt's. `connect` then runs `id -u`
+as root, retrying up to 12 times, 5 seconds apart, while ssh itself fails
+with exit code 255, because the guest's lane access service runs before
+`ssh.service`. The run continues only when `id -u` exits 0 and prints `0`.
+
+Every guest command runs on the host without a shell, as:
+
+```text
+ssh -F none -p <port> -o IdentityFile=<run directory>/client-key -o UserKnownHostsFile=<run directory>/known_hosts -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o UpdateHostKeys=no -o CheckHostIP=no -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ControlMaster=no -o ControlPath=none -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o RequestTTY=no -o ConnectTimeout=10 -- root@127.0.0.1 <command>
+```
+
+`<command>` is the command's words quoted for a POSIX shell and joined into
+one string, which root's shell in the guest reads; a command with no word, or
+with an empty word, is refused. The choices that matter:
+
+- `-F none` ignores every ssh configuration file, and `-o IdentityFile=`
+  names the run's key. ssh drops a `-i` file that it cannot read and then
+  offers `~/.ssh`'s default keys; with `IdentitiesOnly=yes` and the option
+  form it offers only the run's key.
+- `--` ends the options. ssh reads options after the destination too, so
+  without it a command could be read as one.
+- ssh expands `%` tokens and a leading `~` in `IdentityFile` and
+  `UserKnownHostsFile`, and splits an option's value at whitespace and
+  quotes. The `run-directory-path` rule therefore refuses any run directory
+  that does not match `/[A-Za-z0-9._/@+-]*`.
+
+`connect`'s login and `check-runner-units`' queries time out after 60
+seconds each.
+
 ### Guest phases
 
 The guest supervisor
@@ -259,11 +334,10 @@ The engine places both files in `/run/projectbuddy-lane`, which root owns
 with mode 0755, beside the run's spec, `lane-guest.json`, with mode 0644, so
 the workload account can read them but not change them. Only root can create
 an entry in `/run`, so the workload account cannot claim that directory
-first. Outside a lane guest every mode changes nothing and exits 2. The host
-side, which writes the spec and the secrets file and runs these modes over
-SSH, is still to come. The box accepts those SSH logins only as root and only
-with the key that the host sets before the instance boots
-([lane access](ubuntu-lane-box.md#3-configure-lane-access-guest-root)).
+first. Outside a lane guest every mode changes nothing and exits 2. The
+engine runs these modes as root over the [SSH channel](#the-ssh-channel). The
+host side that writes the spec and the secrets file and runs the modes is
+still to come (`VITechnologies/projectbuddy#206`).
 
 | Mode | Runs as | What it does |
 | --- | --- | --- |
