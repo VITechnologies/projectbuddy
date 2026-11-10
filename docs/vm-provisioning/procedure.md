@@ -276,11 +276,16 @@ that independently re-checks it (`verify-base-receipt.py`,
 `verify-public-provisioning-receipt.py`, `verify-vagrant-box-receipt.py`,
 `verify-vagrant-clone-receipt.py`) -- mirroring `vm-fleet-status.yml`'s
 "never trust a self-reported status alone" discipline for the Windows
-family. The intended `package-build` transition has no dedicated
-receipt verifier of its own (`package-vagrant-box.py` validates its
-*input* vagrant-box receipt via `verify-vagrant-box-receipt.py`, but
-produces no independently-reverifiable receipt of its own output) -- a
-real gap, not yet resolved.
+family. The `package-build` transition's report
+(`projectbuddy/linux-vip-package-proof@1`, written by the consumer-vendored
+`build-vip-package.sh`) has no dedicated verifier script --
+`package-vagrant-box.py` checks it inline (schema, outcome, VM and base
+snapshot identity, and the package's file, SHA-256, name, version, and
+status) before it packages. That gap is not yet resolved. The packager then
+writes its own `projectbuddy/ubuntu-vagrant-box@1` receipt and has
+`verify-vagrant-box-receipt.py` re-check it and write its hash;
+`scripts/tests/test_package_vagrant_box.py` covers the packager's refusals
+and that receipt.
 
 `verify-vagrant-clone.py` and `verify-vagrant-clone-receipt.py` are thin
 adapters over the neutral clone verifier (`scripts/vagrant_clone/`), with the
