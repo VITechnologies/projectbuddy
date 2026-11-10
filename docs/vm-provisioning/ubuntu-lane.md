@@ -289,7 +289,10 @@ build unit has ended and its control group is empty, and it:
 6. writes the first header last and flushes it again: until then block 0 is
    zero, so the host refuses a disk that the launcher left partway;
 7. always powers the guest off, even when its arguments are malformed or a
-   step above failed; it then exits 1 having written nothing.
+   step above failed. Malformed arguments, an invalid unit name or
+   `maxOutputBytes`, and a device that fails step 3 make it exit 1 before
+   anything is written; a write that fails before the first header is
+   complete leaves a disk that the host refuses.
 
 The host reads the disk only after it observes the instance `poweroff`. It
 streams the disk with `mediumio cat`, which opens it read-only and does not
