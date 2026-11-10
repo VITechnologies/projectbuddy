@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from lane_box.profile import NAME_PATTERN, _check_fields, _check_probe
 
 from .common import Refusal
+from .output_disk import NAME_LIMIT, SMALLEST_ARCHIVE
 
 WORKLOAD_SCHEMA = "projectbuddy/lane-workload@2"
 # REQ-106 split @1's single argument vector into a fetch and a build phase; @1 has no network boundary.
@@ -210,13 +211,19 @@ def check_declaration(data: object, digest: str) -> tuple[Declaration | None, li
     for item in outputs:
         problem = relative_path(item, "output")
         if problem:
-            refusals.append(Refusal("output-path", f"{problem}; outputs are paths inside the evidence directory"))
+            refusals.append(Refusal("output-path", f"{problem}; outputs are paths below the working directory"))
+        elif len(item.encode("utf-8")) > NAME_LIMIT:
+            refusals.append(Refusal("output-path", f"output {item!r} is longer than {NAME_LIMIT} bytes in UTF-8, "
+                                                   "the longest name the output disk holds"))
+        elif any(pathlib.PurePosixPath(other) in pathlib.PurePosixPath(item).parents for other in outputs):
+            refusals.append(Refusal("output-path", f"output {item!r} is below another output"))
         elif FORBIDDEN_OUTPUT.fullmatch(pathlib.PurePosixPath(item).name):
             refusals.append(Refusal("output-forbidden", f"output {item!r} names a VM disk, saved state, VM "
                                                         "settings, or known-hosts file"))
     max_output_bytes = data.get("maxOutputBytes")
-    if not _positive(max_output_bytes):
-        refusals.append(Refusal("output-size", "maxOutputBytes must be a positive integer"))
+    if not _positive(max_output_bytes) or max_output_bytes < SMALLEST_ARCHIVE:
+        refusals.append(Refusal("output-size", f"maxOutputBytes must be an integer of at least {SMALLEST_ARCHIVE}, "
+                                               "the smallest archive the output disk holds"))
     secrets = _strings(data.get("secrets"), "secrets", "secret-name", refusals)
     for name in secrets:
         if not SECRET_NAME.fullmatch(name):

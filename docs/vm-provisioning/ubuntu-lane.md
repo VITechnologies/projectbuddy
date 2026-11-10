@@ -3,9 +3,11 @@
 - Status: the dry-run lane plan and teardown are built and fixture-tested
   offline (`VITechnologies/projectbuddy#185`); the plan's fetch and build
   phases and its output disk follow REQ-106
-  (`VITechnologies/projectbuddy#200`). Neither is live-proven yet. The clone
+  (`VITechnologies/projectbuddy#200`), and the output disk's format, guest
+  launcher, and host reader are fixture-tested
+  (`VITechnologies/projectbuddy#202`). None is live-proven yet. The clone
   verifier is still to come under `VITechnologies/projectbuddy#185`.
-- Last substantive update: 2026-11-10
+- Last substantive update: 2026-11-11
 - Owner: svelderrainruiz
 
 The Ubuntu lane runs one disposable VM per job from a verified
@@ -28,7 +30,7 @@ The pieces:
 - [`scripts/Invoke-Lane.py`](../../scripts/Invoke-Lane.py): the host command
   line. It needs Python 3.11 or later on a POSIX host.
 - [`scripts/lane/`](../../scripts/lane/): the declaration, plan, teardown,
-  and receipt modules.
+  and receipt modules, and the output disk's guest launcher and host reader.
 - [`vm/ubuntu-lane/lane-workload.example.json`](../../vm/ubuntu-lane/lane-workload.example.json):
   a generic workload declaration.
 
@@ -57,8 +59,8 @@ consumer; its commit is a placeholder.
 | `fetch` | the fetch phase: its `steps`, which may be none, and its `timeoutSeconds`; it has the network and no secrets |
 | `build` | the build phase: at least one step, and its `timeoutSeconds`; it runs with the link off and receives the secrets ([REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106)) |
 | `inputs` | the files and directories the workload reads, which must be in the commit |
-| `outputs` | the files the guest leaves on the output disk, which the run copies into its evidence directory |
-| `maxOutputBytes` | the most bytes the guest may write to the output disk, a positive integer |
+| `outputs` | the files, below the working directory, that the guest leaves on the [output disk](#the-output-disk) and the run copies into its evidence directory |
+| `maxOutputBytes` | the most bytes the guest may write to the output disk, an integer of at least 2048 |
 | `secrets` | the names of the secrets the build phase receives ([REQ-093](https://github.com/VITechnologies/projectbuddy/wiki/REQ-093)) |
 | `toolchain` | each tool's `name` and `probe`, as in the [lane profile](ubuntu-lane-box.md#the-lane-profile) ([REQ-091](https://github.com/VITechnologies/projectbuddy/wiki/REQ-091)) |
 
@@ -67,7 +69,8 @@ non-empty strings that runs without a shell. Its `timeoutSeconds`, a positive
 integer, is the guest's limit for all of the phase's steps together.
 
 Every path is relative, uses `/`, and is in normalized form without `..`. An
-output is never a VM disk, saved state, VM settings file, or known-hosts
+output's path is at most 100 bytes in UTF-8, and no output is below another
+output. An output is never a VM disk, saved state, VM settings file, or known-hosts
 file: a file name ending in `.vdi`, `.vmdk`, `.vhd`, `.vhdx`, `.sav`, or
 `.vbox`, or named `known_hosts`, is refused in any letter case.
 
@@ -141,9 +144,9 @@ there is none.
 | `timeout` | a phase's `timeoutSeconds` is not a positive integer |
 | `working-directory` | `workingDirectory` is not a relative path in normalized form |
 | `input-path` | `inputs` is not a list of strings, or an input is not a relative path below the checkout, or appears twice |
-| `output-path` | `outputs` is not a list of strings, or an output is not a relative path below the evidence directory, or appears twice |
+| `output-path` | `outputs` is not a list of strings, or an output is not a relative path below the working directory, is longer than 100 bytes in UTF-8, is below another output, or appears twice |
 | `output-forbidden` | an output is a VM disk, saved state, VM settings file, or known-hosts file |
-| `output-size` | `maxOutputBytes` is not a positive integer |
+| `output-size` | `maxOutputBytes` is not an integer of at least 2048, the smallest archive the output disk holds |
 | `secret-name` | `secrets` is not a list of strings, or a name is not an environment variable name, or appears twice |
 | `toolchain` | `toolchain` is not a non-empty list, or an entry is not a valid `name` and `probe`, or a name appears twice |
 | `box-digest` | the box's SHA-256 differs from the one its receipt records ([TEST-103](https://github.com/VITechnologies/projectbuddy/wiki/TEST-103)) |
@@ -212,7 +215,7 @@ when the declaration's fetch phase has none. A phase's guest steps run in
 order, in one unit that the guest stops after that phase's `timeoutSeconds`
 in `guestUnits`; a guest step's own `timeoutSeconds` is `null`.
 The plan names these steps; the executor that runs them, on the host and in
-the guest, is still to come.
+the guest, is still to come, apart from the output disk's launcher and reader.
 
 | Step | Phase | Runs | What it does |
 | --- | --- | --- | --- |
@@ -229,7 +232,7 @@ the guest, is still to come.
 | `network-off` | `build` | host | `VBoxManage controlvm {uuid} setlinkstate1 off` |
 | `verify-network-off` | `build` | host | checks that the link is off |
 | `await-poweroff` | `build` | engine | waits for the guest to leave its outputs on the output disk and power itself off, for up to the build timeout plus 300 seconds; after that the run timed out, no output is read, and teardown powers the instance off |
-| `read-outputs` | `collect` | engine | reads the declared outputs and the build's exit status from the output disk without booting the guest, and copies the outputs into the evidence directory; anything else on the disk fails the run |
+| `read-outputs` | `collect` | host | `VBoxManage mediumio --disk=<run directory>/lane-output.vdi cat --output=-` streams the output disk without booting the guest; the lane checks it and copies the declared outputs into the evidence directory, and anything else on the disk fails the run ([the output disk](#the-output-disk)) |
 | `write-evidence` | `collect` | engine | writes the run's evidence record |
 | `teardown` | `teardown` | host | [teardown](#teardown) with `--run`, writing its receipt to the records directory |
 
@@ -242,7 +245,76 @@ property, so nothing the guest reports could safely reopen it. The guest
 therefore leaves its outputs on the output disk and powers itself off, and
 no secret-bearing process ever has the network.
 Host queries time out after 120 seconds, `git` after 120 seconds, and
-`box-add` and `up` after 1800 seconds each.
+`box-add`, `up`, and `read-outputs` after 1800 seconds each.
+
+### The output disk
+
+The output disk carries the build's result and outputs from the guest, which
+has no network after the build starts, to the host
+([REQ-106](https://github.com/VITechnologies/projectbuddy/wiki/REQ-106),
+completion channel C1). It holds one POSIX ustar archive from byte 0, with no
+file system, and zeros after it. The archive's first member,
+`./build-result`, is one line: `exited <code>` (0 to 255), `killed <signal>`
+(1 to 64), or `timeout`, the build unit's own timeout, which is distinct from
+a nonzero exit
+([REQ-090](https://github.com/VITechnologies/projectbuddy/wiki/REQ-090)).
+The declared outputs that exist follow in declared order, each under its
+declared path. Every member is a regular file with mode 0600, owner and
+group 0, modification time 0, and no user or group name, and the archive
+ends with two zero blocks.
+
+The launcher
+([`scripts/lane/output_disk.py`](../../scripts/lane/output_disk.py)) is one
+file that uses only the Python standard library, so the engine can copy it
+into the guest and run it with the `python3` that the
+[base bootstrap](ubuntu-lane-box.md) installs. It runs as root after the
+build unit has ended and its control group is empty, and it:
+
+1. changes nothing and exits 2 unless
+   `/var/lib/projectbuddy/base-bootstrap-state.json`, which the lane box's
+   readiness check requires, exists, so it cannot write a disk or power off
+   a machine that is not a lane guest;
+2. reads the build unit's `Result`, `ExecMainCode`, and `ExecMainStatus`
+   with `systemctl show`, so the unit must stay loaded after it ends; when
+   they do not give one result line, it writes no archive;
+3. opens the output device only if it is a block device of exactly the output
+   disk's size;
+4. opens each declared output below the working directory without following
+   a symbolic link in any path component, and keeps it only if it is a
+   regular file that the workload account owns and that has one link; a
+   build step therefore cannot make root read a file such as a host key;
+5. writes the result and the outputs it kept, or the result alone when they
+   would end past `maxOutputBytes`, then zeros to the end of the device, and
+   flushes it;
+6. writes the first header last and flushes it again: until then block 0 is
+   zero, so the host refuses a disk that the launcher left partway;
+7. always powers the guest off, even when its arguments are malformed or a
+   step above failed. Malformed arguments, an invalid unit name or
+   `maxOutputBytes`, and a device that fails step 3 make it exit 1 before
+   anything is written; a write that fails before the first header is
+   complete leaves a disk that the host refuses.
+
+The host reads the disk only after it observes the instance `poweroff`. It
+streams the disk with `mediumio cat`, which opens it read-only and does not
+register it again, and checks every byte; the read fails on the first broken
+rule and keeps no output. A refusal names a member by its position, never by
+a name the guest wrote.
+
+| Rule | The read fails when |
+| --- | --- |
+| `disk-length` | the stream holds fewer or more bytes than the output disk's size; `mediumio cat` can stop early and still exit 0 |
+| `header` | a header is not byte for byte the one the launcher writes for its name and size |
+| `member` | the first member is not `./build-result`, or a later one is not a declared output that follows the previous member in declared order |
+| `padding` | a byte between a member's data and the next block is not zero |
+| `length` | the archive does not end within `maxOutputBytes` |
+| `end` | a zero block is not followed by a second one |
+| `tail` | a byte after the archive's end is not zero |
+| `build-result` | the disk holds no `./build-result`, it is longer than 16 bytes, or it is not one result line |
+| `output-missing` | a declared output is not on the disk; the read keeps the build result |
+
+A disk that breaks any other rule has no build result. How the run's status
+in the evidence record follows from the build result is still to come with
+the executor.
 
 ## Teardown
 

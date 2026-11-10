@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lane import cli, common, declaration, plan, teardown  # noqa: E402
+from lane import cli, common, declaration, output_disk, outputs, plan, teardown  # noqa: E402
 from lane_box.toolchain import PROBE_TIMEOUT  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -149,7 +149,9 @@ def test_the_step_table_is_the_code():
     documented = {names(row[0])[0]: row[3] for row in rows}
     for step in steps:
         if step["runs"] == "host" and step["argv"][0] == "VBoxManage" and step["name"] != "verify-network-off":
-            assert f"`{' '.join(step['argv'])}`" in documented[step["name"]], step["name"]
+            argv = " ".join(step["argv"]).replace("/work/pb-lane-0123456789ab", "<run directory>")
+            assert f"`{argv}`" in documented[step["name"]], step["name"]
+    assert [step["name"] for step in steps if step["argv"] and "mediumio" in step["argv"]] == ["read-outputs"]
 
 
 def test_plan_timeouts_are_documented():
@@ -158,5 +160,19 @@ def test_plan_timeouts_are_documented():
     assert "the fetch timeout plus 300 seconds" in UNWRAPPED and "the build timeout plus 300 seconds" in UNWRAPPED
     assert plan.QUERY_TIMEOUT == 120 and plan.GIT_TIMEOUT == 120
     assert "Host queries time out after 120 seconds, `git` after 120 seconds" in UNWRAPPED
-    assert plan.BOX_ADD_TIMEOUT == plan.UP_TIMEOUT == 1800
-    assert "`box-add` and `up` after 1800 seconds each" in UNWRAPPED
+    assert plan.BOX_ADD_TIMEOUT == plan.UP_TIMEOUT == plan.READ_TIMEOUT == 1800
+    assert "`box-add`, `up`, and `read-outputs` after 1800 seconds each" in UNWRAPPED
+
+
+def test_the_output_disk_is_documented():
+    assert tuple(names(row[0])[0] for row in table("| Rule | The read fails when |")) == outputs.READ_RULES
+    assert f"`{output_disk.RESULT_MEMBER}`" in UNWRAPPED
+    assert output_disk.EXIT_LIMIT == 255 and "`exited <code>` (0 to 255)" in UNWRAPPED
+    assert output_disk.SIGNAL_LIMIT == 64 and "`killed <signal>` (1 to 64)" in UNWRAPPED
+    assert output_disk.RESULT_LIMIT == 16 and "it is longer than 16 bytes" in UNWRAPPED
+    assert output_disk.SMALLEST_ARCHIVE == 2048 and "an integer of at least 2048" in UNWRAPPED
+    assert output_disk.NAME_LIMIT == 100 and "at most 100 bytes in UTF-8" in UNWRAPPED
+    assert f"`{output_disk.LANE_GUEST_MARKER}`" in PROCEDURE and "changes nothing and exits 2" in UNWRAPPED
+    properties = UNWRAPPED.split("reads the build unit's", 1)[1].split("with `systemctl show`", 1)[0]
+    assert tuple(names(properties)) == output_disk.UNIT_PROPERTIES
+    assert output_disk.header("a", 0)[100:108] == b"0000600\0" and "mode 0600, owner and group 0" in UNWRAPPED
