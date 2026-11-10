@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 
+from .access import configure_access
 from .common import ChangedError, LaneBoxError, canonical_uuid
 from .packager import Hypervisor, Request, package
 from .profile import load_profile
@@ -34,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--workdir", type=pathlib.Path, help="download directory (default: a new private temporary directory)")
     install.add_argument("--prefix", type=pathlib.Path, default=pathlib.Path("/opt/projectbuddy-lane"))
     install.add_argument("--bindir", type=pathlib.Path, default=pathlib.Path("/usr/local/bin"))
+
+    access = commands.add_parser("configure-access",
+                                 help="guest, as root: install key-only root SSH access for the next boot")
+    access.add_argument("--root", type=pathlib.Path, default=pathlib.Path("/"))
 
     readiness = commands.add_parser("readiness", help="guest, as root: scan and write the readiness receipt")
     readiness.add_argument("--profile", type=pathlib.Path, required=True)
@@ -93,6 +98,15 @@ def _install(arguments: argparse.Namespace, fetch: Fetcher, run: Runner) -> int:
     return 0
 
 
+def _configure_access(arguments: argparse.Namespace) -> int:
+    if not arguments.root.is_absolute():
+        raise LaneBoxError("--root must be an absolute path")
+    for path in configure_access(arguments.root):
+        print(f"installed {path}")
+    print("Lane access: PASS: key-only root SSH takes effect at the next boot")
+    return 0
+
+
 def _readiness(arguments: argparse.Namespace, run: Runner) -> int:
     if not arguments.root.is_absolute():
         raise LaneBoxError("--root must be an absolute path")
@@ -141,8 +155,8 @@ def _verify(arguments: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None, *, fetch: Fetcher = https_fetch, run: Runner = run_command) -> int:
     arguments = build_parser().parse_args(argv)
     label = {
-        "validate-profile": "Lane profile", "install-toolchain": "Lane toolchain", "readiness": "Lane readiness",
-        "package": "Lane box packaging", "verify-receipt": "Lane box receipt",
+        "validate-profile": "Lane profile", "install-toolchain": "Lane toolchain", "configure-access": "Lane access",
+        "readiness": "Lane readiness", "package": "Lane box packaging", "verify-receipt": "Lane box receipt",
     }[arguments.command]
     try:
         if arguments.command == "validate-profile":
@@ -151,6 +165,8 @@ def main(argv: list[str] | None = None, *, fetch: Fetcher = https_fetch, run: Ru
             return 0
         if arguments.command == "install-toolchain":
             return _install(arguments, fetch, run)
+        if arguments.command == "configure-access":
+            return _configure_access(arguments)
         if arguments.command == "readiness":
             return _readiness(arguments, run)
         if arguments.command == "package":

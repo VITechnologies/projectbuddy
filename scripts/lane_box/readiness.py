@@ -1,8 +1,7 @@
-"""Guest-side readiness scan (``projectbuddy/ubuntu-lane-readiness@1``).
+"""Guest-side readiness scan (``projectbuddy/ubuntu-lane-readiness@2``).
 
-Run as root inside the booted lane base VM. The scan fails closed: an unreadable
-directory, an unreadable dpkg database, or a missing identity file is a failure,
-not a pass.
+Run as root inside the booted lane base VM, after ``configure-access``. The scan fails closed: an
+unreadable directory, an unreadable dpkg database, or a missing identity file is a failure, not a pass.
 """
 from __future__ import annotations
 
@@ -12,11 +11,12 @@ import pathlib
 import re
 from datetime import datetime, timezone
 
+from .access import access_failures, scan_access
 from .common import LaneBoxError, canonical_uuid, hash_line, write_private
 from .profile import FORBIDDEN_COMPONENT, Profile
 from .toolchain import Runner, evaluate_probe
 
-READINESS_SCHEMA = "projectbuddy/ubuntu-lane-readiness@1"
+READINESS_SCHEMA = "projectbuddy/ubuntu-lane-readiness@2"
 READINESS_FILENAME = "lane-readiness-receipt.json"
 SKIPPED_ROOTS = ("dev", "proc", "run", "sys")
 LABVIEW_PATHS = ("etc/natinst", "opt/natinst", "usr/local/natinst")
@@ -112,6 +112,7 @@ def build_readiness(root: pathlib.Path, profile: Profile, run: Runner) -> dict:
     runner = scan_runner_absence(root)
     labview = scan_labview_absence(root)
     toolchain = [evaluate_probe(tool, run) for tool in profile.tools]
+    access = scan_access(root, run)
     if runner["runnerConfigurations"]:
         failures.append("Actions runner configuration is present: " + ", ".join(runner["runnerConfigurations"]))
     if runner["runnerUnits"]:
@@ -121,6 +122,7 @@ def build_readiness(root: pathlib.Path, profile: Profile, run: Runner) -> dict:
     if labview["paths"] or labview["packages"]:
         failures.append("LabVIEW, VIPM, or NI residue is present: " + ", ".join(labview["paths"] + labview["packages"]))
     failures.extend(f"toolchain probe failed: {result['name']}" for result in toolchain if not result["ok"])
+    failures.extend(access_failures(access))
     return {
         "schema": READINESS_SCHEMA,
         "profile": {"name": profile.name, "sha256": profile.sha256},
@@ -129,6 +131,7 @@ def build_readiness(root: pathlib.Path, profile: Profile, run: Runner) -> dict:
         "runnerAbsence": runner,
         "labviewAbsence": labview,
         "toolchain": toolchain,
+        "laneAccess": access,
         "checkedAt": datetime.now(timezone.utc).isoformat(),
         "failures": failures,
         "outcome": "FAIL" if failures else "PASS",

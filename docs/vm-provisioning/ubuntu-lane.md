@@ -105,7 +105,7 @@ python3 scripts/Invoke-Lane.py plan --declaration "$DECLARATION" \
   below one.
 - `--box`, `--box-receipt`, `--profile`, `--base-receipt`, and
   `--readiness-receipt` are the lane box and the files its receipt binds, as
-  in [Verify the box](ubuntu-lane-box.md#7-verify-the-box-host).
+  in [Verify the box](ubuntu-lane-box.md#8-verify-the-box-host).
   `--embedded-vagrantfile` defaults to the engine's
   `vm/ubuntu-lane/Vagrantfile.box`.
 - `--work-dir` and `--evidence-dir` hold each run's own run directory and
@@ -261,7 +261,9 @@ the workload account can read them but not change them. Only root can create
 an entry in `/run`, so the workload account cannot claim that directory
 first. Outside a lane guest every mode changes nothing and exits 2. The host
 side, which writes the spec and the secrets file and runs these modes over
-SSH, is still to come.
+SSH, is still to come. The box accepts those SSH logins only as root and only
+with the key that the host sets before the instance boots
+([lane access](ubuntu-lane-box.md#3-configure-lane-access-guest-root)).
 
 | Mode | Runs as | What it does |
 | --- | --- | --- |

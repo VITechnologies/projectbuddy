@@ -75,6 +75,11 @@ else:
 """
 
 
+@pytest.fixture(autouse=True)
+def lane_access_owned_by_the_test_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    box_tests.as_lane_access_owner(monkeypatch)
+
+
 def private_dir(path: Path) -> Path:
     return box_tests.private_dir(path)
 

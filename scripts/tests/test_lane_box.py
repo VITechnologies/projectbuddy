@@ -1,13 +1,16 @@
 """Lane box (VITechnologies/projectbuddy#183): profile, toolchain, readiness, packager, and receipt."""
 from __future__ import annotations
 
+import base64
 import hashlib
+import importlib.util
 import io
 import json
 import os
 import re
 import runpy
 import stat
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -18,7 +21,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from lane_box import cli, common, packager, profile as lane_profile, readiness, receipt, toolchain  # noqa: E402
+from lane_box import access, cli, common, packager, profile as lane_profile, readiness, receipt, toolchain  # noqa: E402
 from lane_box.common import LaneBoxError  # noqa: E402
 
 REPOSITORY = SCRIPTS.parent
@@ -45,9 +48,30 @@ WRAPPER = (
     'include_vagrantfile = File.expand_path("../include/_Vagrantfile", __FILE__)\n'
     "load include_vagrantfile if File.exist?(include_vagrantfile)\n"
 )
+PASSWD = (
+    "root:x:0:0:root:/root:/bin/bash\n"
+    "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n"
+    "sync:x:4:65534:sync:/bin:/bin/sync\n"
+    "\n# a comment\n"
+    "actor:x:1000:1000:Actor,,,:/home/actor:/bin/bash\n"
+)
+SSHD_USERS = ["actor", "root", "sync"]
+# What `sshd -T` prints with the lane drop-in in place: the checked settings among others.
+SSHD_DUMP = "port 22\naddressfamily any\n" + "".join(
+    f"{key} {value}\n" for key, values in access.SSHD_EXPECTED.items() for value in values) + "maxauthtries 6\n"
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def as_lane_access_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guest's lane access files are owned by root; the test's are owned by whoever runs it."""
+    monkeypatch.setattr(access, "ROOT_UID", os.getuid() if hasattr(os, "getuid") else 0)
+
+
+@pytest.fixture(autouse=True)
+def lane_access_owned_by_the_test_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    as_lane_access_owner(monkeypatch)
 
 
 def example() -> dict:
@@ -124,7 +148,7 @@ def fetcher(artifacts: dict[str, bytes]):
 class FakeRunner:
     OUTPUTS = {
         "node": "v24.19.0\n", "npm": "11.17.0\n", "git": "git version 2.43.0\n",
-        "dpkg-query": "20260816ubuntu0.24.04.2",
+        "dpkg-query": "20260816ubuntu0.24.04.2", access.SSHD: SSHD_DUMP,
     }
 
     def __init__(self, outputs: dict | None = None, apt_code: int = 0) -> None:
@@ -162,6 +186,9 @@ def guest_root(tmp_path: Path, packages: str = "") -> Path:
     (root / "etc/systemd/system").mkdir(parents=True)
     (root / "etc/systemd/system/ssh.service").write_text("[Unit]\n", encoding="utf-8")
     (root / "home/actor").mkdir(parents=True)
+    (root / "etc/ssh/sshd_config.d").mkdir(parents=True)
+    (root / "etc/passwd").write_text(PASSWD, encoding="utf-8")
+    access.configure_access(root)
     return root
 
 
@@ -298,6 +325,7 @@ class Host:
         self.box = self.out / "lane.box"
         self.receipt = self.out / "lane-box-receipt.json"
         self.profile = EXAMPLE
+        as_lane_access_owner(monkeypatch)
         write_json(self.evidence / "base-bootstrap-receipt.json", base_receipt())
         loaded = lane_profile.load_profile(EXAMPLE)
         readiness.write_readiness(readiness.build_readiness(guest_root(tmp_path), loaded, FakeRunner()), self.evidence)
@@ -823,6 +851,333 @@ def test_readiness_command(tmp_path, capsys, monkeypatch):
     assert cli.main(argv[:-1] + ["relative"], run=FakeRunner()) == 2
 
 
+# ---------------------------------------------------------------- lane access
+
+
+def lane_access_helper():
+    spec = importlib.util.spec_from_file_location("lane_access", access.GUEST_FILES / "lane_access.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ed25519_blob(key: bytes = b"k" * 32) -> bytes:
+    return access_helper_prefix() + key
+
+
+def access_helper_prefix() -> bytes:
+    return lane_access_helper().BLOB_PREFIX
+
+
+def shown(value: str, flags: str = "TRANSIENT, RDONLYGUEST") -> str:
+    return f"Value: {value}\nTimestamp: 1794072448721000000 ns\nFlags: {flags}\n"
+
+
+def public_key(blob: bytes | None = None) -> str:
+    return "ssh-ed25519 " + base64.b64encode(blob if blob is not None else ed25519_blob()).decode("ascii")
+
+
+class SshdRunner(FakeRunner):
+    """Answers `sshd -T` per account: an exit code, or extra lines appended to the passing dump."""
+
+    def __init__(self, by_user: dict[str, int | str]) -> None:
+        super().__init__()
+        self.by_user = by_user
+
+    def __call__(self, argv, timeout=60, path_prefix=None):
+        if argv[0] != access.SSHD:
+            return super().__call__(argv, timeout, path_prefix)
+        self.calls.append(list(argv))
+        user = re.fullmatch(r"user=([^,]+),host=10\.0\.2\.2,addr=10\.0\.2\.2", argv[3])[1]
+        answer = self.by_user.get(user, "")
+        return (answer, "") if isinstance(answer, int) else (0, SSHD_DUMP + answer)
+
+
+def access_root(tmp_path: Path) -> Path:
+    root = tmp_path / "guest"
+    (root / "etc/ssh/sshd_config.d").mkdir(parents=True)
+    (root / "etc/passwd").write_text(PASSWD, encoding="utf-8")
+    return root
+
+
+def test_configure_access_installs_files_for_the_next_boot(tmp_path):
+    root = access_root(tmp_path)
+    installed = access.configure_access(root)
+    assert installed == ["/" + item.path for item in access.ACCESS_FILES] + ["/" + access.UNIT_LINK]
+    for item in access.ACCESS_FILES:
+        assert (root / item.path).read_bytes() == item.content()
+        assert stat.S_IMODE((root / item.path).stat().st_mode) == 0o644
+    assert os.readlink(root / access.UNIT_LINK) == "/etc/systemd/system/projectbuddy-lane-access.service"
+    run = FakeRunner()
+    scan = access.scan_access(root, run)
+    assert access.access_failures(scan) == []
+    assert scan["files"] == access.expected_files()
+    assert [entry["user"] for entry in scan["sshd"]] == SSHD_USERS
+    assert [call for call in run.calls if call[0] == access.SSHD][0] == [
+        "/usr/sbin/sshd", "-T", "-C", "user=actor,host=10.0.2.2,addr=10.0.2.2"]
+    assert scan["authorizedKeys"] == [] and scan["scanErrors"] == []
+
+
+@pytest.mark.parametrize("prepare, message", [
+    (lambda r: (r / "etc/ssh/sshd_config.d").rmdir(), "/etc/ssh/sshd_config.d is missing"),
+    (lambda r: access.configure_access(r), "refusing to replace existing files: /etc/ssh/sshd_config.d/00-"),
+    (lambda r: (r / access.UNIT_LINK).parent.mkdir(parents=True) or (r / access.UNIT_LINK).symlink_to("/nowhere"),
+     "refusing to replace existing files: /etc/systemd/system/multi-user.target.wants/"),
+])
+def test_configure_access_refuses_without_changes(tmp_path, prepare, message):
+    root = access_root(tmp_path)
+    prepare(root)
+    before = sorted(str(path) for path in root.rglob("*"))
+    with pytest.raises(LaneBoxError, match=message) as raised:
+        access.configure_access(root)
+    assert not isinstance(raised.value, common.ChangedError)
+    assert sorted(str(path) for path in root.rglob("*")) == before
+
+
+@pytest.mark.parametrize("fail_at, changed", [(1, None), (2, "/etc/ssh/sshd_config.d/00-projectbuddy-lane.conf")])
+def test_configure_access_reports_a_partial_install(tmp_path, monkeypatch, fail_at, changed):
+    root = access_root(tmp_path)
+    original, calls = access._write_new, []
+
+    def failing(path, content):
+        calls.append(path)
+        if len(calls) == fail_at:
+            raise OSError(28, "No space left on device")
+        original(path, content)
+
+    monkeypatch.setattr(access, "_write_new", failing)
+    with pytest.raises(LaneBoxError) as raised:
+        access.configure_access(root)
+    if changed is None:
+        assert not isinstance(raised.value, common.ChangedError)
+        assert "no file was installed" in str(raised.value)
+    else:
+        assert isinstance(raised.value, common.ChangedError)
+        assert f"the guest was already changed by: {changed}" in str(raised.value)
+
+
+def test_configure_access_command(tmp_path, capsys, monkeypatch):
+    root = access_root(tmp_path)
+    assert cli.main(["configure-access", "--root", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "installed /usr/local/libexec/projectbuddy-lane-access.py" in out
+    assert out.endswith("Lane access: PASS: key-only root SSH takes effect at the next boot\n")
+    assert cli.main(["configure-access", "--root", str(root)]) == 2
+    assert "Lane access: FAIL: refusing to replace existing files" in capsys.readouterr().err
+    assert cli.main(["configure-access", "--root", "relative"]) == 2
+    assert "--root must be an absolute path" in capsys.readouterr().err
+    other = access_root(tmp_path / "other")
+    monkeypatch.setattr(access.pathlib.Path, "symlink_to", lambda *_: (_ for _ in ()).throw(OSError(1, "nope")))
+    assert cli.main(["configure-access", "--root", str(other)]) == 1
+    assert "the guest was already changed by" in capsys.readouterr().err
+
+
+def damage_file(root: Path) -> None:
+    (root / access.ACCESS_FILES[0].path).write_text("PasswordAuthentication yes\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("damage, run, message", [
+    (damage_file, None, "lane access file is missing or differs: /etc/ssh/sshd_config.d/00-projectbuddy-lane.conf"),
+    (lambda r: (r / access.ACCESS_FILES[1].path).chmod(0o664), None,
+     "lane access file is missing or differs: /etc/systemd/system/projectbuddy-lane-access.service"),
+    (lambda r: (r / access.ACCESS_FILES[2].path).unlink(), None,
+     "lane access file is missing or differs: /usr/local/libexec/projectbuddy-lane-access.py"),
+    (lambda r: (r / access.ACCESS_FILES[2].path).unlink() or (r / access.ACCESS_FILES[2].path).mkdir(), None,
+     "lane access file is missing or differs: /usr/local/libexec/projectbuddy-lane-access.py"),
+    (lambda r: (r / access.UNIT_LINK).unlink(), None, "projectbuddy-lane-access.service is not enabled"),
+    (lambda r: (r / access.UNIT_LINK).unlink() or (r / access.UNIT_LINK).symlink_to("/dev/null"), None,
+     "projectbuddy-lane-access.service is not enabled"),
+    (None, {"root": 255}, "sshd -T failed for root with exit code 255"),
+    (None, {"actor": "passwordauthentication yes\n"}, "sshd does not enforce lane access for actor: passwordauthentication"),
+    (None, {"sync": "allowusers sync\n"}, "sshd does not enforce lane access for sync: allowusers"),
+    (lambda r: (r / "root/.ssh").mkdir(parents=True) or (r / "root/.ssh/authorized_keys2").write_text(""), None,
+     "an authorized_keys file is present: /root/.ssh/authorized_keys2"),
+    (lambda r: (r / "home/actor/.ssh").mkdir(parents=True) or (r / "home/actor/.ssh/authorized_keys").write_text(""),
+     None, "an authorized_keys file is present: /home/actor/.ssh/authorized_keys"),
+    (lambda r: (r / "etc/passwd").unlink(), None, "the lane access scan was incomplete"),
+    (lambda r: (r / "etc/passwd").write_bytes(b"root:x:0:0:\xff:/root:/bin/bash\n"), None,
+     "the lane access scan was incomplete"),
+    (lambda r: (r / "etc/passwd").write_text("root:x:0:0:root:/root\n"), None, "the lane access scan was incomplete"),
+    (lambda r: (r / "etc/passwd").write_text("bad name:x:1:1::/home/x:/bin/sh\n"), None,
+     "the lane access scan was incomplete"),
+    (lambda r: (r / "etc/passwd").write_text("x:x:1:1::relative:/bin/sh\n"), None, "the lane access scan was incomplete"),
+])
+def test_lane_access_problems_fail_readiness(tmp_path, damage, run, message):
+    root = guest_root(tmp_path)
+    if damage:
+        damage(root)
+    result = readiness_for(root, SshdRunner(run or {}))
+    assert result["outcome"] == "FAIL"
+    assert message in result["failures"], result["failures"]
+
+
+def test_lane_access_scan_records_what_it_saw(tmp_path):
+    root = guest_root(tmp_path)
+    (root / access.ACCESS_FILES[2].path).unlink()
+    (root / "etc/passwd").write_text("root:x:0:0:root:/root:/bin/bash\nx:x:1:1::/home/x\n", encoding="utf-8")
+    scan = readiness_for(root, SshdRunner({"root": 1}))["laneAccess"]
+    assert scan["files"][2] == {"path": "/usr/local/libexec/projectbuddy-lane-access.py",
+                                "expectedSha256": access.ACCESS_FILES[2].sha256(),
+                                "sha256": None, "mode": None, "uid": None}
+    assert scan["sshd"] == [{"user": "root", "exitCode": 1, "effective": {}}]
+    assert scan["scanErrors"] == ["/etc/passwd:2: the entry cannot be checked"]
+
+
+def test_lane_access_paths_that_cannot_be_read_fail_closed(tmp_path):
+    root = guest_root(tmp_path)
+    (root / access.UNIT_LINK).unlink()
+    (root / access.UNIT_LINK).parent.rmdir()
+    (root / access.UNIT_LINK).parent.write_text("", encoding="utf-8")
+    (root / access.ACCESS_FILES[2].path).unlink()
+    (root / access.ACCESS_FILES[2].path).parent.rmdir()
+    (root / access.ACCESS_FILES[2].path).parent.write_text("", encoding="utf-8")
+    (root / "home/actor/.ssh").write_text("", encoding="utf-8")
+    scan = readiness_for(root)["laneAccess"]
+    assert scan["unitLink"]["target"] is None and scan["authorizedKeys"] == []
+    assert scan["scanErrors"] == [f"/{access.ACCESS_FILES[2].path}: Not a directory", f"/{access.UNIT_LINK}: Not a directory"]
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="root reads every directory")
+def test_an_unreadable_ssh_directory_fails_closed(tmp_path):
+    root = guest_root(tmp_path)
+    locked = root / "home/actor/.ssh"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        scan = readiness_for(root)["laneAccess"]
+    finally:
+        locked.chmod(0o700)
+    assert scan["scanErrors"] == ["/home/actor/.ssh: Permission denied"]
+
+
+def test_lane_access_owner_is_checked(tmp_path, monkeypatch):
+    root = guest_root(tmp_path)
+    monkeypatch.setattr(access, "ROOT_UID", access.ROOT_UID + 1)
+    failures = readiness_for(root)["failures"]
+    assert sum(failure.startswith("lane access file is missing or differs") for failure in failures) == 3
+
+
+def test_drop_in_sets_exactly_the_checked_settings():
+    lines = [line for line in access.ACCESS_FILES[0].content().decode("ascii").splitlines()
+             if line and not line.startswith("#")]
+    settings = {key.lower(): [value] for key, value in (line.split(" ", 1) for line in lines)}
+    assert len(settings) == len(lines)
+    settings["permitrootlogin"] = ["without-password" if settings["permitrootlogin"] == ["prohibit-password"] else "?"]
+    assert settings == access.SSHD_EXPECTED
+
+
+def test_guest_files_agree_with_each_other():
+    helper = lane_access_helper()
+    unit = access.ACCESS_FILES[1].content().decode("ascii")
+    assert f"ExecStart=/usr/bin/python3 -I /{access.ACCESS_FILES[2].path}\n" in unit
+    assert "Before=ssh.service\n" in unit and "WantedBy=multi-user.target\n" in unit
+    assert access.SSHD_EXPECTED["authorizedkeysfile"] == [f"{helper.KEY_DIRECTORY}/%u"]
+    assert helper.NAT_GATEWAY == access.NAT_GATEWAY
+    assert "import lane_box" not in access.ACCESS_FILES[2].content().decode("ascii")
+
+
+def test_the_key_property_is_reserved_for_the_host():
+    # VirtualBox refuses guest writes only under its host-reserved prefixes (VBoxGuestPropSvc checkHostReserved);
+    # under any other name a guest process can create the property with RDONLYGUEST itself.
+    name = lane_access_helper().PROPERTY
+    assert name.startswith("/VirtualBox/HostInfo/") and len(name) < 64
+
+
+def test_the_helper_accepts_one_guest_read_only_key():
+    helper = lane_access_helper()
+    blob = ed25519_blob()
+    fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii").rstrip("=")
+    for flags in ("TRANSIENT, RDONLYGUEST", "READONLY", "RDONLYGUEST"):
+        line, found = helper.authorized_line(shown(public_key(blob) + " lane-run-42", flags))
+        assert line == f'restrict,from="10.0.2.2" {public_key(blob)}\n' and found == fingerprint
+
+
+@pytest.mark.parametrize("output, message", [
+    ("No value set!\n", "did not print exactly one property"),
+    (shown(public_key()) + "Value: x\n", "did not print exactly one property"),
+    (shown(public_key(), "TRANSIENT"), "is writable by the guest"),
+    (shown(public_key(), ""), "is writable by the guest"),
+    (shown(public_key(), "RDONLYHOST"), "is writable by the guest"),
+    (shown(public_key() + " " + public_key()), "is not exactly one ssh-ed25519 public key"),
+    (shown(public_key() + "\tcomment"), "is not exactly one ssh-ed25519 public key"),
+    (shown("ssh-rsa " + public_key().split()[1]), "is not exactly one ssh-ed25519 public key"),
+    (shown("ssh-ed25519 " + base64.b64encode(b"\x00\x00\x00\x07ssh-rsa" + b"r" * 40).decode("ascii")),
+     "is not an ssh-ed25519 public key"),
+])
+def test_the_helper_refuses_anything_else(output, message):
+    with pytest.raises(ValueError, match=message):
+        lane_access_helper().authorized_line(output)
+
+
+def completed(returncode: int, stdout: str = ""):
+    return lambda argv, **_: subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+
+def test_the_helper_writes_roots_only_key(tmp_path, monkeypatch, capsys):
+    helper = lane_access_helper()
+    directory = tmp_path / "projectbuddy-ssh"
+    seen = []
+    monkeypatch.setattr(helper.subprocess, "run", lambda argv, **kwargs: seen.append((argv, kwargs)) or
+                        subprocess.CompletedProcess(argv, 0, shown(public_key()), ""))
+    assert helper.main("/usr/sbin/VBoxControl", str(directory)) == 0
+    assert seen[0][0] == ["/usr/sbin/VBoxControl", "--nologo", "guestproperty", "get",
+                          "/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey", "--verbose"]
+    assert seen[0][1]["timeout"] == 30 and seen[0][1]["stdin"] == subprocess.DEVNULL
+    assert (directory / "root").read_text(encoding="ascii") == f'restrict,from="10.0.2.2" {public_key()}\n'
+    assert stat.S_IMODE((directory / "root").stat().st_mode) == 0o644 and stat.S_IMODE(directory.stat().st_mode) == 0o755
+    assert sorted(os.listdir(directory)) == ["root"]
+    assert "root accepts only SHA256:" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("run, message", [
+    (completed(2), "/VirtualBox/HostInfo/ProjectBuddy/Lane/ClientKey is not set (VBoxControl exit code 2)"),
+    (completed(0, shown(public_key(), "TRANSIENT")), "is writable by the guest"),
+    (lambda argv, **_: (_ for _ in ()).throw(FileNotFoundError(2, "No such file", argv[0])), "cannot run VBoxControl"),
+    (lambda argv, **_: (_ for _ in ()).throw(subprocess.TimeoutExpired(argv, 30)), "cannot run VBoxControl"),
+])
+def test_the_helper_removes_a_stale_key_and_refuses(tmp_path, monkeypatch, capsys, run, message):
+    helper = lane_access_helper()
+    directory = private_dir(tmp_path / "projectbuddy-ssh")
+    (directory / "root").write_text("ssh-ed25519 stale\n", encoding="ascii")
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    assert helper.main("/usr/sbin/VBoxControl", str(directory)) == 1
+    assert os.listdir(directory) == []
+    err = capsys.readouterr().err
+    assert err.startswith("projectbuddy-lane-access: no client key installed: ") and message in err
+
+
+def test_the_helper_cleans_up_a_failed_write(tmp_path, monkeypatch, capsys):
+    helper = lane_access_helper()
+    directory = tmp_path / "projectbuddy-ssh"
+    monkeypatch.setattr(helper.subprocess, "run", completed(0, shown(public_key())))
+    monkeypatch.setattr(helper.os, "replace", lambda *_: (_ for _ in ()).throw(OSError(30, "Read-only file system")))
+    assert helper.main("/usr/sbin/VBoxControl", str(directory)) == 1
+    assert os.listdir(directory) == [] and "Read-only file system" in capsys.readouterr().err
+
+
+def test_the_helper_refuses_when_an_earlier_key_cannot_be_removed(tmp_path, monkeypatch, capsys):
+    helper = lane_access_helper()
+    (tmp_path / "file").write_text("", encoding="ascii")
+    monkeypatch.setattr(helper.subprocess, "run", completed(0, shown(public_key())))
+    assert helper.main("/usr/sbin/VBoxControl", str(tmp_path / "file")) == 1
+    assert "no client key installed: cannot remove the earlier key: [Errno 20] Not a directory" in capsys.readouterr().err
+
+
+def test_the_helper_runs_as_a_script(monkeypatch, capsys):
+    unlinked = []
+
+    def unlink(path):
+        unlinked.append(path)
+        raise FileNotFoundError(2, "No such file", path)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(subprocess, "run", completed(1))
+    with pytest.raises(SystemExit) as raised:
+        runpy.run_path(str(access.GUEST_FILES / "lane_access.py"), run_name="__main__")
+    assert raised.value.code == 1 and unlinked == ["/run/projectbuddy-ssh/root"]
+    assert "no client key installed" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------- packager
 
 
@@ -851,7 +1206,11 @@ def test_run_packages_and_writes_a_verifiable_receipt(host, capsys):
     assert len(host.outputs()) == 3
     common.verify_hash_file(Path(f"{host.receipt}.sha256"), host.receipt)
     value = json.loads(host.receipt.read_text(encoding="utf-8"))
-    assert value["schema"] == "projectbuddy/ubuntu-lane-box@1" and value["outcome"] == "PASS"
+    assert value["schema"] == "projectbuddy/ubuntu-lane-box@2" and value["outcome"] == "PASS"
+    assert value["laneAccess"] == {
+        "files": [{"path": "/" + item.path, "sha256": item.sha256()} for item in access.ACCESS_FILES],
+        "checkedUsers": SSHD_USERS,
+    }
     assert value["source"] == {"vm": {"name": VM_NAME, "uuid": VM_UUID},
                                "snapshot": {"name": SNAPSHOT_NAME, "uuid": SNAPSHOT_UUID}}
     assert value["sshHostKey"] == {"algorithm": "ssh-ed25519", "fingerprint": FINGERPRINT}
