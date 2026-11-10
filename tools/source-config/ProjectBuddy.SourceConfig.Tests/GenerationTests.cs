@@ -13,7 +13,8 @@ public class GenerationTests
     {
         var settings = await Fixture();
         var pinnedManifest = await Generation.ReadPinned(settings.Root, settings.Manifest);
-        Assert.Equal(Configuration.Hash(ConfigurationTests.Manifest), pinnedManifest.Sha256);
+        var canonicalManifest = ConfigurationTests.Manifest.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Equal(Configuration.Hash(canonicalManifest), pinnedManifest.Sha256);
         var valid = await Generation.RunAsync(settings, (_, _) => Task.FromResult(Verdict(accepted)));
         Assert.Equal(accepted, valid);
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
@@ -109,8 +110,10 @@ public class GenerationTests
         var directory = Path.Combine(Path.GetTempPath(), "projectbuddy-source-config-" + Guid.NewGuid().ToString("N"));
         var root = Path.Combine(directory, "source");
         Directory.CreateDirectory(Path.Combine(root, "src"));
-        await File.WriteAllTextAsync(Path.Combine(root, "vipm.toml"), ConfigurationTests.Manifest.Replace("\n", "\r\n", StringComparison.Ordinal));
-        await File.WriteAllTextAsync(Path.Combine(root, "src/fixture.lvproj"), ConfigurationTests.Xml.Replace("\n", "\r\n", StringComparison.Ordinal));
+        var manifest = ConfigurationTests.Manifest.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var project = ConfigurationTests.Xml.Replace("\r\n", "\n", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(Path.Combine(root, "vipm.toml"), manifest.Replace("\n", "\r\n", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(Path.Combine(root, "src/fixture.lvproj"), project.Replace("\n", "\r\n", StringComparison.Ordinal));
         await Generation.Git(root, "init");
         await Generation.Git(root, "-c", "core.autocrlf=true", "add", "vipm.toml", "src/fixture.lvproj");
         await Generation.Git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Fixture");
