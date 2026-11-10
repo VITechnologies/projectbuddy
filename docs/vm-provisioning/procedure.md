@@ -1,7 +1,7 @@
 # VM Provisioning Procedure
 
 - Status: Active
-- Last substantive update: 2026-11-07
+- Last substantive update: 2026-11-10
 - Owner: svelderrainruiz
 
 Satisfies `repo-standards-review`'s DOC/ARCH gaps for VM provisioning
@@ -222,7 +222,10 @@ restored dispatch path.
   runner name, `online` status, and labels before reporting PASS.
   Package any Vagrant box before this phase: the appliance's clone
   profile refuses Actions runner units (see
-  [the appliance profile](ubuntu-vagrant-clone.md#the-appliance-profile)).
+  [the appliance profile](ubuntu-vagrant-clone.md#the-appliance-profile)),
+  and `package-vagrant-box.py` refuses a source VM that carries a runner
+  ([REQ-105](https://github.com/VITechnologies/projectbuddy/wiki/REQ-105); see
+  [Packaging the appliance box](#packaging-the-appliance-box)).
 - **`package-build`** -- the strongest end-to-end proof phase: builds a
   real `.vip` package (`vi_technologies_lib_super_network_streams`)
   against the activated appliance, verifies its installation, and
@@ -282,10 +285,10 @@ family. The `package-build` transition's report
 `package-vagrant-box.py` checks it inline (schema, outcome, VM and base
 snapshot identity, and the package's file, SHA-256, name, version, and
 status) before it packages. That gap is not yet resolved. The packager then
-writes its own `projectbuddy/ubuntu-vagrant-box@1` receipt and has
-`verify-vagrant-box-receipt.py` re-check it and write its hash;
-`scripts/tests/test_package_vagrant_box.py` covers the packager's refusals
-and that receipt.
+writes its own `projectbuddy/ubuntu-vagrant-box@2` receipt, which records its
+runner scan, and has `verify-vagrant-box-receipt.py` re-check it and write its
+hash; `scripts/tests/test_package_vagrant_box.py` covers the packager's
+refusals and that receipt.
 
 `verify-vagrant-clone.py` and `verify-vagrant-clone-receipt.py` are thin
 adapters over the neutral clone verifier (`scripts/vagrant_clone/`), with the
@@ -295,6 +298,56 @@ verify `@1` receipts against the frozen
 `vm/ubuntu-labview/clone-profile.v1.json`. The profile refuses Actions runner
 units, so package the Vagrant box before `register-runner`. See the
 [Ubuntu Vagrant clone check](ubuntu-vagrant-clone.md).
+
+### Packaging the appliance box
+
+`package-vagrant-box.py` packages the running source VM with
+`vagrant package --base`, so the box is the VM as the packager left it at
+power-off. Its options:
+
+- `--vm-name`, `--vm-uuid`, `--activated-snapshot-uuid`, and the optional
+  `--package-snapshot-uuid` bind the source VM and its snapshots.
+- `--evidence-dir`, `--package-report`, and `--package-artifact` name the
+  receipts, captures, and package it checks first.
+- `--ssh-port` is the VM's loopback SSH forward, from 1024 through 65535.
+- `--guest-password-file` is an absolute path, mode 600 or stricter, holding
+  the guest password.
+- `--output`, `--receipt-out`, `--vagrant-home`, and `--temp-dir` place the
+  box, its receipt, and Vagrant's working files on internal NVMe.
+- `--vboxmanage` and `--vagrant` override the programs found on `PATH`.
+- `--run` packages; without it the packager prints its plan and changes
+  nothing.
+
+The source VM must be `running`, at the activated-ready or package-ready
+snapshot, with exactly one loopback SSH forwarding rule for `--ssh-port`.
+Before it plans anything, the packager scans the VM for an Actions runner
+([REQ-105](https://github.com/VITechnologies/projectbuddy/wiki/REQ-105)). It enrolls only the SSH host key that the base receipt records,
+then, in one guest boot:
+
+1. reads the guest boot ID;
+2. lists runner units with the clone check's two `systemctl` commands (see
+   [Runner units](ubuntu-vagrant-clone.md#runner-units));
+3. runs `sudo find / ( -path /dev -o -path /proc -o -path /run -o -path /sys )
+   -prune -o ( -name .credentials -o -name .runner ) -print`, which lists every
+   runner configuration file outside those four pseudo-filesystems;
+4. reads the boot ID again, and fails if it changed.
+
+A runner unit or configuration file, or any failed step, stops the packager
+with exit code `2` before it changes anything; the VM keeps running. A clean
+scan prints `runner_scan=clean boot_id=<boot ID>` in the plan. With `--run`,
+the packager then shuts the guest down itself with `sudo systemctl poweroff`,
+falling back to the ACPI power button, and starts nothing in the guest between
+the scan and the shutdown. The scan cannot see what a process already running
+in the guest writes before the shutdown ends. The packager stops with exit code
+`1` unless VirtualBox then reports the same VM `poweroff` at the scanned
+snapshot.
+
+The receipt's `runnerScan` block records the scan: `bootId`, the empty
+`runnerUnits` and `runnerConfigurations` lists, the `skippedRoots`, and
+`scannedAt`, a UTC time. `verify-vagrant-box-receipt.py` refuses a receipt
+whose scan found anything, skipped other roots, or is malformed, and refuses
+every `projectbuddy/ubuntu-vagrant-box@1` receipt: such a box was packaged
+without a scan and must be packaged again.
 
 ### LabVIEW-free lane box (`vm/ubuntu-lane/`)
 

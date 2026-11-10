@@ -20,7 +20,8 @@ from vagrant_clone import core, live  # noqa: E402
 from vagrant_clone.profile import load_profile  # noqa: E402
 from vagrant_clone.receipt import load_object, source_box  # noqa: E402
 
-BOX_SCHEMA = "projectbuddy/ubuntu-vagrant-box@1"
+BOX_SCHEMA = "projectbuddy/ubuntu-vagrant-box@2"
+UNSCANNED_BOX_SCHEMA = "projectbuddy/ubuntu-vagrant-box@1"
 FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 
 
@@ -75,6 +76,8 @@ def main() -> int:
         expected_fingerprint = base_receipt["sshHostKey"]["fingerprint"]
         if not isinstance(expected_fingerprint, str) or not FINGERPRINT.fullmatch(expected_fingerprint):
             raise ValueError("base receipt SSH fingerprint is invalid")
+        if box_receipt.get("schema") == UNSCANNED_BOX_SCHEMA:
+            raise ValueError("box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it")
         if box_receipt.get("schema") != BOX_SCHEMA or box_receipt.get("outcome") != "PASS":
             raise ValueError("box receipt is not a passing governed receipt")
         source_vm_uuid = str(uuid.UUID(box_receipt["source"]["vm"]["uuid"]))

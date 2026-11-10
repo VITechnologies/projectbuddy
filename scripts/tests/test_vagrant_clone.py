@@ -684,7 +684,7 @@ def setup_receipt(tmp_path: Path, profile: clone_profile.Profile | None = None,
                   observed: tuple = ()) -> SimpleNamespace:
     loaded = profile or appliance()
     evidence_dir = write_evidence(tmp_path / "evidence")
-    box_receipt = write_json(tmp_path / "box-receipt.json", {"schema": "projectbuddy/ubuntu-vagrant-box@1",
+    box_receipt = write_json(tmp_path / "box-receipt.json", {"schema": "projectbuddy/ubuntu-vagrant-box@2",
                                                              "box": {"sha256": BOX_SHA256}})
     receipt = clone_receipt.build_receipt(loaded, box=clone_receipt.source_box(box_receipt), name=NAME,
                                           uuid=UUID, boot=BOOT, evidence_dir=evidence_dir, observed=list(observed))
@@ -1285,7 +1285,7 @@ def test_enrollment_is_retried(live_setup):
 
 def test_enrollment_gives_up(live_setup):
     guest = live_setup.guest(enroll_failures=30)
-    with pytest.raises(CloneError, match="^clone SSH identity did not become ready$"):
+    with pytest.raises(CloneError, match="^guest SSH identity did not become ready$"):
         live_setup.check(guest)
     assert guest.calls == ["enroll"] * 30 + AFTER_FAILURE
     assert live_setup.sleeps == [5] * 30
@@ -1408,7 +1408,7 @@ def adapter(tmp_path, monkeypatch):
     password.chmod(0o600)
     base = write_json(inputs / "base-receipt.json", {"sshHostKey": {"fingerprint": FINGERPRINT}})
     box_receipt = {
-        "schema": "projectbuddy/ubuntu-vagrant-box@1", "outcome": "PASS", "box": {"sha256": BOX_SHA256},
+        "schema": "projectbuddy/ubuntu-vagrant-box@2", "outcome": "PASS", "box": {"sha256": BOX_SHA256},
         "source": {"vm": {"name": "appliance", "uuid": SOURCE_UUID}, "activatedSnapshot": {"uuid": ACTIVATED_UUID},
                    "snapshot": {"uuid": PACKAGE_UUID}},
         "provenanceSha256": {"baseReceiptSha256": sha256_file(base)},
@@ -1518,7 +1518,9 @@ def write_base(content: object):
     (write_base({"sshHostKey": {"fingerprint": "SHA256:" + "A" * 43 + "="}}), {},
      "base receipt SSH fingerprint is invalid"),
     (write_base({"sshHostKey": {"fingerprint": None}}), {}, "base receipt SSH fingerprint is invalid"),
-    (change_box("/schema", "projectbuddy/ubuntu-vagrant-box@2"), {}, "box receipt is not a passing governed receipt"),
+    (change_box("/schema", "projectbuddy/ubuntu-vagrant-box@1"), {},
+     "box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it"),
+    (change_box("/schema", "projectbuddy/ubuntu-vagrant-box@3"), {}, "box receipt is not a passing governed receipt"),
     (change_box("/outcome", "FAIL"), {}, "box receipt is not a passing governed receipt"),
     (change_box("/source/vm/uuid", UUID.upper()), {}, "clean clone UUID must differ from the source appliance UUID"),
     (change_box("/source/vm/uuid", "appliance"), {}, "badly formed hexadecimal UUID string"),

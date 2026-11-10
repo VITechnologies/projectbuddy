@@ -1,32 +1,41 @@
-"""Appliance box packager (package-vagrant-box.py): its contract before the runner scan.
+"""Appliance box packager (package-vagrant-box.py): REQ-105's runner scan, then the box and its receipt.
 
 The packager runs in process with a fake host behind ``subprocess.run`` and ``subprocess.Popen``. Storage,
-VBoxManage, Vagrant, and the activation and public-appliance verifiers are fakes; the box receipt verifier is real,
-and the fake ``vagrant package`` writes a real box for it to check. Issue: VITechnologies/projectbuddy#195.
+VBoxManage, Vagrant, the running source VM's guest over SSH, and the activation and public-appliance verifiers are
+fakes; the box receipt verifier is real, and the fake ``vagrant package`` writes a real box for it to check.
+Issue: VITechnologies/projectbuddy#195.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import io
 import json
 import os
+import re
 import runpy
 import shutil
 import signal
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPOSITORY / "scripts"))
+
+from vagrant_clone import guest  # noqa: E402
+
 APPLIANCE = REPOSITORY / "vm" / "ubuntu-labview"
 PACKAGER = APPLIANCE / "package-vagrant-box.py"
 BOX_VERIFIER = APPLIANCE / "verify-vagrant-box-receipt.py"
 MANIFEST = APPLIANCE / "provisioning-manifest.json"
 EMBEDDED = APPLIANCE / "Vagrantfile.box"
+ENROLL = APPLIANCE / "enroll-ssh-host-key.py"
 REAL_POPEN = subprocess.Popen
 VBOX = "/host/bin/VBoxManage"
 VAGRANT = "/host/bin/vagrant"
@@ -37,6 +46,18 @@ PACKAGE_UUID = "3c2d4e5f-6071-4829-8b3c-4d5e6f708192"
 TAKEN_UUID = "4d3e5f60-7182-493a-9c4d-5e6f708192a3"
 PUBLIC_UUID = "5e4f6071-8293-4a4b-8d5e-6f708192a3b4"
 BOOT = "0f8fad5b-d9cb-469f-a165-70867728950e"
+SCAN_BOOT = "6f5e7081-92a3-4b4c-9e6f-708192a3b4c5"
+PORT = 2222
+SSH_RULE = f"ssh,tcp,127.0.0.1,{PORT},,22"
+HOST_KEY = "SHA256:" + "k" * 43
+PASSWORD = "guest password\n"
+SUDO = 'sudo -S -p "" '
+SCAN = (SUDO + "find / '(' -path /dev -o -path /proc -o -path /run -o -path /sys ')' -prune"
+        " -o '(' -name .credentials -o -name .runner ')' -print")
+POWEROFF = SUDO + "systemctl poweroff"
+BOOT_ID = "cat /proc/sys/kernel/random/boot_id"
+UNIT_FILES = "systemctl list-unit-files --no-pager --no-legend --plain --full"
+UNITS = "systemctl list-units --all --no-pager --no-legend --plain --full"
 ACTIVATED = "labview2026-q3-pro-activated-ready"
 PACKAGE_READY = "labview2026-q3-pro-package-ready"
 PUBLIC_SNAPSHOT = "labview2026-q3-public-ready"
@@ -93,7 +114,7 @@ def hash_file(target: Path) -> Path:
 
 
 def vm_info(**changes: str) -> dict[str, str]:
-    info = {"name": NAME, "UUID": VM_UUID, "VMState": "poweroff",
+    info = {"name": NAME, "UUID": VM_UUID, "VMState": "running", "Forwarding(0)": SSH_RULE,
             "CurrentSnapshotName": ACTIVATED, "CurrentSnapshotUUID": ACTIVATED_UUID}
     info.update(changes)
     return {key: value for key, value in info.items() if value is not None}
@@ -126,7 +147,7 @@ class Process:
 
 
 class Host:
-    """The packager's host: storage, the sibling verifiers, VBoxManage, and Vagrant."""
+    """The packager's host: storage, the sibling verifiers, VBoxManage, Vagrant, and the source VM's guest."""
 
     def __init__(self) -> None:
         self.mount = f"{DEVICE} ext4 rw,relatime\n"
@@ -139,7 +160,8 @@ class Host:
         self.info_code = 0
         self.snapshots = {"SnapshotName": ACTIVATED, "SnapshotUUID": ACTIVATED_UUID, "SnapshotDescription": ""}
         self.snapshots_code = 0
-        self.take = (0, vm_info(CurrentSnapshotName=PACKAGE_READY, CurrentSnapshotUUID=TAKEN_UUID))
+        self.take = (0, vm_info(VMState="poweroff", CurrentSnapshotName=PACKAGE_READY,
+                                CurrentSnapshotUUID=TAKEN_UUID))
         self.package = 0
         self.wrapper = WRAPPER
         self.box_bytes: bytes | None = None
@@ -147,10 +169,64 @@ class Host:
         self.calls: list[list[str]] = []
         self.environments: dict[str, dict[str, str]] = {}
         self.killed: list[int] = []
+        self.enroll_failures = 0
+        self.enrolled: list[list[str]] = []
+        self.guest = {BOOT_ID: [(0, f"{SCAN_BOOT}\n")],
+                      UNIT_FILES: [(0, "ssh.service enabled enabled\n")],
+                      UNITS: [(0, "ssh.service loaded active running OpenSSH server\n")],
+                      SCAN: [(0, "")], POWEROFF: [(255, "")]}
+        self.commands: list[str] = []
+        self.sudo_inputs: list[str] = []
+        self.askpass: list[str] = []
+        self.poweroff_works = True
+        self.button_works = True
+        self.stopped: dict[str, str | None] = {"VMState": "poweroff"}
+        self.stopped_code = 0
+        self.hooks: dict[str, object] = {}
 
-    def run(self, argv, **_options) -> subprocess.CompletedProcess:
+    def stop(self) -> None:
+        self.info = {key: value for key, value in {**self.info, **self.stopped}.items() if value is not None}
+        self.info_code = self.stopped_code
+
+    def ssh(self, argv, options) -> subprocess.CompletedProcess:
+        assert argv[:2] == ["ssh", "-p"] and argv[2] == str(PORT) and argv[-2] == "actor@127.0.0.1"
+        known_hosts = Path(next(word for word in argv if word.startswith("UserKnownHostsFile=")).split("=", 1)[1])
+        assert "StrictHostKeyChecking=yes" in argv and known_hosts.read_text(encoding="utf-8") == "enrolled\n"
+        if not self.askpass:
+            askpass = Path(options["env"]["SSH_ASKPASS"])
+            assert askpass.stat().st_mode & 0o777 == 0o700
+            with REAL_POPEN([str(askpass)], stdout=subprocess.PIPE, text=True) as process:
+                self.askpass.append(process.communicate(timeout=30)[0])
+        command = argv[-1]
+        self.commands.append(command)
+        if command.startswith(SUDO):
+            self.sudo_inputs.append(options["stdin"].read())
+        if command == POWEROFF and self.poweroff_works:
+            self.stop()
+        self.hooks.pop(command, lambda: None)()
+        if command not in self.guest:
+            raise AssertionError(f"unexpected guest command: {command}")
+        replies = self.guest[command]
+        code, output = replies.pop(0) if len(replies) > 1 else replies[0]
+        return subprocess.CompletedProcess(argv, code, output, "")
+
+    def run(self, argv, **options) -> subprocess.CompletedProcess:
         self.calls.append(list(argv))
         program = Path(argv[0]).name
+        if program == "ssh":
+            return self.ssh(list(argv), options)
+        if argv[0] == str(ENROLL):
+            self.enrolled.append(list(argv))
+            if self.enroll_failures or argv[argv.index("--expected-fingerprint") + 1] != HOST_KEY:
+                self.enroll_failures = max(self.enroll_failures - 1, 0)
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            Path(argv[argv.index("--out") + 1]).write_text("enrolled\n", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[0] == VBOX and argv[1] == "controlvm":
+            assert argv[2:] == [VM_UUID, "acpipowerbutton"]
+            if self.button_works:
+                self.stop()
+            return subprocess.CompletedProcess(argv, 0, "", "")
         if program == "findmnt":
             if argv[3] == "SOURCE,FSTYPE,OPTIONS":
                 return subprocess.CompletedProcess(argv, self.findmnt_code, self.mount.replace(
@@ -196,8 +272,12 @@ class Host:
         return [Path(argv[0]).name for argv in self.calls]
 
     def mutations(self) -> list[list[str]]:
-        return [argv for argv in self.calls
-                if argv[0] == VAGRANT or (argv[0] == VBOX and "take" in argv)]
+        return [argv for argv in self.calls if argv[0] == VAGRANT or (argv[0] == VBOX and (
+            "take" in argv or "controlvm" in argv)) or (argv[0] == "ssh" and argv[-1] == POWEROFF)]
+
+    def mutation_names(self) -> list[str]:
+        return ["poweroff" if argv[0] == "ssh" else argv[-1] if "controlvm" in argv else "take" if "take" in argv
+                else argv[1] for argv in self.mutations()]
 
 
 @pytest.fixture
@@ -205,7 +285,8 @@ def packaging(tmp_path, monkeypatch):
     previous = os.umask(0o077)
     os.umask(previous)
     evidence = private_dir(tmp_path / "evidence")
-    base = private_file(evidence / "base-bootstrap-receipt.json", {"schema": "base"})
+    base = private_file(evidence / "base-bootstrap-receipt.json",
+                        {"schema": "base", "sshHostKey": {"algorithm": "ssh-ed25519", "fingerprint": HOST_KEY}})
     public = private_file(evidence / "public-provisioning-receipt.json", {"schema": "public"})
     public_appliance = private_file(evidence / "public-appliance-receipt.json",
                                     {"snapshot": {"name": PUBLIC_SNAPSHOT, "uuid": PUBLIC_UUID}})
@@ -225,7 +306,9 @@ def packaging(tmp_path, monkeypatch):
     vagrant_home = private_dir(tmp_path / "vagrant-home")
     private_dir(vagrant_home / "boxes")
     out = private_dir(tmp_path / "out")
-    state = SimpleNamespace(
+    runtime = private_dir(tmp_path / "runtime")
+    password = private_file(private_dir(tmp_path / "secrets") / "guest-password", PASSWORD)
+    state = SimpleNamespace(runtime=runtime, password=password, sleeps=[],
         host=Host(), evidence=evidence, base=base, public=public, public_appliance=public_appliance,
         activation=activation, captures=captures, report=report, artifact=artifact, vagrant_home=vagrant_home,
         temp=private_dir(tmp_path / "tmp"), out=out, box=out / "appliance.box",
@@ -235,7 +318,10 @@ def packaging(tmp_path, monkeypatch):
         "--evidence-dir": str(evidence), "--package-report": str(report), "--package-artifact": str(artifact),
         "--vagrant-home": str(vagrant_home), "--temp-dir": str(state.temp), "--output": str(state.box),
         "--receipt-out": str(state.receipt), "--vboxmanage": VBOX, "--vagrant": VAGRANT,
+        "--ssh-port": str(PORT), "--guest-password-file": str(password),
     }
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setattr(time, "sleep", state.sleeps.append)
     monkeypatch.setattr(subprocess, "run", lambda argv, **options: state.host.run(argv, **options))
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **options: state.host.popen(argv, **options))
     monkeypatch.setattr(os, "killpg", lambda pid, sent: state.host.killed.append(sent))
@@ -285,6 +371,7 @@ def test_the_packager_plans_from_the_activated_snapshot(packaging, capsys):
         f"source_vm_uuid={VM_UUID}",
         f"activated_snapshot_uuid={ACTIVATED_UUID}",
         "package_snapshot=create",
+        f"runner_scan=clean boot_id={SCAN_BOOT}",
     ]
     assert verifier_calls(packaging) == [
         [str(APPLIANCE / "verify-activation-receipt.py"), str(packaging.activation), "--vm-name", NAME,
@@ -294,17 +381,39 @@ def test_the_packager_plans_from_the_activated_snapshot(packaging, capsys):
          "--manifest", str(MANIFEST), "--vm-name", NAME, "--vm-uuid", VM_UUID,
          "--snapshot-name", PUBLIC_SNAPSHOT, "--snapshot-uuid", PUBLIC_UUID],
     ]
-    assert packaging.host.calls[-1] == [VBOX, "showvminfo", NAME, "--machinereadable"]
+    assert [VBOX, "showvminfo", NAME, "--machinereadable"] in packaging.host.calls
     assert packaging.host.mutations() == []
     assert outputs(packaging) == {}
+
+
+def test_the_scan_reaches_the_guest_with_the_base_receipt_host_key(packaging, capsys):
+    assert packaging.run() == 0
+    assert packaging.host.enrolled == [[str(ENROLL), "--host", "127.0.0.1", "--port", str(PORT),
+                                        "--expected-fingerprint", HOST_KEY, "--out", packaging.host.enrolled[0][-1]]]
+    assert packaging.host.commands == [BOOT_ID, UNIT_FILES, UNITS, SCAN, BOOT_ID]
+    assert packaging.host.askpass == [PASSWORD] and packaging.host.sudo_inputs == [PASSWORD]
+    assert list(packaging.runtime.iterdir()) == []
+
+
+def test_a_relative_password_file_is_refused_even_where_it_resolves(packaging, capsys, monkeypatch):
+    monkeypatch.chdir(packaging.password.parent)
+    assert packaging.run(guest_password_file=packaging.password.name) == 2
+    assert "guest password file must be an existing absolute path" in capsys.readouterr().err
+    assert packaging.host.enrolled == []
+
+
+def test_enrollment_is_retried_while_the_guest_boots(packaging, capsys):
+    packaging.host.enroll_failures = 29
+    assert packaging.run() == 0
+    assert len(packaging.host.enrolled) == 30 and packaging.sleeps == [5] * 29
 
 
 def test_the_packager_plans_from_a_marked_package_snapshot(packaging, capsys):
     at_package_ready(packaging)
     assert packaging.run() == 0
     output = capsys.readouterr().out.splitlines()
-    assert output[0] == "Vagrant box packaging: PLAN" and output[-1] == f"package_snapshot={PACKAGE_UUID}"
-    assert packaging.host.calls[-1] == [VBOX, "snapshot", VM_UUID, "list", "--machinereadable"]
+    assert output[0] == "Vagrant box packaging: PLAN" and output[-2] == f"package_snapshot={PACKAGE_UUID}"
+    assert [VBOX, "snapshot", VM_UUID, "list", "--machinereadable"] in packaging.host.calls
     assert packaging.host.mutations() == []
 
 
@@ -330,16 +439,23 @@ def test_the_packager_takes_the_package_snapshot_and_packages(packaging, capsys)
         f"Vagrant box packaging: PASS: {packaging.box}", f"Vagrant box packaging: PASS: {packaging.receipt}"]
     marker = (f"projectbuddy/package-ready@1;activated={ACTIVATED_UUID};"
               f"report={sha256(packaging.report)};artifact={sha256(packaging.artifact)}")
-    assert packaging.host.mutations() == [
+    assert packaging.host.mutations()[1:] == [
         [VBOX, "snapshot", VM_UUID, "take", PACKAGE_READY, "--description", marker],
         [VAGRANT, "package", "--base", VM_UUID, "--output", str(packaging.box), "--vagrantfile", str(EMBEDDED)],
     ]
+    assert packaging.host.mutation_names() == ["poweroff", "take", "package"]
+    assert packaging.host.commands == [BOOT_ID, UNIT_FILES, UNITS, SCAN, BOOT_ID, POWEROFF]
+    assert packaging.host.sudo_inputs == [PASSWORD, PASSWORD]
+    assert list(packaging.runtime.iterdir()) == []
     environment = packaging.host.environments["vagrant"]
     assert (environment["VAGRANT_HOME"], environment["TMPDIR"]) == (str(packaging.vagrant_home), str(packaging.temp))
     receipt = json.loads(packaging.receipt.read_text(encoding="utf-8"))
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    scanned = datetime.datetime.fromisoformat(receipt["runnerScan"].pop("scannedAt"))
+    assert scanned.utcoffset() == datetime.timedelta(0)
+    assert abs(datetime.datetime.now(datetime.timezone.utc) - scanned) < datetime.timedelta(minutes=1)
     assert receipt == {
-        "schema": "projectbuddy/ubuntu-vagrant-box@1",
+        "schema": "projectbuddy/ubuntu-vagrant-box@2",
         "source": {"vm": {"name": NAME, "uuid": VM_UUID},
                    "activatedSnapshot": {"name": ACTIVATED, "uuid": ACTIVATED_UUID},
                    "snapshot": {"name": PACKAGE_READY, "uuid": TAKEN_UUID}},
@@ -363,6 +479,8 @@ def test_the_packager_takes_the_package_snapshot_and_packages(packaging, capsys)
             "vipmVersion": manifest["vipm"]["version"],
             "vipmArtifactSha256": manifest["vipm"]["sha256"],
         },
+        "runnerScan": {"bootId": SCAN_BOOT, "runnerUnits": [], "runnerConfigurations": [],
+                       "skippedRoots": ["/dev", "/proc", "/run", "/sys"]},
         "failures": [],
         "outcome": "PASS",
     }
@@ -375,7 +493,7 @@ def test_the_packager_takes_the_package_snapshot_and_packages(packaging, capsys)
 def test_the_packager_packages_an_existing_package_snapshot(packaging, capsys):
     at_package_ready(packaging)
     assert packaging.run("--run") == 0
-    assert [argv[1] for argv in packaging.host.mutations()] == ["package"]
+    assert packaging.host.mutation_names() == ["poweroff", "package"]
     receipt = json.loads(packaging.receipt.read_text(encoding="utf-8"))
     assert receipt["source"]["snapshot"] == {"name": PACKAGE_READY, "uuid": PACKAGE_UUID}
 
@@ -392,9 +510,52 @@ def test_the_box_verifier_checks_what_the_packager_wrote(packaging, capsys):
         "--vm-name", NAME, "--vm-uuid", VM_UUID, "--activated-snapshot-uuid", ACTIVATED_UUID,
         "--package-snapshot-uuid", TAKEN_UUID, "--hash-out", str(packaging.receipt_hash),
     ]
-    rewrite(packaging.receipt, lambda receipt: receipt.update(schema="projectbuddy/ubuntu-vagrant-box@2"))
-    code, error = real_run([sys.executable, *verify[:-2]])
-    assert code == 2 and "Vagrant box receipt: FAIL: unexpected schema" in error
+    assert real_run([sys.executable, *verify[:-2]]) == (0, "")
+
+
+def without_scan_field(name: str) -> object:
+    return lambda receipt: receipt["runnerScan"].pop(name)
+
+
+def scan_field(name: str, value) -> object:
+    return lambda receipt: receipt["runnerScan"].update({name: value})
+
+
+RECEIPT_REFUSALS = [
+    (lambda receipt: receipt.update(schema="projectbuddy/ubuntu-vagrant-box@1"),
+     "box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it"),
+    (lambda receipt: receipt.update(schema="projectbuddy/ubuntu-vagrant-box@3"), "unexpected schema"),
+    (lambda receipt: receipt.pop("runnerScan"), "runner scan is missing or malformed"),
+    (lambda receipt: receipt.update(runnerScan=[]), "runner scan is missing or malformed"),
+    (without_scan_field("scannedAt"), "runner scan is missing or malformed"),
+    (scan_field("extra", True), "runner scan is missing or malformed"),
+    (scan_field("runnerUnits", ["actions.runner.org-repo.lane.service"]), "runner scan found an Actions runner"),
+    (scan_field("runnerConfigurations", ["/home/actor/actions-runner/.runner"]),
+     "runner scan found an Actions runner"),
+    (scan_field("runnerUnits", None), "runner scan found an Actions runner"),
+    (scan_field("skippedRoots", ["/dev", "/proc", "/run", "/sys", "/home"]), "runner scan skipped other roots"),
+    (scan_field("bootId", SCAN_BOOT.upper()), "runner scan boot ID is invalid"),
+    (scan_field("bootId", "boot"), "runner scan boot ID is invalid"),
+    (scan_field("bootId", None), "runner scan boot ID is invalid"),
+    (scan_field("scannedAt", "2026-11-10T03:00:00"), "runner scan time is invalid"),
+    (scan_field("scannedAt", "2026-11-10T03:00:00+01:00"), "runner scan time is invalid"),
+    (scan_field("scannedAt", "yesterday"), "runner scan time is invalid"),
+    (scan_field("scannedAt", 1794280389), "runner scan time is invalid"),
+]
+
+
+@pytest.mark.parametrize("change, message", RECEIPT_REFUSALS)
+def test_the_box_verifier_refuses_a_receipt_without_a_clean_runner_scan(packaging, capsys, change, message):
+    assert packaging.run("--run") == 0
+    rewrite(packaging.receipt, change)
+    code, error = real_run([sys.executable, *verifier_calls(packaging)[-1][:-2]])
+    assert code == 2 and f"Vagrant box receipt: FAIL: {message}\n" in error
+
+
+def test_the_box_verifier_accepts_a_utc_scan_time_written_with_z(packaging, capsys):
+    assert packaging.run("--run") == 0
+    rewrite(packaging.receipt, scan_field("scannedAt", "2026-11-10T03:00:00Z"))
+    assert real_run([sys.executable, *verifier_calls(packaging)[-1][:-2]]) == (0, "")
 
 
 # Refusals: nothing is created, snapshotted, or packaged.
@@ -434,8 +595,31 @@ def set_info(**changes: str) -> object:
     return lambda state: setattr(state.host, "info", vm_info(**changes))
 
 
+FORWARD = "source VM does not have exactly one loopback SSH forwarding rule for the expected port"
+BASE_KEY = "base receipt SSH fingerprint is invalid"
+
+
+def base_changed(content) -> object:
+    return lambda state: private_file(state.base, content)
+
+
+def guest_replies(command: str, *replies: tuple[int, str]) -> object:
+    return lambda state: state.host.guest.update({command: list(replies)})
+
+
 REFUSALS = [
     (None, dict(vm_name="bad name"), "VM name is invalid"),
+    (None, dict(ssh_port="1023"), "SSH port must be from 1024 through 65535"),
+    (None, dict(ssh_port="65536"), "SSH port must be from 1024 through 65535"),
+    (None, dict(guest_password_file="guest-password"), "guest password file must be an existing absolute path"),
+    (lambda s: s.password.unlink(), {}, "guest password file must be an existing absolute path"),
+    (lambda s: s.password.chmod(0o640), {}, "guest password file must be an existing absolute path"),
+    (base_changed({"sshHostKey": {"fingerprint": "SHA256:" + "k" * 42}}), {}, BASE_KEY),
+    (base_changed({"sshHostKey": {"fingerprint": None}}), {}, BASE_KEY),
+    (base_changed({"sshHostKey": "SHA256:" + "k" * 43}), {}, BASE_KEY),
+    (base_changed([]), {}, BASE_KEY),
+    (base_changed({"sshHostKey": {"fingerprint": "SHA256:" + "m" * 43}}), {},
+     "runner scan failed: guest SSH identity did not become ready"),
     (None, dict(vm_uuid="appliance"), "badly formed hexadecimal UUID string"),
     (None, dict(package_snapshot_uuid="snapshot"), "badly formed hexadecimal UUID string"),
     (lambda s: s.evidence.chmod(0o750), {}, "directory must have mode 700 or stricter"),
@@ -486,8 +670,12 @@ REFUSALS = [
      "public appliance receipt verification failed"),
     (lambda s: setattr(s.host, "info_code", 1), {}, "cannot read VM identity"),
     (set_info(UUID=PACKAGE_UUID), {}, "registered VM UUID does not match expected identity"),
-    (set_info(VMState="running"), {}, "source VM must be powered off"),
-    (set_info(VMState="saved"), {}, "source VM must be powered off"),
+    (set_info(VMState="poweroff"), {}, "source VM must be running for the runner scan"),
+    (set_info(VMState="saved"), {}, "source VM must be running for the runner scan"),
+    (set_info(**{"Forwarding(0)": None}), {}, FORWARD),
+    (set_info(**{"Forwarding(0)": f"ssh,tcp,0.0.0.0,{PORT},,22"}), {}, FORWARD),
+    (set_info(**{"Forwarding(0)": "ssh,tcp,127.0.0.1,2223,,22"}), {}, FORWARD),
+    (set_info(**{"Forwarding(1)": "other,tcp,127.0.0.1,2223,,22"}), {}, FORWARD),
     (set_info(CurrentSnapshotUUID=PACKAGE_UUID), {},
      "activated-ready snapshot identity does not match packaging inputs"),
     (None, dict(package_snapshot_uuid=PACKAGE_UUID),
@@ -507,6 +695,26 @@ REFUSALS = [
      "source VM is not at the activated-ready or package-ready boundary"),
     (set_info(CurrentSnapshotName=None, CurrentSnapshotUUID=None), {},
      "source VM is not at the activated-ready or package-ready boundary"),
+    (lambda s: setattr(s.host, "enroll_failures", 30), {},
+     "runner scan failed: guest SSH identity did not become ready"),
+    (guest_replies(BOOT_ID, (255, "")), {}, "runner scan failed: cannot read the guest boot ID"),
+    (guest_replies(BOOT_ID, (0, "boot\n")), {}, "runner scan failed: guest boot ID is not a UUID"),
+    (guest_replies(BOOT_ID, (0, f"{SCAN_BOOT}\n"), (0, f"{BOOT}\n")), {},
+     "runner scan failed: the guest restarted during the runner scan"),
+    (guest_replies(UNIT_FILES, (1, "")), {}, "runner scan failed: systemctl list-unit-files failed with exit code 1"),
+    (guest_replies(UNITS, (0, "")), {}, "runner scan failed: systemctl list-units listed no units"),
+    (guest_replies(SCAN, (1, "")), {}, "runner scan failed: runner configuration scan failed with exit code 1"),
+    (guest_replies(SCAN, (124, "")), {}, "runner scan failed: runner configuration scan failed with exit code 124"),
+    (lambda s: s.runtime.rmdir(), {}, "cannot create the guest session directory"),
+    (lambda s: s.host.hooks.update({UNITS: s.password.unlink}), {},
+     "runner scan failed: [Errno 2] No such file or directory"),
+    (guest_replies(UNITS, (0, "actions.runner.org-repo.lane.service loaded active running GitHub Actions Runner\n")),
+     {}, "REQ-105: the source VM carries an Actions runner: actions.runner.org-repo.lane.service"),
+    (guest_replies(UNIT_FILES, (0, "actions.runner.org-repo.lane.service enabled enabled\n")),
+     {}, "REQ-105: the source VM carries an Actions runner: actions.runner.org-repo.lane.service"),
+    (guest_replies(SCAN, (0, "/home/actor/actions-runner/.runner\n/home/actor/actions-runner/.credentials\n")), {},
+     "REQ-105: the source VM carries an Actions runner: /home/actor/actions-runner/.credentials, "
+     "/home/actor/actions-runner/.runner"),
 ]
 
 
@@ -522,6 +730,8 @@ def test_the_packager_refuses(packaging, capsys, setup, changes, message, mode):
     assert captured.err.startswith("Vagrant box packaging: FAIL: ") and message in captured.err
     assert packaging.host.mutations() == []
     assert outputs(packaging) == before
+    assert bool(packaging.host.enrolled) == message.startswith(("runner scan failed", "REQ-105"))
+    assert not packaging.runtime.exists() or list(packaging.runtime.iterdir()) == []
 
 
 def test_a_storage_refusal_stops_before_any_verifier(packaging, capsys):
@@ -573,7 +783,7 @@ def test_a_packaging_failure_removes_the_outputs(packaging, capsys, setup, messa
     setup(packaging)
     assert packaging.run("--run") == 1
     assert f"Vagrant box packaging: FAIL: {message}\n" in capsys.readouterr().err
-    assert ["take" if "take" in argv else argv[1] for argv in packaging.host.mutations()] == mutations
+    assert packaging.host.mutation_names() == ["poweroff", *mutations]
     assert outputs(packaging) == {}
 
 
@@ -592,9 +802,68 @@ def test_a_hung_vagrant_is_stopped(packaging, capsys, hangs, signals):
     assert outputs(packaging) == {}
 
 
-@pytest.mark.xfail(raises=ValueError, strict=True,
-                   reason="#195: a taken snapshot without a UUID escapes main() with a traceback")
 def test_a_taken_snapshot_without_a_uuid_fails_cleanly(packaging, capsys):
-    packaging.host.take = (0, vm_info(CurrentSnapshotName=PACKAGE_READY, CurrentSnapshotUUID=None))
+    packaging.host.take = (0, vm_info(VMState="poweroff", CurrentSnapshotName=PACKAGE_READY, CurrentSnapshotUUID=None))
     assert packaging.run("--run") == 1
     assert "Vagrant box packaging: FAIL: badly formed hexadecimal UUID string" in capsys.readouterr().err
+    assert packaging.host.mutation_names() == ["poweroff", "take"]
+    assert outputs(packaging) == {}
+
+
+# Power-off after the scan.
+
+def test_the_power_button_stops_a_guest_that_ignores_poweroff(packaging, capsys):
+    packaging.host.poweroff_works = False
+    assert packaging.run("--run") == 0
+    assert packaging.host.mutation_names() == ["poweroff", "acpipowerbutton", "take", "package"]
+    assert packaging.sleeps == [2] * 60
+
+
+def stopped_as(**changes: str | None) -> object:
+    return lambda state: state.host.stopped.update(changes)
+
+
+def ignores_power(state) -> None:
+    state.host.poweroff_works = state.host.button_works = False
+
+
+def loses_password(state) -> None:
+    state.host.hooks[SCAN] = state.password.unlink
+
+
+STRAY = "source VM is not powered off at the scanned snapshot"
+POWEROFF_FAILURES = [
+    (ignores_power, "source VM did not power off after the runner scan", ["poweroff", "acpipowerbutton"]),
+    (loses_password, "source VM did not power off after the runner scan", []),
+    (stopped_as(CurrentSnapshotName=PACKAGE_READY, CurrentSnapshotUUID=TAKEN_UUID), STRAY, ["poweroff"]),
+    (stopped_as(CurrentSnapshotUUID=PACKAGE_UUID), STRAY, ["poweroff"]),
+    (stopped_as(CurrentSnapshotName=None), STRAY, ["poweroff"]),
+    (stopped_as(UUID=PACKAGE_UUID), STRAY, ["poweroff"]),
+    (lambda s: setattr(s.host, "stopped_code", 1), STRAY, ["poweroff"]),
+]
+
+
+@pytest.mark.parametrize("setup, message, mutations", POWEROFF_FAILURES)
+def test_the_packager_stops_unless_the_scanned_vm_powers_off_unchanged(packaging, capsys, setup, message,
+                                                                        mutations):
+    setup(packaging)
+    assert packaging.run("--run") == 1
+    assert capsys.readouterr().err == f"Vagrant box packaging: FAIL: {message}\n"
+    assert packaging.host.mutation_names() == mutations
+    assert outputs(packaging) == {} and list(packaging.runtime.iterdir()) == []
+
+
+# The procedure.
+
+def test_the_packaging_procedure_stays_in_step_with_the_packager(packaging, capsys):
+    procedure = (REPOSITORY / "docs" / "vm-provisioning" / "procedure.md").read_text(encoding="utf-8")
+    section = procedure.split("\n### Packaging the appliance box\n", 1)[1].split("\n### ", 1)[0]
+    unwrapped = " ".join(section.split())
+    options = re.findall(r'add_argument\("(--[a-z0-9-]+)"', PACKAGER.read_text(encoding="utf-8"))
+    assert len(options) == 16 and [option for option in options if f"`{option}`" not in section] == []
+    assert f"`sudo {' '.join(guest.RUNNER_CONFIGURATION_QUERY)}`" in unwrapped
+    assert "`sudo systemctl poweroff`" in section and "`runner_scan=clean boot_id=<boot ID>`" in section
+    assert packaging.run("--run") == 0
+    scan = json.loads(packaging.receipt.read_text(encoding="utf-8"))["runnerScan"]
+    assert [field for field in scan if f"`{field}`" not in section] == []
+    assert "with exit code `2` before it changes anything" in unwrapped and "with exit code `1` unless" in unwrapped

@@ -13,8 +13,8 @@ runner. It is the base image for the Ubuntu lane in the wiki's
 lane plan, teardown, and clone verifier that consume it are
 `VITechnologies/projectbuddy#185`.
 
-The LabVIEW appliance under `vm/ubuntu-labview/` is unchanged. It keeps its
-own manifest, packager, and `projectbuddy/ubuntu-vagrant-box@1` receipt (see
+The LabVIEW appliance under `vm/ubuntu-labview/` is separate. It keeps its
+own manifest, packager, and `projectbuddy/ubuntu-vagrant-box@2` receipt (see
 [the VM provisioning procedure](procedure.md#ubuntu-labview-vm-vmubuntu-labview-provision-ubuntu-vmyml)).
 
 The pieces:
