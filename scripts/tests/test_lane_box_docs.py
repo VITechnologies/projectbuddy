@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lane_box import cli, packager, profile, readiness, receipt  # noqa: E402
+from lane_box import access, cli, packager, profile, readiness, receipt  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 PROCEDURE = (REPOSITORY / "docs" / "vm-provisioning" / "ubuntu-lane-box.md").read_text(encoding="utf-8")
@@ -50,9 +51,12 @@ def test_readiness_receipt_fields_are_documented(tmp_path):
     lane = profile.load_profile(REPOSITORY / "vm" / "ubuntu-lane" / "lane-profile.example.json")
     value = readiness.build_readiness(tmp_path, lane, absent)
     assert sorted(table_names("The readiness receipt (")) == sorted(set(value) - {"schema"})
-    for block in ("runnerAbsence", "labviewAbsence"):
+    for block in ("runnerAbsence", "labviewAbsence", "laneAccess"):
         row = next(line for line in PROCEDURE.splitlines() if line.startswith(f"| `{block}` |"))
         assert sorted(re.findall(r"`([^`]+)`", row.split("|")[2])) == sorted(value[block])
+    lane_access = UNWRAPPED.split("In `laneAccess`, ", 1)[1].split("\n\n", 1)[0]
+    entries = (value["laneAccess"]["files"][0], value["laneAccess"]["unitLink"], value["laneAccess"]["sshd"][0])
+    assert all(f"`{field}`" in lane_access for entry in entries for field in entry)
     toolchain_row = next(line for line in PROCEDURE.splitlines() if line.startswith("| `toolchain` | for each"))
     assert sorted(re.findall(r"`([^`]+)`", toolchain_row)[1:]) == sorted(value["toolchain"][0])
 
@@ -64,9 +68,11 @@ def test_box_receipt_fields_are_documented(tmp_path):
     inputs = dict.fromkeys(("baseReceipt", "embeddedVagrantfile", "profile", "readinessReceipt"), box)
     value = receipt.build_box_receipt(
         profile=lane, vm={}, snapshot={}, box=box, inputs=inputs, base={"sshHostKey": {}},
-        readiness={"toolchain": [], "bootId": None},
+        readiness={"toolchain": [], "bootId": None, "laneAccess": {"sshd": []}},
     )
     assert sorted(table_names("The box receipt (")) == sorted(set(value) - {"schema"})
+    lane_access = next(line for line in PROCEDURE.splitlines() if line.startswith("| `laneAccess` | `files`, the"))
+    assert sorted(re.findall(r"`([^`]+)`", lane_access.split("|")[2])) == sorted(value["laneAccess"])
     provenance = next(line for line in PROCEDURE.splitlines() if line.startswith("| `provenanceSha256` |"))
     expected = receipt.provenance_inputs(Path("p"), Path("b"), Path("r"), Path("e"))
     assert sorted(re.findall(r"`([^`]+)`", provenance.split("|")[2])) == sorted(expected)
@@ -91,6 +97,21 @@ def test_schemas_paths_and_defaults_are_documented():
     assert packager.DELETE_TIMEOUT == 600 and "a ten-minute timeout" in UNWRAPPED
     assert packager.STOP_GRACE == 30 and "waits up to 30 seconds, and then sends `SIGKILL`" in UNWRAPPED
     assert cli.EMBEDDED_VAGRANTFILE.relative_to(REPOSITORY).as_posix() in PROCEDURE
+
+
+def test_lane_access_is_documented():
+    spec = importlib.util.spec_from_file_location("lane_access", access.GUEST_FILES / "lane_access.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    files = table_names("so that it runs at the next boot:")
+    assert files == ["/" + item.path for item in access.ACCESS_FILES]
+    assert f"`/{access.UNIT_LINK}`" in PROCEDURE
+    for text in (helper.PROPERTY, helper.VBOXCONTROL, f"{helper.KEY_DIRECTORY}/root", *sorted(helper.GUEST_READ_ONLY),
+                 *sorted(access.NOLOGIN_SHELLS),
+                 f'restrict,from="{access.NAT_GATEWAY}" ssh-ed25519 <key>',
+                 f"{access.SSHD} -T -C user=<account>,host={access.NAT_GATEWAY},addr={access.NAT_GATEWAY}"):
+        assert f"`{text}`" in UNWRAPPED, text
+    assert commands()["configure-access"].get_default("root") == Path("/") and "`--root` (default `/`" in UNWRAPPED
 
 
 def test_exit_codes_are_documented():

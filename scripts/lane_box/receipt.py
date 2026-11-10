@@ -1,4 +1,4 @@
-"""Lane box receipt (``projectbuddy/ubuntu-lane-box@1``) and its verifier.
+"""Lane box receipt (``projectbuddy/ubuntu-lane-box@2``) and its verifier.
 
 The verifier recomputes the whole receipt from the box, the profile, the base and
 readiness receipts, and the embedded Vagrantfile; any difference fails.
@@ -12,11 +12,12 @@ import pathlib
 import re
 import tarfile
 
+from .access import SSHD_EXPECTED, UNIT_LINK, UNIT_LINK_TARGET, expected_files
 from .common import VM_NAME_PATTERN, LaneBoxError, canonical_uuid, forbidden_keys, sha256_file
 from .profile import Profile, load_profile
 from .readiness import NOBLE, READINESS_SCHEMA, SKIPPED_ROOTS
 
-BOX_SCHEMA = "projectbuddy/ubuntu-lane-box@1"
+BOX_SCHEMA = "projectbuddy/ubuntu-lane-box@2"
 BASE_SCHEMA = "projectbuddy/ubuntu-base-bootstrap@2"
 FINGERPRINT_PATTERN = re.compile(r"SHA256:[A-Za-z0-9+/]{20,}={0,2}")
 # The Vagrantfile that `vagrant package --vagrantfile` generates; anything else is unexpected behavior.
@@ -106,6 +107,18 @@ def check_readiness_receipt(receipt: dict, profile: Profile, vm_name: str, vm_uu
     expected = [{"name": tool.name, "expected": tool.probe.expected, "observed": tool.probe.expected,
                  "exitCode": 0, "ok": True} for tool in profile.tools]
     require(observed == expected, "toolchain probes do not match the profile")
+    access = receipt.get("laneAccess") if isinstance(receipt.get("laneAccess"), dict) else {}
+    require(access.get("files") == expected_files(), "lane access files do not match this engine")
+    require(access.get("unitLink") == {"path": "/" + UNIT_LINK, "target": UNIT_LINK_TARGET},
+            "the lane access unit is not enabled")
+    sshd = access.get("sshd") if isinstance(access.get("sshd"), list) else []
+    users = [entry.get("user") for entry in sshd if isinstance(entry, dict)]
+    require("root" in users and users == sorted(set(users), key=str),
+            "sshd was not checked for root and each account once")
+    passing = [{"user": user, "exitCode": 0, "effective": SSHD_EXPECTED} for user in users]
+    require(sshd == passing, "sshd does not enforce lane access")
+    require(access.get("authorizedKeys") == [], "an authorized_keys file is present")
+    require(access.get("scanErrors") == [], "the lane access scan was incomplete")
     return errors
 
 
@@ -158,6 +171,10 @@ def build_box_receipt(
             "skippedRoots": ["/" + name for name in SKIPPED_ROOTS],
         },
         "labviewAbsence": {"paths": [], "packages": []},
+        "laneAccess": {
+            "files": [{"path": entry["path"], "sha256": entry["sha256"]} for entry in expected_files()],
+            "checkedUsers": [entry["user"] for entry in readiness["laneAccess"]["sshd"]],
+        },
         "sshHostKey": base["sshHostKey"],
         "failures": [],
         "outcome": "PASS",

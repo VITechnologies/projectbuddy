@@ -355,7 +355,7 @@ A lane box is a Vagrant box of a LabVIEW-free Ubuntu 24.04 VM with a pinned
 toolchain and no runner, built from a lane profile
 (`projectbuddy/ubuntu-lane-profile@1`) and reusing this family's base
 bootstrap receipt. Its packager writes its own
-`projectbuddy/ubuntu-lane-box@1` receipt, which `Invoke-LaneBox.py
+`projectbuddy/ubuntu-lane-box@2` receipt, which `Invoke-LaneBox.py
 verify-receipt` recomputes from its inputs. The appliance path above is
 unchanged. See the [Ubuntu lane box procedure](ubuntu-lane-box.md).
 
