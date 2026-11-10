@@ -69,6 +69,48 @@ jobs:
           name: coverage-evidence
           path: coverage.xml
 
+  peer-ask:
+    # tools/peer/ask (projectbuddy-ask, #211): unit tests with a 100% line and branch gate.
+    name: Peer Ask Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/peer/ask/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/peer/ask
+        run: |
+          dotnet restore ProjectBuddy.PeerAsk.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.PeerAsk.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-ask-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/peer-ask-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-ask coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-ask coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-ask coverage must be 100% line and branch")
+          PY
+
   toolchain-smoke-test:
     # Calls this repo's own reusable toolchain-smoke-test.yml against
     # itself (REQ-008): proves scripts/Test-ToolchainPresence.ps1's real

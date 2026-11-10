@@ -6,3 +6,8 @@ __pycache__/
 coverage.xml
 .pytest_cache/
 .coverage
+
+# .NET build output (tools/peer/ask)
+bin/
+obj/
+TestResults/
