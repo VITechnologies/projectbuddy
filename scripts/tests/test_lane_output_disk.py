@@ -381,6 +381,24 @@ def test_invalid_arguments_write_nothing_and_still_power_off(tmp_path, marker, u
     assert code == 1 and calls == [list(output_disk.POWEROFF)] and image.read_bytes() == b"\xff" * MIB
 
 
+@pytest.mark.parametrize("drop,extra", [(2, []), (0, ["--help"]), (0, ["--uid", ""]),
+                                        (0, ["--max-output-bytes", "1e6"])],
+                         ids=["no-device", "help", "empty-uid", "float-maximum"])
+def test_malformed_arguments_in_a_lane_guest_write_nothing_and_still_power_off(tmp_path, marker, drop, extra):
+    image = tmp_path / "disk.img"
+    image.write_bytes(b"\xff" * MIB)
+    run, calls = fake_run()
+    assert output_disk.main(launcher_arguments(image, tmp_path, *extra)[drop:], run=run, marker=marker) == 1
+    assert calls == [list(output_disk.POWEROFF)] and image.read_bytes() == b"\xff" * MIB
+
+
+def test_malformed_arguments_outside_a_lane_guest_change_nothing(tmp_path):
+    run, calls = fake_run()
+    with pytest.raises(SystemExit) as stopped:
+        output_disk.main(["--uid", "x"], run=run, marker=str(tmp_path / "absent"))
+    assert stopped.value.code == 2 and calls == []
+
+
 @pytest.mark.parametrize("block_device,size", [(False, MIB), (True, 2 * MIB)])
 def test_a_device_that_is_not_the_output_disk_is_not_written(tmp_path, marker, monkeypatch, block_device, size):
     monkeypatch.setattr(output_disk.stat, "S_ISBLK", lambda mode: block_device)

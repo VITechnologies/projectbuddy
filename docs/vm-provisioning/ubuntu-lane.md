@@ -288,7 +288,8 @@ build unit has ended and its control group is empty, and it:
    flushes it;
 6. writes the first header last and flushes it again: until then block 0 is
    zero, so the host refuses a disk that the launcher left partway;
-7. always powers the guest off, even when a step above failed.
+7. always powers the guest off, even when its arguments are malformed or a
+   step above failed; it then exits 1 having written nothing.
 
 The host reads the disk only after it observes the instance `poweroff`. It
 streams the disk with `mediumio cat`, which opens it read-only and does not

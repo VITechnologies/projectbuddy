@@ -240,12 +240,16 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str], run: Run = subprocess.run, marker: str = LANE_GUEST_MARKER) -> int:
     """Outside a lane guest, change nothing and return 2. In one, write the disk, then always power off."""
-    arguments = parse_arguments(argv)
     if not os.path.isfile(marker):
+        parse_arguments(argv)
         print(f"not a lane guest: {marker} is missing; nothing was written", file=sys.stderr)
         return 2
     code = 1
     try:
+        try:
+            arguments = parse_arguments(argv)
+        except SystemExit:
+            return code
         if not UNIT_NAME.fullmatch(arguments.unit) or arguments.max_output_bytes < SMALLEST_ARCHIVE:
             print("the unit name or maxOutputBytes is not valid; nothing was written", file=sys.stderr)
             return code
