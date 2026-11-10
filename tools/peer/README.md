@@ -83,3 +83,22 @@ cd tools/peer/ask
 dotnet test ProjectBuddy.PeerAsk.Tests --settings coverage.runsettings --collect:"XPlat Code Coverage"
 dotnet publish ProjectBuddy.PeerAsk -c Release -r win-x64 -o out   # the peer's projectbuddy-ask.exe
 ```
+
+## `identity/`: the `projectbuddy` model identity
+
+`identity/identity.json` pins the identity for stage P1
+([#217](https://github.com/VITechnologies/projectbuddy/issues/217)). It holds a
+fixed role text, the Ollama parameters (`num_ctx`, `temperature`, `seed`), a
+size limit for the system prompt, and every source file with its SHA-256.
+`scripts/New-PeerModelfile.py` turns the manifest and a base model into a
+Modelfile. The same inputs always give byte-identical output, and a changed
+source fails closed:
+
+```bash
+python3 scripts/New-PeerModelfile.py --manifest tools/peer/identity/identity.json --base qwen2.5:7b --output Modelfile
+ollama create projectbuddy:0.1-qwen2.5-7b -f Modelfile
+```
+
+Editing a pinned source (this README is one of them) means updating its digest
+in `identity.json`, and raising `identityVersion` when the change affects the
+model.
