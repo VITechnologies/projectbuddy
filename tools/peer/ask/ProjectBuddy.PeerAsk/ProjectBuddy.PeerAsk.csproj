@@ -11,7 +11,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Deterministic>true</Deterministic>
     <IsTrimmable>true</IsTrimmable>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
