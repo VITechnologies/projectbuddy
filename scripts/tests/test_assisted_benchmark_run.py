@@ -172,6 +172,129 @@ class FakeOllama:
         }
 
 
+def refusal_cli_fixture(tmp_path, monkeypatch, mode):
+    module = load_module("assisted_run_observation_cli_" + mode, SCRIPTS / "assisted_benchmark_run.py")
+    import assisted_benchmark_review as review
+
+    capture = tmp_path / "run-0001"
+    make_capture(capture)
+    auth_path = tmp_path / "authorization.json"
+    auth_path.write_text(json.dumps(authorization()))
+    proof_path = tmp_path / "proof.json"
+    proof_path.write_text(json.dumps(ppl_proof()))
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "success.json"
+    refusal = private / "refusal.json"
+    canary = "PRIVATE_CANARY_8471 /private/not-retained"
+
+    class FixtureMcp(FakeMcp):
+        def __init__(self, _command):
+            super().__init__(mcp_snapshot(get_contract()))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_error):
+            pass
+
+    class FixtureModel(FakeOllama):
+        def chat(self, payload):
+            if mode == "deadline":
+                raise review.ReviewDeadlineError(canary)
+            if mode == "cancelled":
+                raise KeyboardInterrupt(canary)
+            return super().chat(payload)
+
+    monkeypatch.setattr(module, "McpStdioClient", FixtureMcp)
+    monkeypatch.setattr(module, "LocalOllama", lambda _endpoint: FixtureModel())
+    if mode == "finalization":
+        def fail_finalization(*_args):
+            raise OSError(canary)
+
+        monkeypatch.setattr(module, "write_private_receipt", fail_finalization)
+    args = ["--authorization", str(auth_path), "--capture-directory", str(capture), "--ppl-proof", str(proof_path),
+            "--contract", str(CONTRACT_PATH), "--ollama-url", "http://127.0.0.1:11434", "--output", str(output),
+            "--failure-observation", str(refusal), "--mcp-command", "must-not-run"]
+    return module, args, output, refusal
+
+
+@pytest.mark.parametrize("mode, exit_code, phase", [("deadline", 2, "inference"), ("cancelled", 130, "inference"), ("finalization", 2, "finalization")])
+def test_cli_refusal_observation_preserves_original_outcome_without_canaries(tmp_path, monkeypatch, capsys, mode, exit_code, phase):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, mode)
+    assert module.main(args) == exit_code
+    captured = capsys.readouterr()
+    observed = json.loads(refusal.read_text())
+    assert observed["schema"] == "projectbuddy/assisted-review-refusal@1"
+    assert observed["phase"] == phase
+    assert observed["exitCode"] == exit_code
+    assert observed["complete"] is False
+    assert "PRIVATE_CANARY_8471" not in refusal.read_text() + captured.out + captured.err
+    assert "/private/not-retained" not in refusal.read_text() + captured.out + captured.err
+    assert refusal.stat().st_mode & 0o777 == 0o600
+    assert not output.exists()
+    writer = load_module("assisted_run_refusal_real_writer_" + mode, SCRIPTS / "assisted_benchmark_run.py")
+    with pytest.raises(writer.RunError, match="partial checkpoint"):
+        writer.write_private_receipt(output, observed)
+
+
+def test_failed_refusal_persistence_does_not_replace_primary_deadline(tmp_path, monkeypatch, capsys):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, "deadline")
+
+    def fail_write(*_args):
+        raise OSError("PRIVATE_CANARY_8471 observation writer failed")
+
+    monkeypatch.setattr(module, "write_private_observation", fail_write)
+    assert module.main(args) == 2
+    captured = capsys.readouterr()
+    assert "ReviewDeadlineError" in captured.err
+    assert "original outcome preserved" in captured.err
+    assert "PRIVATE_CANARY_8471" not in captured.err + captured.out
+    assert not refusal.exists() and not output.exists()
+
+
+def test_success_does_not_write_a_refusal_observation(tmp_path, monkeypatch):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, "success")
+    assert module.main(args) == 0
+    assert output.exists()
+    assert not refusal.exists()
+
+
+def test_refusal_writer_is_private_non_overwriting_and_rejects_unsafe_data(tmp_path, monkeypatch):
+    import assisted_benchmark_observation as observations
+
+    record = observations.RefusalObserver().snapshot(OSError("PRIVATE_CANARY_8471"), 2)
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    path = private / "refusal.json"
+    observations.write_private_observation(path, record)
+    assert path.stat().st_mode & 0o777 == 0o600
+    before = path.read_bytes()
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(path, record)
+    assert path.read_bytes() == before
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(private / "unknown.json", {**record, "rawException": "PRIVATE_CANARY_8471"})
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(public / "refusal.json", record)
+    alias = tmp_path / "alias"
+    alias.symlink_to(private, target_is_directory=True)
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(alias / "refusal2.json", record)
+
+    def fail_link(*_args, **_kwargs):
+        raise OSError("fixture atomic commit failure")
+
+    monkeypatch.setattr(observations.os, "link", fail_link)
+    with pytest.raises(OSError):
+        observations.write_private_observation(private / "failure.json", record)
+    assert not (private / "failure.json").exists()
+    assert list(private.glob(".review-refusal-*")) == []
+
+
 def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     module = load_module("assisted_benchmark_run_test", SCRIPTS / "assisted_benchmark_run.py")
     contract = get_contract()

@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from assisted_benchmark_checkpoint import CheckpointError, CheckpointStore
+from assisted_benchmark_observation import PHASES, RefusalObserver
 from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy, validate_review_lifecycle, validate_review_execution
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
@@ -61,6 +62,9 @@ class ReviewLifecycle:
         self.retries = 0
         self.prior_seconds = 0.0
         self.reserved_requests = 0
+        self.phase = "review-preflight"
+        self.request_may_have_been_in_flight = False
+        self.last_request_sha256 = None
         self.check()
 
     def remaining(self) -> float:
@@ -96,13 +100,19 @@ class ReviewLifecycle:
         if self.remaining() <= 0:
             raise ReviewDeadlineError("review deadline exceeded; server completion is unknown")
 
-    def call(self, operation):
+    def call(self, operation, phase: str = "review-preflight", request_hash: str | None = None):
+        if phase not in PHASES:
+            raise ReviewError("unsupported host review phase")
+        self.phase = phase
+        self.last_request_sha256 = request_hash
+        self.request_may_have_been_in_flight = False
         for attempt in range(self.policy["maxRetries"] + 1):
             self.check()
             if self.requests >= self.policy["maxRequests"]:
                 raise ReviewError("review request budget exhausted; assessment incomplete")
             self.requests += 1
             started = self.clock()
+            self.request_may_have_been_in_flight = True
             try:
                 result = operation()
             except ReviewTransportError as error:
@@ -116,6 +126,7 @@ class ReviewLifecycle:
                 if delay and self.wait(delay):
                     raise ReviewCancelledError("review cancelled during retry backoff") from None
                 continue
+            self.request_may_have_been_in_flight = False
             self.check()
             if self.clock() - started >= self.policy["requestSeconds"]:
                 raise ReviewDeadlineError("request deadline exceeded; server completion is unknown")
@@ -133,16 +144,18 @@ class LifecycleTransport:
     def __init__(self, transport, lifecycle: ReviewLifecycle):
         self.transport = transport.bound(lifecycle) if isinstance(transport, LocalOllama) else transport
         self.lifecycle = lifecycle
+        self.phase = "identity-preflight"
 
     def tags(self):
-        return self.lifecycle.call(self.transport.tags)
+        return self.lifecycle.call(self.transport.tags, self.phase, hashlib.sha256(_json_bytes({"method": "GET", "path": "/api/tags"})).hexdigest())
 
     def show(self, model):
-        return self.lifecycle.call(lambda: self.transport.show(model))
+        return self.lifecycle.call(lambda: self.transport.show(model), "model-metadata",
+                       hashlib.sha256(_json_bytes({"method": "POST", "path": "/api/show", "model": model})).hexdigest())
 
     def chat(self, payload):
         encoded = _json_bytes(payload)
-        return self.lifecycle.call(lambda: self.transport.chat(json.loads(encoded)))
+        return self.lifecycle.call(lambda: self.transport.chat(json.loads(encoded)), "inference", hashlib.sha256(encoded).hexdigest())
 
 
 def _json_bytes(value: object) -> bytes:
@@ -638,7 +651,9 @@ class LocalOllama:
         return self._request("/api/chat", payload)
 
 
-def _verify_model(transport, model: dict) -> None:
+def _verify_model(transport, model: dict, phase: str = "identity-preflight") -> None:
+    if isinstance(transport, LifecycleTransport):
+        transport.phase = phase
     response = transport.tags()
     models = response.get("models") if isinstance(response, dict) else None
     if not isinstance(models, list):
@@ -781,11 +796,11 @@ def collect_review_inputs(evidence, approved, selected, requests, budgets, posit
                 validated = validate_assessment(assessment, set(selected), frame_ids)
                 persist_failure_progress = False
                 if checkpoint is not None:
-                    _verify_model(transport, model)
+                    _verify_model(transport, model, "identity-postflight")
                 records.append(minimize_input(validated))
                 if checkpoint is not None:
                     checkpoint.save(records, lifecycle.progress(), limits)
-            _verify_model(transport, model)
+            _verify_model(transport, model, "identity-postflight")
             validate_review_privacy(approved["reviewPrivacy"])
             if checkpoint is not None:
                 checkpoint.save(records, lifecycle.progress(), limits)
@@ -802,13 +817,18 @@ def collect_review_inputs(evidence, approved, selected, requests, budgets, posit
 
 
 def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None,
-                    cancel_event=None, clock=time.monotonic, wait=None, checkpoint_path: Path | None = None, resume: bool = False) -> dict:
+                    cancel_event=None, clock=time.monotonic, wait=None, checkpoint_path: Path | None = None, resume: bool = False,
+                    failure_observer: RefusalObserver | None = None) -> dict:
+    if failure_observer is not None:
+        failure_observer.begin_review()
     approved = validate_authorization(authorization, contract)
     if "reviewExecution" not in approved:
         raise ReviewError("an explicit review execution policy is required")
     if "reviewLifecycle" not in approved:
         raise ReviewError("an explicit review lifecycle policy is required")
     lifecycle = ReviewLifecycle(approved["reviewLifecycle"], cancel_event, clock, wait)
+    if failure_observer is not None:
+        failure_observer.bind(lifecycle)
     transport = LifecycleTransport(transport, lifecycle)
     budget = approved.get("reviewBudget")
     if budget is None:
@@ -825,6 +845,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
     budgets = [request_budget(payload, budget) for payload in requests]
     reviewed = selected.get("frameImages", {}).get("frames", [])
     frame_ids = {frame["frameId"] for frame in reviewed}
+    lifecycle.phase = "checkpoint-validation"
     records, model_limits, checkpoint_summary = collect_review_inputs(evidence, approved, selected, requests, budgets,
         positions, reviewed, transport, lifecycle, checkpoint_path, resume)
     assessments = [record["assessment"] for record in records]

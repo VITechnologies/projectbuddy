@@ -308,6 +308,31 @@ Install Pillow 12.1.1 too when it is not already available and images are used.
 The contract is `REQ-114` / `TEST-116` for issue #235. These client-side limits
 are not GPU sizing, OS CPU preemption, or server-computation attestation.
 
+## Private Non-Success Observations
+
+Optionally add `--failure-observation /absolute/private/refusal.json` before
+`--mcp-command`. This requests a distinct, non-overwriting
+`projectbuddy/assisted-review-refusal@1` record on refusal or cancellation;
+success writes no observation. Keep its path separate from inputs, the capture
+tree, checkpoints and the final receipt. POSIX custody requires a current-user
+0700 directory and creates a 0600 file atomically; unsafe or unsupported custody
+fails closed. No existing operator file is replaced.
+
+The closed record contains `complete: false`, the original exit code, fixed
+failure-kind/outcome/phase enums, validated lifecycle limits, bounded
+request/retry/reserved counters, finite elapsed time when available, possible
+in-flight state and the last request hash when available. Model phases distinguish
+identity preflight, model metadata, inference and identity postflight. No prompt,
+response, model prose, private path, tool result or exception message is retained.
+`serverCompletion` is `unknown` after a model request, otherwise `not-started`;
+neither an observation nor absence of residency proves server work finished.
+
+Observation persistence is best effort: failure emits only a fixed safe secondary
+diagnostic and preserves the original refusal/cancellation exit. Recording it
+does not check an expired deadline again, retry work, call another tool or expand
+authority. It is not a successful receipt, resumable checkpoint, model verdict or
+build proof. This is the `REQ-119` / `TEST-120` contract for issue #246.
+
 ## Private Checkpoints And Resume
 
 Add `--checkpoint /absolute/private/review.json` to a new run to retain partial

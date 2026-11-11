@@ -94,6 +94,27 @@ contract trusts local daemon metadata and the caller's reviewed policy, not a
 model attestation or universal tokenizer guarantee. Source-config accepts no
 images. These example limits are not benchmark or GPU-capacity proof.
 
+## Non-Success Observations
+
+Optional `--failure-observation /absolute/private/refusal.json` requests a new,
+distinct `projectbuddy/assisted-review-refusal@1` observation on an exception or
+cancellation. Keep the path outside the source checkout and output tree and
+separate from all policy/schema inputs. Success creates no observation. A normal
+model rejection remains the existing generated draft/exit-2 outcome, not a
+transport failure observation.
+
+Only fixed host phases/failure categories, original exit, `complete: false`,
+validated lifecycle limits, bounded counters, finite elapsed time when available,
+possible in-flight state and last request hash are retained. Raw prompts,
+responses, model prose, private paths and exception messages are excluded.
+Server completion stays `unknown` after a request, never inferred from residency.
+The writer uses private temporary files and an atomic non-overwriting commit:
+0700 directory/0600 files on Linux, exact current-user-plus-SYSTEM access on
+supported Windows paths. Unsafe custody fails closed. Persistence failure emits
+only a fixed diagnostic and preserves the original exception/cancellation exit;
+it does not retry, loosen limits or produce configuration/build acceptance.
+This implements `REQ-119` / `TEST-120` for issue #246.
+
 ## Outputs And Gates
 
 `--review-execution` is required. Only explicitly approved CPU-only execution
