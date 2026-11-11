@@ -23,9 +23,12 @@ public sealed record InputFile(string Text, string Sha256);
 
 public static class Generation
 {
-    public static async Task<bool> RunAsync(Settings settings, Func<Settings, Draft, Task<Review>> review)
+    public static async Task<bool> RunAsync(Settings settings, Func<Settings, Draft, Task<Review>> review,
+        ReviewRefusalObserver? observer = null)
     {
+        observer?.Begin("input-validation");
         OllamaReview.ValidateModelIdentity(settings);
+        observer?.ConfigureLimits(settings.Lifecycle);
         var root = Path.GetFullPath(settings.Root);
         var output = Path.GetFullPath(settings.Output);
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output already exists; choose a new directory.");
@@ -77,6 +80,7 @@ public static class Generation
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");
+        observer?.Mark("finalization");
         settings.Privacy.Validate();
         CreatePrivateDirectory(output);
         CheckLinks(output);
@@ -155,6 +159,37 @@ public static class Generation
             var expected = UnixFileMode.UserRead | UnixFileMode.UserWrite | (directory ? UnixFileMode.UserExecute : 0);
             Configuration.Require(File.GetUnixFileMode(path) == expected, "Generated evidence requires private custody.");
         }
+    }
+
+    internal static void WritePrivateRefusal(string path, ReviewRefusalObservation observation)
+    {
+        observation.Validate();
+        Configuration.Require(Path.IsPathFullyQualified(path), "Refusal output requires an absolute path.");
+        var output = Path.GetFullPath(path);
+        Configuration.Require(!File.Exists(output) && !Directory.Exists(output) && new FileInfo(output).LinkTarget is null,
+            "Refusal output requires a new non-symlink file.");
+        var parent = Path.GetDirectoryName(output)!;
+        if (Directory.Exists(parent))
+        {
+            CheckLinks(parent);
+            VerifyPrivate(parent, true);
+        }
+        else CreatePrivateDirectory(parent);
+        var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(observation,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) + "\n");
+        Configuration.Require(payload.Length <= 65536, "Refusal observation exceeds its bounded size.");
+        var temporary = Path.Combine(parent, ".review-refusal-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                ProtectPrivateFile(temporary);
+                stream.Write(payload);
+                stream.Flush(true);
+            }
+            File.Move(temporary, output, false);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     public static async Task<InputFile> ReadPinned(string root, string relative)

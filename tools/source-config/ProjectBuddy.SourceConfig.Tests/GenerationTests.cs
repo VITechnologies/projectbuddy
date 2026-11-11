@@ -199,6 +199,74 @@ public class GenerationTests
     }
 
     [Fact]
+    public async Task ReusedRefusalObserverCannotRetainOldRequestCounters()
+    {
+        var settings = await Fixture();
+        var observer = new ReviewRefusalObserver();
+        using var handler = new ReviewHttpHandler(Inventory());
+        Assert.True(await Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, observer: observer), observer));
+        var invalid = settings with { ModelDigest = "invalid" };
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(invalid,
+            (_, _) => throw new Exception("must not reach model"), observer));
+        var record = observer.Snapshot(error, 1);
+        Assert.Equal(0, record.RequestCount);
+        Assert.Null(record.Limits);
+        Assert.Equal("input-validation", record.Phase);
+    }
+
+    [Theory]
+    [InlineData(1, "identity-preflight")]
+    [InlineData(2, "model-metadata")]
+    [InlineData(3, "inference")]
+    [InlineData(4, "identity-postflight")]
+    public async Task RefusalSnapshotIdentifiesEveryModelRequestPhase(int target, string phase)
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { TotalSeconds = 10, RequestSeconds = 1 } };
+        var elapsed = 0.0;
+        var requests = 0;
+        var observer = new ReviewRefusalObserver();
+        using var handler = new ReviewHttpHandler(Inventory(), onRequest: _ => { if (++requests == target) elapsed += 2; });
+        var error = await Assert.ThrowsAsync<ReviewDeadlineException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, elapsed: () => elapsed, observer: observer), observer));
+        var record = observer.Snapshot(error, 1);
+        Assert.Equal(phase, record.Phase);
+        Assert.Equal(target, record.RequestCount);
+        Assert.Equal(2, record.ConsumedSeconds);
+        Assert.False(record.RequestMayHaveBeenInFlight);
+        Assert.Equal("deadline", record.FailureKind);
+        Assert.Equal(64, record.LastRequestSha256!.Length);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task RefusalObservationExcludesExceptionCanaryAndUsesPrivateCustody()
+    {
+        var settings = await Fixture();
+        const string canary = "PRIVATE_CANARY_8471 /private/not-retained";
+        var observer = new ReviewRefusalObserver();
+        using var handler = new ReviewHttpHandler(Inventory(), responseStatus: (path, _) =>
+            path == "/api/chat" ? throw new HttpRequestException(canary) : null);
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, observer: observer), observer));
+        var record = observer.Snapshot(error, 1);
+        Assert.Equal("inference", record.Phase);
+        Assert.True(record.RequestMayHaveBeenInFlight);
+        Assert.Equal("transport", record.FailureKind);
+        var path = Path.Combine(Path.GetDirectoryName(settings.Root)!, "private-refusal", "observation.json");
+        Generation.WritePrivateRefusal(path, record);
+        Generation.VerifyPrivate(Path.GetDirectoryName(path)!, true);
+        Generation.VerifyPrivate(path, false);
+        var content = await File.ReadAllTextAsync(path);
+        Assert.DoesNotContain("PRIVATE_CANARY_8471", content);
+        Assert.DoesNotContain("/private/not-retained", content);
+        Assert.Throws<InvalidDataException>(() => Generation.WritePrivateRefusal(path, record));
+        Assert.Throws<InvalidDataException>(() => Generation.WritePrivateRefusal(path + ".bad", record with { Phase = canary }));
+        Assert.Equal(content, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
     public async Task CancelledReviewStartsNoHttpRequest()
     {
         var settings = await Fixture();
@@ -396,8 +464,11 @@ public class GenerationTests
         }
     }
 
-    [Fact]
-    public async Task CliDiagnosticsDoNotEchoPrivateInputPaths()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CliDiagnosticsDoNotEchoPrivateInputPaths(bool occupiedObservation, bool insideSource)
     {
         var settings = await Fixture();
         const string canary = "PRIVATE_CANARY_8471";
@@ -409,6 +480,14 @@ public class GenerationTests
             ["model-digest"] = settings.ModelDigest, ["review-budget"] = Path.Combine(settings.Root, canary),
             ["review-privacy"] = "unused-fixture-path", ["review-lifecycle"] = "unused-fixture-path", ["review-execution"] = "unused-fixture-path"
         };
+        var observationPath = Path.Combine(Path.GetDirectoryName(settings.Root)!, "cli-refusal", "observation.json");
+        if (insideSource) observationPath = Path.Combine(settings.Root, "must-not-create", "observation.json");
+        if (occupiedObservation)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(observationPath)!);
+            await File.WriteAllTextAsync(observationPath, "existing-operator-data");
+        }
+        options["failure-observation"] = observationPath;
         var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         start.ArgumentList.Add(typeof(Generation).Assembly.Location);
         foreach (var option in options)
@@ -421,8 +500,26 @@ public class GenerationTests
         var errors = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         Assert.Equal(1, process.ExitCode);
-        Assert.Contains("source-config: refused (FileNotFoundException)", await errors);
+        Assert.Contains(insideSource ? "source-config: refused (InvalidDataException)" : "source-config: refused (FileNotFoundException)", await errors);
         Assert.DoesNotContain(canary, await output + await errors);
+        if (insideSource)
+        {
+            Assert.False(Directory.Exists(Path.GetDirectoryName(observationPath)));
+        }
+        else if (occupiedObservation)
+        {
+            Assert.Equal("existing-operator-data", await File.ReadAllTextAsync(observationPath));
+            Assert.Contains("original outcome preserved", await errors);
+        }
+        else
+        {
+            using var observation = JsonDocument.Parse(await File.ReadAllTextAsync(observationPath));
+            Assert.False(observation.RootElement.GetProperty("complete").GetBoolean());
+            Assert.Equal(1, observation.RootElement.GetProperty("exitCode").GetInt32());
+            Assert.Equal("input-validation", observation.RootElement.GetProperty("phase").GetString());
+            Assert.DoesNotContain(canary, await File.ReadAllTextAsync(observationPath));
+            Generation.VerifyPrivate(observationPath, false);
+        }
     }
 
     [Fact]

@@ -26,6 +26,7 @@ from assisted_benchmark_contract import (
 )
 from assisted_benchmark_review import LocalOllama, ReviewError, review_evidence
 from assisted_benchmark_checkpoint import CheckpointError
+from assisted_benchmark_observation import RefusalObserver, write_private_observation
 
 RUN_SCHEMA = "projectbuddy/assisted-benchmark-run@1"
 MAX_MCP_LINE_BYTES = 4 * 1024 * 1024
@@ -297,7 +298,10 @@ def orchestrate(
     capture_directory: Path | None = None,
     checkpoint_path: Path | None = None,
     resume: bool = False,
+    failure_observer: RefusalObserver | None = None,
 ) -> dict:
+    if failure_observer is not None:
+        failure_observer.mark("orchestration")
     print("[assisted-benchmark] validating run authorization", file=sys.stderr, flush=True)
     approved = validate_authorization(authorization, contract)
     if approved["sourceRevision"] != contract["source"]["revision"]:
@@ -309,6 +313,8 @@ def orchestrate(
     proof = validate_ppl_build_proof(ppl_proof)
 
     print("[assisted-benchmark] initializing LBA MCP and validating tool registry", file=sys.stderr, flush=True)
+    if failure_observer is not None:
+        failure_observer.mark("mcp-context")
     snapshot = mcp_client.initialize_and_list_tools()
     snapshot_summary = validate_snapshot(snapshot, contract)
     call_names = {call["tool"] for call in approved["approvedCalls"]}
@@ -329,7 +335,7 @@ def orchestrate(
     review_input = {**capture, "benchmarkResult": proof}
     print("[assisted-benchmark] requesting local Ollama assessment", file=sys.stderr, flush=True)
     assessment = review_evidence(review_input, approved, contract, ollama_transport, capture_directory,
-                                 checkpoint_path=checkpoint_path, resume=resume)
+                                 checkpoint_path=checkpoint_path, resume=resume, failure_observer=failure_observer)
     print("[assisted-benchmark] local assessment complete", file=sys.stderr, flush=True)
     core = {
         "schema": RUN_SCHEMA,
@@ -381,31 +387,60 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True, help="new absolute receipt path in a private directory")
     parser.add_argument("--checkpoint", type=Path, help="private POSIX partial-review state, never a success receipt")
     parser.add_argument("--resume", action="store_true", help="reuse only an exactly matching private checkpoint")
+    parser.add_argument("--failure-observation", type=Path, help="optional private non-success observation, never a run receipt")
     parser.add_argument("--mcp-command", nargs="+", required=True)
     args = parser.parse_args(argv)
+    observer = RefusalObserver()
+
+    def record_refusal(error, exit_code):
+        if args.failure_observation is not None:
+            try:
+                write_private_observation(args.failure_observation, observer.snapshot(error, exit_code))
+            except Exception:
+                print("assisted-benchmark-run: non-success observation unavailable; original outcome preserved", file=sys.stderr)
+
     try:
+        if args.failure_observation is not None:
+            excluded = [args.output, args.authorization, args.contract, args.ppl_proof, args.capture_directory]
+            if args.checkpoint is not None:
+                excluded.append(args.checkpoint)
+            observation_path = Path(os.path.abspath(args.failure_observation))
+            capture_path = Path(os.path.abspath(args.capture_directory))
+            if (any(observation_path == Path(os.path.abspath(path)) for path in excluded)
+                    or observation_path.is_relative_to(capture_path)):
+                args.failure_observation = None
+                raise RunError("refusal observation must be separate from inputs, checkpoint and success output")
         if args.resume and args.checkpoint is None:
             raise RunError("resume requires an explicit private checkpoint path")
         if args.checkpoint is not None and args.checkpoint.absolute() == args.output.absolute():
             raise RunError("checkpoint and final receipt paths must be different")
         contract = load_contract(args.contract)
-        authorization = json.loads(args.authorization.read_text(encoding="utf-8"))
+        authorization = validate_authorization(json.loads(args.authorization.read_text(encoding="utf-8")), contract)
+        observer.configure_limits(authorization.get("reviewLifecycle"))
+        observer.mark("capture-validation")
         capture = validate_capture(args.capture_directory, contract["source"]["serverVersion"], contract["source"]["revision"])
         proof = json.loads(args.ppl_proof.read_text(encoding="utf-8"))
         with McpStdioClient(args.mcp_command) as mcp:
             receipt = orchestrate(
                 authorization, contract, capture, proof, mcp, LocalOllama(args.ollama_url), args.capture_directory,
-                args.checkpoint, args.resume
+                args.checkpoint, args.resume, observer
             )
+            observer.mark("finalization")
         write_private_receipt(args.output, receipt)
         print(json.dumps({"status": "complete", "runId": receipt["runId"], "receiptSha256": receipt["receiptSha256"]}, sort_keys=True))
         return 0
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as error:
+        record_refusal(error, 130)
         print("assisted-benchmark-run: cancelled; server completion may be unknown", file=sys.stderr)
         return 130
     except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError, CheckpointError) as error:
+        record_refusal(error, 2)
         print(f"assisted-benchmark-run: refused ({type(error).__name__}); no success; server completion may be unknown", file=sys.stderr)
         return 2
+    except Exception as error:
+        record_refusal(error, 1)
+        print("assisted-benchmark-run: internal failure; no success; server completion may be unknown", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

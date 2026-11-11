@@ -168,6 +168,95 @@ def test_cancelled_review_never_starts_a_request():
     assert transport.payloads == []
 
 
+def test_refusal_observation_identifies_metadata_deadline_without_raw_values():
+    module = load_module("assisted_review_metadata_observation", REVIEW_MODULE)
+    observer = module.RefusalObserver()
+    now = [0.0]
+    auth = authorization()
+    auth["reviewLifecycle"].update({"totalSeconds": 10, "requestSeconds": 1})
+
+    class SlowMetadata(FakeTransport):
+        def show(self, model):
+            now[0] += 2
+            return super().show(model)
+
+    transport = SlowMetadata()
+    with pytest.raises(module.ReviewDeadlineError) as failure:
+        module.review_evidence(evidence(), auth, contract(), transport, clock=lambda: now[0], failure_observer=observer)
+    observation = observer.snapshot(failure.value, 2)
+    assert observation["phase"] == "model-metadata"
+    assert observation["requestCount"] == 2
+    assert observation["consumedSeconds"] == 2
+    assert observation["complete"] is False
+    assert observation["failureKind"] == "deadline"
+    assert observation["requestMayHaveBeenInFlight"] is False
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("phase, expected_count", [("identity-preflight", 1), ("model-metadata", 2), ("inference", 3), ("identity-postflight", 4)])
+def test_refusal_observation_covers_request_phases_without_exception_text(phase, expected_count):
+    module = load_module("assisted_review_phase_refusals", REVIEW_MODULE)
+    observer = module.RefusalObserver()
+    canary = "PRIVATE_CANARY_8471 /private/not-retained"
+    original = module.ReviewDeadlineError(canary)
+
+    class RefusedPhase(FakeTransport):
+        def tags(self):
+            if phase == "identity-preflight" or phase == "identity-postflight" and self.tag_calls > 0:
+                raise original
+            return super().tags()
+
+        def show(self, model):
+            if phase == "model-metadata":
+                raise original
+            return super().show(model)
+
+        def chat(self, payload):
+            if phase == "inference":
+                raise original
+            return super().chat(payload)
+
+    with pytest.raises(module.ReviewDeadlineError) as failure:
+        module.review_evidence(evidence(), authorization(), contract(), RefusedPhase(), failure_observer=observer)
+    assert failure.value is original
+    observed = observer.snapshot(failure.value, 2)
+    assert observed["phase"] == phase
+    assert observed["requestCount"] == expected_count
+    assert observed["retryCount"] == 0
+    assert observed["requestMayHaveBeenInFlight"] is True
+    assert len(observed["lastRequestSha256"]) == 64
+    assert observed["serverCompletion"] == "unknown"
+    assert "PRIVATE_CANARY_8471" not in json.dumps(observed)
+    assert "/private/not-retained" not in json.dumps(observed)
+
+
+def test_refusal_observation_retains_no_unvalidated_private_input():
+    module = load_module("assisted_review_preflight_refusal", REVIEW_MODULE)
+    observer = module.RefusalObserver()
+    bad = authorization()
+    bad["PRIVATE_CANARY_8471"] = "/private/not-retained"
+    with pytest.raises(module.ContractError) as failure:
+        module.review_evidence(evidence(), bad, contract(), FakeTransport(), failure_observer=observer)
+    observed = observer.snapshot(failure.value, 2)
+    assert observed["phase"] == "review-preflight"
+    assert observed["requestCount"] == 0
+    assert observed["limits"] is None
+    assert observed["serverCompletion"] == "not-started"
+    assert "PRIVATE_CANARY_8471" not in json.dumps(observed)
+
+
+def test_reused_observer_does_not_retain_a_prior_runs_counters():
+    module = load_module("assisted_review_reused_observer", REVIEW_MODULE)
+    observer = module.RefusalObserver()
+    module.review_evidence(evidence(), authorization(), contract(), FakeTransport(), failure_observer=observer)
+    with pytest.raises(module.ContractError) as failure:
+        module.review_evidence(evidence(), {"PRIVATE_CANARY_8471": "not-retained"}, contract(), FakeTransport(), failure_observer=observer)
+    observed = observer.snapshot(failure.value, 2)
+    assert observed["requestCount"] == 0
+    assert observed["limits"] is None
+    assert observed["phase"] == "review-preflight"
+
+
 def test_interrupted_assessment_resumes_without_repeating_completed_inference(tmp_path):
     review_module = load_module("assisted_review_resume_fixture", REVIEW_MODULE)
     run_fixture = load_module("assisted_run_resume_fixture", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")

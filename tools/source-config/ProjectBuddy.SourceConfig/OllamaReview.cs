@@ -81,9 +81,12 @@ internal sealed class ReviewExecution : IDisposable
     private readonly Func<TimeSpan, CancellationToken, Task> delay;
     private int requests;
     private int retries;
+    private string phase = "review-preflight";
+    private bool requestMayHaveBeenInFlight;
+    private string? lastRequestHash;
 
     public ReviewExecution(ReviewLifecyclePolicy policy, CancellationToken caller, Func<double>? elapsed = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null, ReviewRefusalObserver? observer = null)
     {
         policy.Validate();
         this.policy = policy;
@@ -93,6 +96,7 @@ internal sealed class ReviewExecution : IDisposable
         this.delay = delay ?? ((duration, token) => Task.Delay(duration, token));
         overall = CancellationTokenSource.CreateLinkedTokenSource(caller);
         overall.CancelAfter(TimeSpan.FromSeconds(policy.TotalSeconds));
+        observer?.Bind(this);
         try { Check(); }
         catch { overall.Dispose(); throw; }
     }
@@ -103,14 +107,28 @@ internal sealed class ReviewExecution : IDisposable
         if (overall.IsCancellationRequested || elapsed() >= policy.TotalSeconds) throw new ReviewDeadlineException();
     }
 
-    public async Task<JsonDocument> RequestAsync(HttpClient client, string path, object? payload = null)
+    public void Mark(string value)
     {
+        Configuration.Require(ReviewRefusalObservation.Phases.Contains(value), "Unsupported host observation phase.");
+        phase = value;
+    }
+
+    public ReviewRefusalObservation Refusal(Exception error, int exitCode) => ReviewRefusalObservation.Create(error,
+        exitCode, phase, policy, requests, retries, Math.Round(Math.Max(0, elapsed()), 6), requestMayHaveBeenInFlight, lastRequestHash);
+
+    public async Task<JsonDocument> RequestAsync(HttpClient client, string path, object? payload = null,
+        string requestPhase = "identity-preflight")
+    {
+        Mark(requestPhase);
+        requestMayHaveBeenInFlight = false;
+        lastRequestHash = Configuration.Hash(JsonSerializer.Serialize(payload ?? new { method = "GET", path }));
         for (var attempt = 0; ; attempt++)
         {
             Check();
             Configuration.Require(requests < policy.MaxRequests, "Review request budget exhausted; assessment incomplete.");
             requests++;
             var started = elapsed();
+            requestMayHaveBeenInFlight = true;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(Math.Min(policy.RequestSeconds, policy.TotalSeconds - started)));
             try
@@ -132,6 +150,7 @@ internal sealed class ReviewExecution : IDisposable
                     Configuration.Require(buffer.Length + count <= 1024 * 1024, "Local review response exceeds the configured bound.");
                     buffer.Write(bytes, 0, count);
                 }
+                requestMayHaveBeenInFlight = false;
                 Check();
                 if (elapsed() - started >= policy.RequestSeconds) throw new ReviewDeadlineException();
                 return JsonDocument.Parse(buffer.ToArray());
@@ -312,26 +331,29 @@ public static class OllamaReview
     public static Task<Review> RunAsync(Settings settings, Draft draft)
         => RunAsync(settings, draft, CancellationToken.None);
 
-    public static Task<Review> RunAsync(Settings settings, Draft draft, CancellationToken cancellation)
+    public static Task<Review> RunAsync(Settings settings, Draft draft, CancellationToken cancellation, ReviewRefusalObserver? observer = null)
     {
         ValidateModelIdentity(settings);
-        return RunAsync(settings, draft, new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }, cancellation);
+        return RunAsync(settings, draft, new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }, cancellation, observer: observer);
     }
 
     internal static async Task<Review> RunAsync(Settings settings, Draft draft, HttpMessageHandler handler,
-        CancellationToken cancellation = default, Func<double>? elapsed = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
+        CancellationToken cancellation = default, Func<double>? elapsed = null, Func<TimeSpan, CancellationToken, Task>? delay = null,
+        ReviewRefusalObserver? observer = null)
     {
+        observer?.Begin("review-preflight");
         ValidateModelIdentity(settings);
-        using var execution = new ReviewExecution(settings.Lifecycle, cancellation, elapsed, delay);
+        observer?.ConfigureLimits(settings.Lifecycle);
+        using var execution = new ReviewExecution(settings.Lifecycle, cancellation, elapsed, delay, observer);
         using var client = new HttpClient(handler)
         {
             BaseAddress = Endpoint(settings.OllamaUrl),
             Timeout = Timeout.InfiniteTimeSpan,
             MaxResponseContentBufferSize = 1024 * 1024
         };
-        async Task<string> Digest()
+        async Task<string> Digest(string phase)
         {
-            using var inventory = await execution.RequestAsync(client, "api/tags");
+            using var inventory = await execution.RequestAsync(client, "api/tags", requestPhase: phase);
             var tags = inventory.RootElement;
             Configuration.Require(tags.ValueKind == JsonValueKind.Object
                 && tags.EnumerateObject().Count(property => property.Name == "models") == 1
@@ -357,9 +379,9 @@ public static class OllamaReview
             Configuration.Require(matches.Count == 1, "Selected model must have exactly one installed inventory entry.");
             return matches[0];
         }
-        var digest = await Digest();
+        var digest = await Digest("identity-preflight");
         Configuration.Require(digest == settings.ModelDigest, "Installed model does not match the caller-approved digest.");
-        using var metadata = await execution.RequestAsync(client, "api/show", new { model = settings.Model });
+        using var metadata = await execution.RequestAsync(client, "api/show", new { model = settings.Model }, "model-metadata");
         ValidateJsonFields(metadata.RootElement);
         var modelBudget = settings.Budget.CheckModel(metadata.RootElement);
         var evidence = JsonSerializer.Serialize(new
@@ -387,7 +409,7 @@ public static class OllamaReview
         };
         var requestBudget = settings.Budget.Check(JsonSerializer.SerializeToElement(payload));
         settings.Privacy.Validate();
-        using var document = await execution.RequestAsync(client, "api/chat", payload);
+        using var document = await execution.RequestAsync(client, "api/chat", payload, "inference");
         ValidateJsonFields(document.RootElement);
         Configuration.Require(document.RootElement.TryGetProperty("prompt_eval_count", out var promptCount)
             && promptCount.ValueKind == JsonValueKind.Number && promptCount.TryGetInt32(out var inputTokens)
@@ -397,7 +419,7 @@ public static class OllamaReview
             && outputTokens > 0 && outputTokens <= settings.Budget.OutputTokens,
             "Ollama completion counts are missing or exceed the approved budget.");
         var review = Parse(document.RootElement, settings.Model, digest);
-        Configuration.Require(await Digest() == settings.ModelDigest, "Model identity changed during review.");
+        Configuration.Require(await Digest("identity-postflight") == settings.ModelDigest, "Model identity changed during review.");
         settings.Privacy.Validate();
         return review with { RequestBudget = requestBudget, ModelBudget = modelBudget, Lifecycle = execution.Summary() };
     }
