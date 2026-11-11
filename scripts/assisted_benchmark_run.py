@@ -344,6 +344,7 @@ def orchestrate(
         "reviewEvidenceSha256": assessment["evidenceSha256"],
         "approvedReviewModel": assessment["approvedModel"],
         "reviewModel": assessment["model"],
+        "reviewAggregation": assessment["aggregation"],
         "reviewPromptVersion": assessment["promptVersion"],
         "reviewedFrameCount": assessment["reviewedFrameCount"],
         "advisoryOnly": assessment["advisoryOnly"],

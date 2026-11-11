@@ -119,6 +119,27 @@ identity separately from the verified review identity (`approvedModel` / `model`
 and `approvedReviewModel` / `reviewModel`). This is the `REQ-109` / `TEST-111`
 contract in ProjectBuddy issue #230, not attestation of an untrusted local daemon.
 
+## Aggregation
+
+The host validates every required per-input response and revalidates the final
+aggregate. A failing input remains failing; only all-pass inputs without any
+uncertainties can produce a passing aggregate. Other complete combinations are
+inconclusive. Missing, malformed, or contradictory inputs are errors, not passes.
+
+Findings are deduplicated by their complete validated content, with evidence
+field order normalized. Different supporting evidence is never collapsed merely
+because claim text matches. Ordering is stable: blocking, warning, then info;
+within a severity, first occurrence in input order wins. The 32-finding output
+bound never drops a blocker: more than 32 distinct blockers causes an incomplete
+review error. Optional detail may be bounded, but omission counts are disclosed
+in `aggregation` on assessment receipts and `reviewAggregation` on run receipts,
+with policy version and required/completed input counts. Uncertainties are
+deduplicated and bounded to 32; multiple distinct recommendations use an explicit
+combined-review recommendation and report how many original recommendations
+were omitted. This is the `REQ-110` / `TEST-112` contract for issue #231.
+Frame-specific finding references remain separate work in issue #233; category
+references are not presented as frame-level attribution or whole-capture proof.
+
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing
 `lv_icon.lvlibp` proof. Native build failures and exact-VM poison teardown remain
