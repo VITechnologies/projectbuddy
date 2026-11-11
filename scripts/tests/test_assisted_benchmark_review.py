@@ -47,6 +47,7 @@ def authorization(fields=("captureMetadata", "resourceSamples"), **overrides):
         "approvedCalls": [{"tool": "get_benchmark_series", "arguments": {}}],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewExecution": {"schema": "projectbuddy/ollama-execution@1", "modelDigest": MODEL["digest"], "mode": "cpu-only", "threads": 1},
         "reviewLifecycle": {"schema": "projectbuddy/ollama-lifecycle@1", "totalSeconds": 300, "requestSeconds": 90,
                     "maxRequests": 16, "maxRetries": 0, "backoffSeconds": 0, "residencySeconds": 30, "maxImageCount": 3},
         "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
@@ -217,7 +218,7 @@ def checkpoint_fixture(tmp_path, name, response=None):
     return review_module, capture, auth, directory, checkpoint
 
 
-@pytest.mark.parametrize("changed", ["approval", "evidence", "model", "prompt", "schema", "budget", "privacy", "lifecycle", "frame"])
+@pytest.mark.parametrize("changed", ["approval", "evidence", "model", "prompt", "schema", "budget", "privacy", "lifecycle", "frame", "execution"])
 def test_changed_checkpoint_identity_is_rejected_without_overwrite(tmp_path, monkeypatch, changed):
     module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_identity")
     before = checkpoint.read_bytes()
@@ -228,6 +229,7 @@ def test_changed_checkpoint_identity_is_rejected_without_overwrite(tmp_path, mon
     elif changed == "model":
         auth["ollamaModel"]["digest"] = "0" * 64
         auth["reviewBudget"]["modelDigest"] = "0" * 64
+        auth["reviewExecution"]["modelDigest"] = "0" * 64
     elif changed == "prompt":
         monkeypatch.setattr(module, "PROMPT_VERSION", "changed")
     elif changed == "schema":
@@ -238,6 +240,8 @@ def test_changed_checkpoint_identity_is_rejected_without_overwrite(tmp_path, mon
         auth["reviewPrivacy"]["expiresAt"] = "2098-01-01T00:00:00Z"
     elif changed == "lifecycle":
         auth["reviewLifecycle"]["residencySeconds"] += 1
+    elif changed == "execution":
+        auth["reviewExecution"]["threads"] = 2
     else:
         capture["frames"][0]["tMs"] = 1
     transport = FakeTransport()
@@ -625,17 +629,80 @@ def test_request_cannot_silently_exceed_its_context_budget():
         review_module.build_review_request(MODEL["tag"], {"captureMetadata": {"description": "x" * 20000}})
 
 
+def test_cpu_execution_options_are_canonical_before_request_hashing():
+    review_module = load_module("assisted_review_cpu_execution", REVIEW_MODULE)
+    execution = {"schema": "projectbuddy/ollama-execution@1", "modelDigest": MODEL["digest"], "mode": "cpu-only", "threads": 1}
+    budget = authorization()["reviewBudget"]
+    payload = review_module.build_review_request(MODEL["tag"], {"captureMetadata": {"runId": "run-0001"}},
+                                                review_budget=budget, review_execution=execution)
+    assert payload["options"]["num_gpu"] == 0
+    assert payload["options"]["num_thread"] == 1
+    recorded = review_module.request_budget(payload, budget)
+    assert recorded["requestSha256"] == hashlib.sha256(review_module._json_bytes(payload)).hexdigest()
+
+
+@pytest.mark.parametrize("problem", ["missing", "zero", "negative", "boolean", "excessive", "mode", "unknown", "digest"])
+def test_unsupported_execution_policy_prevents_inference(problem):
+    module = load_module("assisted_review_invalid_cpu_policy", REVIEW_MODULE)
+    auth = authorization()
+    if problem == "missing":
+        auth.pop("reviewExecution")
+    elif problem in {"zero", "negative", "boolean", "excessive"}:
+        auth["reviewExecution"]["threads"] = {"zero": 0, "negative": -1, "boolean": True, "excessive": 9}[problem]
+    elif problem == "mode":
+        auth["reviewExecution"]["mode"] = "automatic"
+    elif problem == "unknown":
+        auth["reviewExecution"]["num_gpu"] = 1
+    else:
+        auth["reviewExecution"]["modelDigest"] = "0" * 64
+    transport = FakeTransport()
+    with pytest.raises((module.ReviewError, module.ContractError), match="execution"):
+        module.review_evidence(evidence(), auth, contract(), transport)
+    assert transport.tag_calls == 0
+    assert transport.payloads == []
+
+
+def test_actual_wire_payload_and_receipt_hash_include_cpu_controls():
+    import httpx
+
+    module = load_module("assisted_review_wire_cpu_policy", REVIEW_MODULE)
+    bodies = []
+    auth = authorization()
+    auth["reviewExecution"]["threads"] = 2
+
+    def respond(request):
+        if request.url.path == "/api/tags":
+            data = {"models": [{"name": MODEL["tag"], "digest": MODEL["digest"]}]}
+        elif request.url.path == "/api/show":
+            data = FakeTransport().show(MODEL["tag"])
+        else:
+            assert request.url.path == "/api/chat"
+            bodies.append(request.content)
+            payload = json.loads(request.content)
+            assert payload["options"]["num_gpu"] == 0
+            assert payload["options"]["num_thread"] == 2
+            data = assessment_response()
+        return httpx.Response(200, json=data)
+
+    transport = module.LocalOllama("http://127.0.0.1:11434", http_transport=httpx.MockTransport(respond))
+    result = module.review_evidence(evidence(), auth, contract(), transport)
+    assert len(bodies) == 1
+    assert result["requestBudgets"][0]["requestSha256"] == hashlib.sha256(bodies[0]).hexdigest()
+    assert result["reviewExecution"] == auth["reviewExecution"]
+
+
 def test_context_budget_exact_boundary_and_one_token_over():
     review_module = load_module("assisted_review_exact_budget", REVIEW_MODULE)
     budget = authorization()["reviewBudget"]
     selected = {"captureMetadata": {"description": "public fixture"}}
-    payload = review_module.build_review_request(MODEL["tag"], selected, review_budget=budget)
+    execution = authorization()["reviewExecution"]
+    payload = review_module.build_review_request(MODEL["tag"], selected, review_budget=budget, review_execution=execution)
     measured = review_module.request_budget(payload, budget)
     exact = {**budget, "contextTokens": measured["inputTokenUpperBound"] + budget["outputTokens"]}
-    accepted = review_module.build_review_request(MODEL["tag"], selected, review_budget=exact)
+    accepted = review_module.build_review_request(MODEL["tag"], selected, review_budget=exact, review_execution=execution)
     assert accepted["options"]["num_ctx"] == exact["contextTokens"]
     with pytest.raises(review_module.ReviewError, match="context budget"):
-        review_module.build_review_request(MODEL["tag"], selected, review_budget={**exact, "contextTokens": exact["contextTokens"] - 1})
+        review_module.build_review_request(MODEL["tag"], selected, review_budget={**exact, "contextTokens": exact["contextTokens"] - 1}, review_execution=execution)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -692,7 +759,7 @@ def test_image_payload_must_fit_the_explicit_media_budget():
     budget = {**authorization()["reviewBudget"], "maxImageBytes": 1}
     selected = {"frameImages": {"frames": [{"index": 0, "sha256": "a" * 64, "frameId": "f" * 64}], "_imagesBase64": ["YWJj"]}}
     with pytest.raises(review_module.ReviewError, match="image budget"):
-        review_module.build_review_request(MODEL["tag"], selected, review_budget=budget)
+        review_module.build_review_request(MODEL["tag"], selected, review_budget=budget, review_execution=authorization()["reviewExecution"])
 
 
 def test_review_refuses_evidence_from_a_different_run():

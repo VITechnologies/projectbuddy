@@ -10,7 +10,7 @@ namespace ProjectBuddy.SourceConfig;
 
 public sealed record Settings(string Root, string Manifest, string Build, string Repository,
     string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest,
-    ReviewBudget Budget, ReviewPrivacy Privacy, ReviewLifecyclePolicy Lifecycle);
+    ReviewBudget Budget, ReviewPrivacy Privacy, ReviewLifecyclePolicy Lifecycle, ReviewExecutionPolicy Execution);
 public sealed record Review(string Decision, string[] Blockers, string Model, string Digest)
 {
     public ReviewRequestBudget? RequestBudget { get; init; }
@@ -73,6 +73,7 @@ public static class Generation
             reviewBudget = settings.Budget,
             reviewPrivacy = settings.Privacy,
             reviewLifecycle = settings.Lifecycle,
+            reviewExecution = settings.Execution,
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");

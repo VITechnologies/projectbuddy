@@ -353,6 +353,7 @@ def orchestrate(
         "reviewModel": assessment["model"],
         "reviewAggregation": assessment["aggregation"],
         "reviewBudget": assessment["reviewBudget"],
+        "reviewExecution": assessment["reviewExecution"],
         "reviewRequestBudgets": assessment["requestBudgets"],
         "reviewModelBudget": assessment["modelBudget"],
         "reviewPrivacy": assessment["reviewPrivacy"],

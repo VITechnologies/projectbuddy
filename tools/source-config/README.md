@@ -44,7 +44,8 @@ dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
   --model-digest APPROVED_MODEL_SHA256 \
   --review-budget /path/to/APPROVED_BUDGET.json \
   --review-privacy /path/to/APPROVED_PRIVACY.json \
-  --review-lifecycle /path/to/APPROVED_LIFECYCLE.json
+  --review-lifecycle /path/to/APPROVED_LIFECYCLE.json \
+  --review-execution /path/to/APPROVED_EXECUTION.json
 ```
 
 The same options work with native Windows paths in PowerShell; supply the
@@ -94,6 +95,27 @@ model attestation or universal tokenizer guarantee. Source-config accepts no
 images. These example limits are not benchmark or GPU-capacity proof.
 
 ## Outputs And Gates
+
+`--review-execution` is required. Only explicitly approved CPU-only execution
+is currently supported; replace the digest with the same full lowercase digest
+as `--model-digest`:
+
+```json
+{
+  "schema": "projectbuddy/ollama-execution@1",
+  "modelDigest": "<64 lowercase hex characters>",
+  "mode": "cpu-only",
+  "threads": 1
+}
+```
+
+The host validates exactly these fields and an integer thread count from 1 to 8.
+It emits `num_gpu: 0` and the approved `num_thread` in the canonical payload
+before request hashing and submission. Unknown modes/controls or a different
+digest fail before inference; no server-default or after-hashing adapter fallback
+is used. The policy is retained as `reviewExecution` in evidence. These are
+requested Ollama execution settings, not proof of OS CPU/GPU enforcement or
+exclusive service ownership; observed residency remains a separate fact.
 
 `--review-lifecycle` is required. This example bounds the model-review session,
 including model preflight, inference, backoff and postflight (not earlier Git
@@ -199,3 +221,5 @@ Disclosure/retention behavior is specified in `REQ-113` and `TEST-115`
 (ProjectBuddy issue #234).
 Review lifecycle behavior is specified in `REQ-114` and `TEST-116`
 (ProjectBuddy issue #235).
+Explicit execution options are specified in `REQ-118` and `TEST-119`
+(ProjectBuddy issue #244).
