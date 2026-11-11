@@ -143,6 +143,75 @@ public class GenerationTests
     }
 
     [Fact]
+    public async Task OverBudgetEvidenceSendsNoInferenceAndWritesNoConfiguration()
+    {
+        var settings = await Fixture();
+        settings = settings with { Budget = settings.Budget with { MaxTextBytes = 10 } };
+        using var handler = new ReviewHttpHandler(Inventory());
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData("tokenizer")]
+    [InlineData("context")]
+    [InlineData("template")]
+    [InlineData("missing")]
+    public async Task UnsupportedModelBudgetSendsNoInference(string problem)
+    {
+        var settings = await Fixture();
+        var metadata = problem switch
+        {
+            "tokenizer" => "{\"template\":\"\",\"model_info\":{\"general.architecture\":\"fixture\",\"fixture.context_length\":32768,\"tokenizer.ggml.model\":\"unknown\"}}",
+            "context" => "{\"template\":\"\",\"model_info\":{\"general.architecture\":\"fixture\",\"fixture.context_length\":1024,\"tokenizer.ggml.model\":\"gpt2\"}}",
+            "template" => "{\"template\":\"" + new string('x', 2000) + "\",\"model_info\":{\"general.architecture\":\"fixture\",\"fixture.context_length\":32768,\"tokenizer.ggml.model\":\"gpt2\"}}",
+            _ => "{}"
+        };
+        using var handler = new ReviewHttpHandler(Inventory(), metadataOverride: metadata);
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData(null, 16, "stop")]
+    [InlineData(0, 16, "stop")]
+    [InlineData(999999, 16, "stop")]
+    [InlineData(64, 0, "stop")]
+    [InlineData(64, 999999, "stop")]
+    [InlineData(64, 16, "length")]
+    public async Task IncompleteCompletionLeavesNoConfiguration(int? inputCount, int? outputCount, string reason)
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory(), inputCount: inputCount, outputCount: outputCount, reason: reason);
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task ReviewBudgetBoundaryAndEvidenceAreExplicit()
+    {
+        var settings = await Fixture();
+        using var payload = JsonDocument.Parse("{\"format\":{},\"messages\":[{\"role\":\"user\",\"content\":\"fixture\"}]}");
+        var measured = settings.Budget.Check(payload.RootElement);
+        var exact = settings.Budget with { ContextTokens = measured.InputTokenUpperBound + settings.Budget.OutputTokens };
+        exact.Validate(settings.ModelDigest);
+        Assert.Equal(measured.InputTokenUpperBound, exact.Check(payload.RootElement).InputTokenUpperBound);
+        Assert.Throws<InvalidDataException>(() => (exact with { ContextTokens = exact.ContextTokens - 1 }).Check(payload.RootElement));
+        using var handler = new ReviewHttpHandler(Inventory());
+        Assert.True(await Generation.RunAsync(settings, (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        using var evidence = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
+        var request = evidence.RootElement.GetProperty("ollama").GetProperty("RequestBudget");
+        Assert.Equal(64, request.GetProperty("PolicySha256").GetString()!.Length);
+        Assert.Equal("all-submitted-evidence; no truncation", request.GetProperty("Coverage").GetString());
+    }
+
+    [Fact]
     public async Task ApprovedHttpReviewBindsExpectedAndObservedIdentity()
     {
         var settings = await Fixture();
@@ -266,7 +335,8 @@ public class GenerationTests
     private static string InventoryEntry() => JsonSerializer.Serialize(new { name = "fixture:1", digest = new string('a', 64) });
 
     private sealed class ReviewHttpHandler(string preflight, string? postflight = null,
-        bool unavailablePostflight = false, string responseModel = "fixture:1", bool unavailablePreflight = false) : HttpMessageHandler
+        bool unavailablePostflight = false, string responseModel = "fixture:1", bool unavailablePreflight = false,
+        string? metadataOverride = null, int? inputCount = 64, int? outputCount = 16, string reason = "stop") : HttpMessageHandler
     {
         public int InventoryRequests { get; private set; }
         public int InferenceRequests { get; private set; }
@@ -282,6 +352,10 @@ public class GenerationTests
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
                 content = InventoryRequests == 1 ? preflight : postflight ?? preflight;
             }
+            else if (request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath == "/api/show")
+            {
+                content = metadataOverride ?? "{\"template\":\"\",\"system\":\"\",\"model_info\":{\"general.architecture\":\"fixture\",\"fixture.context_length\":32768,\"tokenizer.ggml.model\":\"gpt2\"}}";
+            }
             else
             {
                 Assert.Equal(HttpMethod.Post, request.Method);
@@ -289,7 +363,7 @@ public class GenerationTests
                 InferenceRequests++;
                 content = JsonSerializer.Serialize(new
                 {
-                    model = responseModel, done = true, done_reason = "stop",
+                    model = responseModel, done = true, done_reason = reason, prompt_eval_count = inputCount, eval_count = outputCount,
                     message = new { content = "{\"decision\":\"accept\",\"blockers\":[]}" }
                 });
             }
@@ -315,6 +389,8 @@ public class GenerationTests
         var revision = await Generation.Git(root, "rev-parse", "HEAD");
         return new Settings(root, "vipm.toml", "ppl", "https://example.org/fixture.git", revision,
             Path.Combine(AppContext.BaseDirectory, "pipeline-config.schema.json"), Path.Combine(directory, "generated"),
-            "http://127.0.0.1:11435", "fixture:1", new string('a', 64));
+            "http://127.0.0.1:11435", "fixture:1", new string('a', 64),
+            new ReviewBudget("projectbuddy/ollama-budget@1", "utf8-byte-plus-approved-media@1", new string('a', 64),
+                16384, 512, 1024, 0, 65536, 0, 0));
     }
 }

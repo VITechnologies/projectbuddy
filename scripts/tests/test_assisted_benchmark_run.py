@@ -52,6 +52,10 @@ def authorization():
         ],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
+                 "modelDigest": MODEL["digest"], "contextTokens": 16384, "outputTokens": 512,
+                 "templateReserveTokens": 1024, "imageTokensPerImage": 2048,
+                 "maxTextBytes": 65536, "maxImageBytes": 8 * 1024 * 1024, "maxImagesPerRequest": 1},
         "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
             "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "frameImages", "benchmarkResult"],
         "allowVmLifecycle": False,
@@ -148,12 +152,14 @@ class FakeOllama:
         return {"models": [{"name": MODEL["tag"], "digest": MODEL["digest"]}]}
 
     def show(self, model):
-        return {"capabilities": ["completion", "vision"]}
+        return {"capabilities": ["completion", "vision"], "template": "", "system": "",
+            "model_info": {"general.architecture": "fixture", "fixture.context_length": 32768,
+                       "tokenizer.ggml.model": "gpt2"}}
 
     def chat(self, payload):
         self.payload = payload
         return {
-            "model": MODEL["tag"], "done": True, "done_reason": "stop",
+            "model": MODEL["tag"], "done": True, "done_reason": "stop", "prompt_eval_count": 64, "eval_count": 16,
             "message": {"content": json.dumps({
                 "decision": "pass", "findings": [], "uncertainties": [],
                 "recommendation": "retain the verified receipts",

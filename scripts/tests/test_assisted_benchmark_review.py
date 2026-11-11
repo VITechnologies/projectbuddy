@@ -46,6 +46,10 @@ def authorization(fields=("captureMetadata", "resourceSamples"), **overrides):
         "approvedCalls": [{"tool": "get_benchmark_series", "arguments": {}}],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
+                 "modelDigest": MODEL["digest"], "contextTokens": 16384, "outputTokens": 512,
+                 "templateReserveTokens": 1024, "imageTokensPerImage": 2048,
+                 "maxTextBytes": 65536, "maxImageBytes": 8 * 1024 * 1024, "maxImagesPerRequest": 1},
         "evidenceFields": list(fields),
         "allowVmLifecycle": False,
         "teardownOnNativePplFailure": False,
@@ -96,7 +100,9 @@ class FakeTransport:
         return {"models": [{"name": MODEL["tag"], "digest": digest}]}
 
     def show(self, model):
-        return {"capabilities": ["completion", "vision"]}
+        return {"capabilities": ["completion", "vision"], "template": "", "system": "",
+            "model_info": {"general.architecture": "fixture", "fixture.context_length": 32768,
+                       "tokenizer.ggml.model": "gpt2"}}
 
     def chat(self, payload):
         self.payload = payload
@@ -110,6 +116,8 @@ def assessment_response(model=None, content=None, done=True, reason="stop"):
         "model": model or MODEL["tag"],
         "done": done,
         "done_reason": reason,
+        "prompt_eval_count": 64,
+        "eval_count": 16,
         "message": {"content": json.dumps(review)},
     }
 
@@ -131,6 +139,82 @@ def test_review_uses_only_per_run_approved_evidence_and_returns_provenance():
     prompt_data = json.loads(transport.payload["messages"][1]["content"])
     assert set(prompt_data) == {"captureMetadata", "resourceSamples"}
     assert "frames" not in prompt_data
+
+
+def test_request_cannot_silently_exceed_its_context_budget():
+    review_module = load_module("assisted_review_context_overflow", REVIEW_MODULE)
+    with pytest.raises(review_module.ReviewError, match="budget"):
+        review_module.build_review_request(MODEL["tag"], {"captureMetadata": {"description": "x" * 20000}})
+
+
+def test_context_budget_exact_boundary_and_one_token_over():
+    review_module = load_module("assisted_review_exact_budget", REVIEW_MODULE)
+    budget = authorization()["reviewBudget"]
+    selected = {"captureMetadata": {"description": "public fixture"}}
+    payload = review_module.build_review_request(MODEL["tag"], selected, review_budget=budget)
+    measured = review_module.request_budget(payload, budget)
+    exact = {**budget, "contextTokens": measured["inputTokenUpperBound"] + budget["outputTokens"]}
+    accepted = review_module.build_review_request(MODEL["tag"], selected, review_budget=exact)
+    assert accepted["options"]["num_ctx"] == exact["contextTokens"]
+    with pytest.raises(review_module.ReviewError, match="context budget"):
+        review_module.build_review_request(MODEL["tag"], selected, review_budget={**exact, "contextTokens": exact["contextTokens"] - 1})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("contextTokens", 0), ("outputTokens", True), ("templateReserveTokens", -1),
+    ("maxTextBytes", 0), ("maxImageBytes", 0), ("imageTokensPerImage", 0),
+    ("maxImagesPerRequest", 2), ("accounting", "guess"), ("modelDigest", "0" * 64),
+])
+def test_invalid_budget_prevents_any_inference(field, value):
+    review_module = load_module("assisted_review_invalid_budget", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewBudget"][field] = value
+    transport = FakeTransport()
+    with pytest.raises(review_module.ContractError, match="budget"):
+        review_module.review_evidence(evidence(), auth, contract(), transport)
+    assert transport.payloads == []
+    assert transport.tag_calls == 0
+
+
+@pytest.mark.parametrize("problem", ["unknown-tokenizer", "small-context", "large-template", "missing-info"])
+def test_unsupported_model_budget_metadata_prevents_inference(problem):
+    review_module = load_module("assisted_review_model_budget", REVIEW_MODULE)
+
+    class UnsupportedMetadata(FakeTransport):
+        def show(self, model):
+            metadata = super().show(model)
+            if problem == "unknown-tokenizer":
+                metadata["model_info"]["tokenizer.ggml.model"] = "unknown"
+            elif problem == "small-context":
+                metadata["model_info"]["fixture.context_length"] = 1024
+            elif problem == "large-template":
+                metadata["template"] = "x" * 2000
+            else:
+                metadata.pop("model_info")
+            return metadata
+
+    transport = UnsupportedMetadata()
+    with pytest.raises(review_module.ReviewError, match="budget"):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("field,value", [("prompt_eval_count", None), ("prompt_eval_count", True),
+                                         ("prompt_eval_count", 999999), ("eval_count", 0), ("eval_count", 999999)])
+def test_incomplete_or_over_budget_completion_is_not_an_assessment(field, value):
+    review_module = load_module("assisted_review_completion_budget", REVIEW_MODULE)
+    response = assessment_response()
+    response[field] = value
+    with pytest.raises(review_module.ReviewError, match="completion counts"):
+        review_module.review_evidence(evidence(), authorization(), contract(), FakeTransport(response=response))
+
+
+def test_image_payload_must_fit_the_explicit_media_budget():
+    review_module = load_module("assisted_review_media_budget", REVIEW_MODULE)
+    budget = {**authorization()["reviewBudget"], "maxImageBytes": 1}
+    selected = {"frameImages": {"frames": [{"index": 0, "sha256": "a" * 64}], "_imagesBase64": ["YWJj"]}}
+    with pytest.raises(review_module.ReviewError, match="image budget"):
+        review_module.build_review_request(MODEL["tag"], selected, review_budget=budget)
 
 
 def test_review_refuses_evidence_from_a_different_run():

@@ -92,7 +92,19 @@ model tag/digest):
   ],
   "targetVmUuids": [],
   "ollamaModel": {"tag": "projectbuddy:...", "digest": "<64 hex characters>"},
-  "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "frameImages", "benchmarkResult"],
+  "reviewBudget": {
+    "schema": "projectbuddy/ollama-budget@1",
+    "accounting": "utf8-byte-plus-approved-media@1",
+    "modelDigest": "<same full lowercase model digest>",
+    "contextTokens": 16384,
+    "outputTokens": 512,
+    "templateReserveTokens": 1024,
+    "imageTokensPerImage": 0,
+    "maxTextBytes": 65536,
+    "maxImageBytes": 0,
+    "maxImagesPerRequest": 0
+  },
+  "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
   "allowVmLifecycle": false,
   "teardownOnNativePplFailure": false
 }
@@ -139,6 +151,34 @@ combined-review recommendation and report how many original recommendations
 were omitted. This is the `REQ-110` / `TEST-112` contract for issue #231.
 Frame-specific finding references remain separate work in issue #233; category
 references are not presented as frame-level attribution or whole-capture proof.
+
+## Inference Budget
+
+Model review requires an explicit `reviewBudget` bound into run authorization;
+authorization used only for planning MCP calls does not implicitly grant one.
+The example above is text-only. Image review additionally requires a reviewed,
+digest-specific `imageTokensPerImage` upper bound, nonzero `maxImageBytes`, and
+`maxImagesPerRequest: 1`; unknown image cost means no image inference. Fixture
+image costs are synthetic, not a live-model sizing recommendation.
+
+Only the declared `utf8-byte-plus-approved-media@1` accounting for a model
+reporting the `gpt2` byte-level tokenizer is supported. Model metadata must
+provide its architecture/context limit and template/system. Template/system
+UTF-8 bytes plus 256 framing tokens must fit the approved reserve. The host
+counts prompt/schema UTF-8 bytes conservatively, adds that reserve and the
+approved media bound, and reserves output tokens before any request is sent.
+All requests are prechecked; nothing is silently truncated or summarized.
+Completion counts must be positive and within bounds, in addition to existing
+identity, JSON-schema, evidence, and completion checks. Unsupported metadata or
+an input that cannot be shown to fit is rejected, not submitted optimistically.
+
+Assessment and run receipts retain the complete approved budget, per-request
+policy/request hashes, input upper bounds, and no-truncation coverage, plus the
+observed tokenizer/context and template hash. They do not retain raw prompts or
+image data in budget metadata. These checks trust local daemon metadata and the
+caller-reviewed template/media bounds; they do not prove model reasoning,
+authenticate weights, or establish GPU capacity. The policy implements the
+`REQ-111` / `TEST-113` contract for issue #232.
 
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing

@@ -7,9 +7,11 @@ using Tomlyn;
 namespace ProjectBuddy.SourceConfig;
 
 public sealed record Settings(string Root, string Manifest, string Build, string Repository,
-    string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest);
+    string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest, ReviewBudget Budget);
 public sealed record Review(string Decision, string[] Blockers, string Model, string Digest)
 {
+    public ReviewRequestBudget? RequestBudget { get; init; }
+    public ReviewModelBudget? ModelBudget { get; init; }
     public bool Accepted => Decision == "accept" && Blockers.Length == 0;
 }
 public sealed record InputFile(string Text, string Sha256);
@@ -63,6 +65,7 @@ public static class Generation
                 runtimeAndCleanupPolicy = "native-windows; cleanup disabled"
             },
             approvedOllama = new { model = settings.Model, digest = settings.ModelDigest },
+            reviewBudget = settings.Budget,
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");
