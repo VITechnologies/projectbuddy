@@ -175,6 +175,31 @@ def validate_snapshot(snapshot: object, contract: dict) -> dict:
     }
 
 
+def validate_review_budget(budget: object, model_digest: str) -> dict:
+    keys = {"schema", "accounting", "modelDigest", "contextTokens", "outputTokens", "templateReserveTokens",
+            "imageTokensPerImage", "maxTextBytes", "maxImageBytes", "maxImagesPerRequest"}
+    if not isinstance(budget, dict) or set(budget) != keys:
+        raise ContractError("review budget fields are invalid")
+    if (budget["schema"] != "projectbuddy/ollama-budget@1"
+            or budget["accounting"] != "utf8-byte-plus-approved-media@1"):
+        raise ContractError("review budget accounting policy is unsupported")
+    if (not isinstance(budget["modelDigest"], str) or not re.fullmatch(r"[0-9a-f]{64}", budget["modelDigest"])
+            or budget["modelDigest"] != model_digest):
+        raise ContractError("review budget does not identify the approved model digest")
+    bounds = {"contextTokens": (1, 32768), "outputTokens": (1, 4096), "templateReserveTokens": (256, 16384),
+              "imageTokensPerImage": (0, 32768), "maxTextBytes": (1, 512 * 1024),
+              "maxImageBytes": (0, 8 * 1024 * 1024), "maxImagesPerRequest": (0, 1)}
+    for key, (minimum, maximum) in bounds.items():
+        value = budget[key]
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ContractError(f"review budget {key} is invalid")
+    if budget["outputTokens"] + budget["templateReserveTokens"] >= budget["contextTokens"]:
+        raise ContractError("review budget has no input capacity")
+    if budget["maxImagesPerRequest"] and (not budget["imageTokensPerImage"] or not budget["maxImageBytes"]):
+        raise ContractError("review budget requires an approved model-specific image bound")
+    return dict(budget)
+
+
 def validate_authorization(authorization: object, contract: dict) -> dict:
     validate_contract(contract)
     required = {
@@ -182,7 +207,8 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         "approvedCalls", "targetVmUuids", "evidenceFields", "allowVmLifecycle",
         "teardownOnNativePplFailure", "ollamaModel",
     }
-    if not isinstance(authorization, dict) or set(authorization) != required:
+    if (not isinstance(authorization, dict) or not required.issubset(authorization)
+            or set(authorization) - required - {"reviewBudget"}):
         raise ContractError("run authorization fields are invalid")
     if authorization["schema"] != AUTHORIZATION_SCHEMA:
         raise ContractError("unsupported run authorization schema")
@@ -250,6 +276,8 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
     normalized["approvedCalls"] = canonical_calls
     normalized["targetVmUuids"] = canonical_uuids
     normalized["ollamaModel"] = {"tag": model["tag"], "digest": model["digest"].lower()}
+    if "reviewBudget" in authorization:
+        normalized["reviewBudget"] = validate_review_budget(authorization["reviewBudget"], normalized["ollamaModel"]["digest"])
     return normalized
 
 

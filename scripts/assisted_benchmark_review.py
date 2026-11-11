@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from assisted_benchmark_contract import ContractError, validate_authorization
+from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
 PROMPT_VERSION = "1"
@@ -199,7 +199,52 @@ def assessment_schema(approved_fields: list[str]) -> dict:
     }
 
 
-def build_review_request(model_tag: str, selected_evidence: dict, image_position: int | None = None, keep_alive: str | int = 0) -> dict:
+def model_budget(metadata: object, budget: dict) -> dict:
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("model_info"), dict):
+        raise ReviewError("model budget metadata is unavailable")
+    info = metadata["model_info"]
+    architecture = info.get("general.architecture")
+    context = info.get(f"{architecture}.context_length") if isinstance(architecture, str) else None
+    template = metadata.get("template")
+    system = metadata.get("system", "")
+    if (info.get("tokenizer.ggml.model") != "gpt2" or type(context) is not int
+            or context < budget["contextTokens"] or not isinstance(template, str) or not isinstance(system, str)
+            or len(template.encode("utf-8")) + len(system.encode("utf-8")) + 256 > budget["templateReserveTokens"]):
+        raise ReviewError("model tokenizer/context/template is incompatible with the approved budget")
+    return {"tokenizer": "gpt2", "modelContextTokens": context,
+            "templateSha256": hashlib.sha256(_json_bytes({"template": template, "system": system})).hexdigest()}
+
+
+def request_budget(payload: dict, budget: dict) -> dict:
+    text_bytes = len(_json_bytes(payload["format"]))
+    images = []
+    for message in payload["messages"]:
+        text_bytes += len(message["role"].encode("utf-8")) + len(message["content"].encode("utf-8"))
+        images.extend(message.get("images", []))
+    if text_bytes > budget["maxTextBytes"] or len(images) > budget["maxImagesPerRequest"]:
+        raise ReviewError("request exceeds the approved text/image budget")
+    for image in images:
+        try:
+            image_size = len(base64.b64decode(image, validate=True))
+        except (ValueError, TypeError) as error:
+            raise ReviewError("request budget received invalid image encoding") from error
+        if not 0 < image_size <= budget["maxImageBytes"] or not budget["imageTokensPerImage"]:
+            raise ReviewError("request exceeds the approved image budget")
+    upper_bound = text_bytes + budget["templateReserveTokens"] + len(images) * budget["imageTokensPerImage"]
+    if upper_bound + budget["outputTokens"] > budget["contextTokens"]:
+        raise ReviewError("request exceeds the approved context budget")
+    return {"policySha256": hashlib.sha256(_json_bytes(budget)).hexdigest(),
+            "requestSha256": hashlib.sha256(_json_bytes(payload)).hexdigest(),
+            "inputTokenUpperBound": upper_bound, "textBytes": text_bytes, "imageCount": len(images),
+            "contextTokens": budget["contextTokens"], "outputTokens": budget["outputTokens"],
+            "coverage": "all-submitted-evidence; no truncation"}
+
+
+def build_review_request(model_tag: str, selected_evidence: dict, image_position: int | None = None,
+                         keep_alive: str | int = 0, review_budget: dict | None = None) -> dict:
+    if not isinstance(review_budget, dict):
+        raise ReviewError("an explicit approved review budget is required")
+    budget = validate_review_budget(review_budget, review_budget.get("modelDigest"))
     approved_fields = sorted(selected_evidence)
     prompt_fields = {
         field: {key: value for key, value in item.items() if not key.startswith("_")} if field == "frameImages" else item
@@ -219,12 +264,12 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
         prompt_fields["frameImages"]["frames"] = [frame_metadata]
         user_message["content"] = _json_bytes(prompt_fields).decode("utf-8")
         user_message["images"] = [images[image_position]]
-    return {
+    payload = {
         "model": model_tag,
         "stream": False,
         "keep_alive": keep_alive,
         "format": assessment_schema(approved_fields),
-        "options": {"num_ctx": 8192, "num_predict": 512, "temperature": 0, "seed": 42},
+        "options": {"num_ctx": budget["contextTokens"], "num_predict": budget["outputTokens"], "temperature": 0, "seed": 42},
         "messages": [
             {
                 "role": "system",
@@ -238,6 +283,8 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
             user_message,
         ],
     }
+    request_budget(payload, budget)
+    return payload
 
 
 def validate_assessment(value: object, approved_fields: set[str]) -> dict:
@@ -412,23 +459,33 @@ def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], r
 
 def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None) -> dict:
     approved = validate_authorization(authorization, contract)
+    budget = approved.get("reviewBudget")
+    if budget is None:
+        raise ReviewError("an explicit approved review budget is required")
     selected = select_evidence(evidence, approved, contract, capture_directory)
     model = approved["ollamaModel"]
     _verify_model(transport, model)
+    show = getattr(transport, "show", None)
+    metadata = show(model["tag"]) if callable(show) else None
     if "frameImages" in selected:
-        show = getattr(transport, "show", None)
-        if not callable(show) or "vision" not in show(model["tag"]).get("capabilities", []):
+        if not isinstance(metadata, dict) or "vision" not in metadata.get("capabilities", []):
             raise ReviewError("approved frameImages require a locally installed vision-capable Ollama model")
+    model_limits = model_budget(metadata, budget)
     image_count = len(selected.get("frameImages", {}).get("_imagesBase64", []))
     positions = range(image_count) if image_count > 1 else [0] if image_count == 1 else [None]
     assessments = []
     positions = list(positions)
+    requests = [build_review_request(model["tag"], selected, position,
+                "5m" if index < len(positions) - 1 else 0, budget) for index, position in enumerate(positions)]
+    budgets = [request_budget(payload, budget) for payload in requests]
     for call_index, image_position in enumerate(positions):
-        keep_alive: str | int = "5m" if call_index < len(positions) - 1 else 0
-        response = transport.chat(build_review_request(model["tag"], selected, image_position, keep_alive))
+        response = transport.chat(requests[call_index])
         if (response.get("model") != model["tag"] or response.get("done") is not True
                 or response.get("done_reason") != "stop" or "error" in response):
             raise ReviewError("local Ollama review was incomplete or used a different model")
+        if (type(response.get("prompt_eval_count")) is not int or not 0 < response["prompt_eval_count"] <= budgets[call_index]["inputTokenUpperBound"]
+                or type(response.get("eval_count")) is not int or not 0 < response["eval_count"] <= budget["outputTokens"]):
+            raise ReviewError("local Ollama completion counts are missing or exceed the approved budget")
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise ReviewError("local Ollama review content is invalid")
@@ -450,6 +507,9 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "promptVersion": PROMPT_VERSION,
         "assessment": assessment,
         "aggregation": aggregation,
+        "reviewBudget": budget,
+        "requestBudgets": budgets,
+        "modelBudget": model_limits,
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

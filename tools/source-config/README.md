@@ -41,7 +41,8 @@ dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
   --output /path/to/NEW_OUTPUT_DIRECTORY \
   --ollama-url http://127.0.0.1:11435 \
   --model MODEL:TAG \
-  --model-digest APPROVED_MODEL_SHA256
+  --model-digest APPROVED_MODEL_SHA256 \
+  --review-budget /path/to/APPROVED_BUDGET.json
 ```
 
 The same options work with native Windows paths in PowerShell; supply the
@@ -59,6 +60,37 @@ postflight identity leaves no generated configuration or success evidence.
 The local daemon remains a trusted dependency; these checks are not a signed
 attestation of the model weights or protection against a malicious daemon.
 
+`--review-budget` is a required caller-approved JSON policy. It has exactly
+these fields (replace the digest with the approved model's full digest):
+
+```json
+{
+  "schema": "projectbuddy/ollama-budget@1",
+  "accounting": "utf8-byte-plus-approved-media@1",
+  "modelDigest": "<64 lowercase hex characters>",
+  "contextTokens": 16384,
+  "outputTokens": 512,
+  "templateReserveTokens": 1024,
+  "imageTokensPerImage": 0,
+  "maxTextBytes": 65536,
+  "maxImageBytes": 0,
+  "maxImagesPerRequest": 0
+}
+```
+
+The engine supports this conservative accounting only for a model reporting
+the `gpt2` byte-level tokenizer. Model metadata must expose a sufficient context
+length and a template/system whose UTF-8 bytes plus a 256-token framing reserve
+fit the approved template reserve. Prompt roles/content, output schema, template
+reserve, and output-token reserve must all fit; a byte allowance alone is not
+acceptance. Unknown metadata, an unsupported tokenizer, or excess content is
+refused without inference. Nothing is silently truncated or automatically
+summarized. Completion counts must be present, positive, and within the approved
+bounds; incomplete/length-limited responses cannot pass. This compatibility
+contract trusts local daemon metadata and the caller's reviewed policy, not a
+model attestation or universal tokenizer guarantee. Source-config accepts no
+images. These example limits are not benchmark or GPU-capacity proof.
+
 ## Outputs And Gates
 
 - `pipeline.json`: schema-validated native Windows route, pinned source commit,
@@ -72,6 +104,9 @@ attestation of the model weights or protection against a malicious daemon.
 - `evidence.json`: input and output SHA-256 values, source revision, field
   provenance, schema hash, caller approval (`approvedOllama`), verified model
   identity (`ollama`), decision, blockers, and validity flags.
+  The report also retains the approved budget and request/policy/template hashes,
+  conservative input bound, and explicit no-truncation coverage without saving
+  the raw request in the budget record.
 
 Exit 0 means deterministic checks and the mandatory local model review passed
 for this declared configuration scope. Exit 2 means drafts were produced but
@@ -104,3 +139,5 @@ CI jobs run the same suite; actual CI results and a native LabVIEW build remain
 separate gates. The planned contract is the wiki's `REQ-108` and `TEST-110`.
 Caller-approved model identity is specified in `REQ-109` and `TEST-111`
 (ProjectBuddy issue #230).
+Budget/completeness behavior is specified in `REQ-111` and `TEST-113`
+(ProjectBuddy issue #232).
