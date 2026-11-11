@@ -36,6 +36,48 @@ The snapshot must contain the actual `tools/list` array; the empty array above
 is only a shape illustration and will be rejected because required tools are
 missing.
 
+## Live Run Policy Primitives
+
+`scripts/assisted_benchmark_live_policy.py` contains offline policy/compiler and
+broker primitives for the follow-on live-agent design in ProjectBuddy #250.
+`validate_live_policy` checks a versioned policy against a caller-pinned digest
+and the pinned LBA contract, including a host identity digest derived from the
+local OS `/etc/machine-id` with the `projectbuddy/host-identity@1` domain
+separator. The raw machine-id is not retained or emitted. This catches
+accidental cross-host replay, but it is not hardware attestation and a cloned
+machine-id can impersonate the host. `compile_provision_permit` scopes one create
+request; `claim_provision_permit_once` durably consumes it; `bind_created_vm`
+requires before/after inventory plus the provisioner-returned UUID and the
+private claim before sealing the run grant. `LiveRunBroker` checks exact ordered
+tool/argument pairs against that grant and consumes it once from a private
+ledger; `teardown_target` returns only the bound UUID, once.
+
+`dispatch_provision_once` admits only the exact compiled request, writes a
+durable dispatch marker before invoking the caller-injected provisioner adapter,
+and rechecks expiry immediately before that call. A timeout/lost response burns
+the dispatch: it is never retried with that run ID; the caller must reconcile
+host inventory before another run. This module supplies no real provisioner
+adapter; tests inject only a fake.
+
+These are not a live coordinator or CLI: this module does not itself call
+VirtualBox, MCP, Ollama, download, guest bootstrap, VIPM, or teardown. The caller
+must pin the trusted policy digest in reviewed runner configuration and pass the
+same active `ProvisioningLock` to permit creation, claim, one-shot dispatch, and
+UUID binding. The compiler/binder reject an absent or released lock and a claim
+ledger outside its private lock directory. Hold the lock from inventory snapshot
+through UUID sealing, independently verify the provisioner result and host
+inventory, and
+route teardown through a separately tested identity-checking adapter. The
+lock, permits and run-grant claims use one fixed persistent host ledger at
+`~/.local/state/projectbuddy/live-run-ledger`; callers cannot select a fresh
+ledger to replay a permit. The ledger requires current-user POSIX custody
+(0700 directory/0600 files); unsupported custody fails closed. Self-hashes and
+the ledger detect accidental tampering/replay, but are not signatures or
+protection against a malicious same-user process deleting/replacing local
+state. Do not treat successful fixture tests or constructed grants as live
+authorization, VM proof, or permission to start a run. P0 #251 is tracked under
+epic #250 and excludes SBOM and native Windows PPL work.
+
 ## Capture and review
 
 The capture reader accepts only a finalized `stopped` run with a ready
