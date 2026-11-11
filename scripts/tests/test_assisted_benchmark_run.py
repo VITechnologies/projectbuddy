@@ -398,6 +398,59 @@ def test_entrypoint_does_not_echo_private_paths_in_errors(tmp_path, capsys):
     assert canary not in captured.err + captured.out
 
 
+def test_plan_only_cli_uses_no_mcp_ollama_or_output_side_effects(tmp_path, monkeypatch, capsys):
+    module = load_module("assisted_run_offline_plan_cli", SCRIPTS / "assisted_benchmark_run.py")
+    capture = tmp_path / "run-0001"
+    make_capture(capture)
+    authorization_path = tmp_path / "authorization.json"
+    authorization_path.write_text(json.dumps(authorization()), encoding="utf-8")
+    proof_path = tmp_path / "proof.json"
+    proof_path.write_text(json.dumps(ppl_proof()), encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("plan-only mode attempted to construct an external client")
+
+    monkeypatch.setattr(module, "McpStdioClient", forbidden)
+    monkeypatch.setattr(module, "LocalOllama", forbidden)
+    result = module.main(["--plan-only", "--authorization", str(authorization_path),
+                          "--capture-directory", str(capture), "--ppl-proof", str(proof_path),
+                          "--contract", str(CONTRACT_PATH)])
+    captured = capsys.readouterr()
+    plan = json.loads(captured.out)
+    assert result == 0
+    assert plan["status"] == "plan-only" and plan["complete"] is False
+    assert plan["inferencePerformed"] is False and plan["serverCompletion"] == "not-started"
+    assert "PRIVATE_CANARY" not in captured.out + captured.err
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["authorization.json", "proof.json", "run-0001"]
+
+
+def test_plan_only_cli_rejects_live_options_without_refusal_output(tmp_path, monkeypatch, capsys):
+    module = load_module("assisted_run_plan_reject_live_options", SCRIPTS / "assisted_benchmark_run.py")
+    missing = str(tmp_path / "not-read.json")
+    monkeypatch.setattr(module, "McpStdioClient", lambda *_args: pytest.fail("MCP client started"))
+    result = module.main(["--plan-only", "--authorization", missing, "--capture-directory", missing,
+                          "--ppl-proof", missing, "--contract", missing, "--failure-observation", missing])
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "no external calls made" in captured.err
+    assert not Path(missing).exists()
+
+
+def test_plan_only_cancellation_does_not_claim_unknown_server_completion(monkeypatch, capsys):
+    module = load_module("assisted_run_plan_cancelled", SCRIPTS / "assisted_benchmark_run.py")
+
+    def cancel(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(module, "load_contract", cancel)
+    result = module.main(["--plan-only", "--authorization", "auth.json", "--capture-directory", "capture",
+                          "--ppl-proof", "proof.json", "--contract", "contract.json"])
+    captured = capsys.readouterr()
+    assert result == 130
+    assert "plan cancelled; no external calls made" in captured.err
+    assert "server completion" not in captured.err
+
+
 def test_receipt_writer_is_private_atomic_and_does_not_overwrite(tmp_path: Path):
     module = load_module("assisted_benchmark_run_receipt_writer", SCRIPTS / "assisted_benchmark_run.py")
     private = tmp_path / "private"

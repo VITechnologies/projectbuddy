@@ -68,6 +68,8 @@ def evidence():
     return {
         "schema": "projectbuddy/assisted-benchmark-evidence@1",
         "runId": "run-0001",
+        "actorVersion": "1.4.14",
+        "actorRevision": "7f65a2215b952e1f31bc3677087f14c8b528d789",
         "captureState": "stopped",
         "workload": "labview-launch",
         "plane": "LINUX",
@@ -153,6 +155,59 @@ def test_review_uses_only_per_run_approved_evidence_and_returns_provenance():
     prompt_data = json.loads(transport.payload["messages"][1]["content"])
     assert set(prompt_data) == {"captureMetadata", "resourceSamples"}
     assert "frames" not in prompt_data
+
+
+def test_offline_review_plan_matches_canonical_request_hashes_without_contents():
+    review_module = load_module("assisted_review_plan_hash_parity", REVIEW_MODULE)
+    contract_value = contract()
+    approved = authorization()
+    source = evidence()
+    source["source"] = "PRIVATE_CANARY_SOURCE_TEXT"
+    source["privatePath"] = "/private/canary/capture"
+    plan = review_module.build_review_plan(source, approved, contract_value)
+    selected = review_module.select_evidence(source, approved, contract_value)
+    payload = review_module.build_review_request(MODEL["tag"], selected, keep_alive=30,
+                                                 review_budget=approved["reviewBudget"],
+                                                 review_execution=approved["reviewExecution"])
+    measured = review_module.request_budget(payload, approved["reviewBudget"])
+    assert plan["status"] == "plan-only" and plan["complete"] is False
+    assert plan["inferencePerformed"] is False and plan["nativeBuildProven"] is False
+    assert plan["requests"] == [{"ordinal": 1, **measured}]
+    assert plan["totals"] == {"inferenceRequestCount": 1, "textBytes": measured["textBytes"],
+                              "inputTokenUpperBound": measured["inputTokenUpperBound"],
+                              "outputTokenLimit": measured["outputTokens"], "imageCount": 0}
+    assert plan["requestEnvelope"] == {"operationCount": 4, "worstCaseAttemptCount": 4,
+                                       "maxRequests": 16, "maxRetriesPerOperation": 0}
+    assert plan["latencyEstimateSeconds"] is None
+    assert plan["modelMetadataCompatibility"] == "unknown-not-queried"
+    assert plan["serverCompletion"] == "not-started"
+    assert plan["planSha256"] == hashlib.sha256(review_module._json_bytes(
+        {key: value for key, value in plan.items() if key != "planSha256"})).hexdigest()
+    serialized = json.dumps(plan, sort_keys=True)
+    assert "PRIVATE_CANARY_SOURCE_TEXT" not in serialized
+    assert "/private/canary/capture" not in serialized
+    assert '"messages":' not in serialized and '"template":' not in serialized
+
+
+def test_offline_review_plan_refuses_expiry_budget_and_lifecycle_overflow():
+    review_module = load_module("assisted_review_plan_fail_closed", REVIEW_MODULE)
+    contract_value = contract()
+    expired = authorization()
+    expired["reviewPrivacy"]["expiresAt"] = "2000-01-01T00:00:00Z"
+    with pytest.raises(review_module.ContractError, match="expired"):
+        review_module.build_review_plan(evidence(), expired, contract_value)
+    overflow = authorization()
+    overflow["reviewBudget"]["maxTextBytes"] = 1
+    with pytest.raises(review_module.ReviewError, match="text/image budget"):
+        review_module.build_review_plan(evidence(), overflow, contract_value)
+    lifecycle_overflow = authorization()
+    lifecycle_overflow["reviewLifecycle"]["maxRequests"] = 3
+    with pytest.raises(review_module.ReviewError, match="request/retry envelope"):
+        review_module.build_review_plan(evidence(), lifecycle_overflow, contract_value)
+    mismatched_capture = evidence()
+    mismatched_capture["workload"] = "different-workload"
+    with pytest.raises(review_module.ReviewError, match="capture actor identity"):
+        review_module.build_review_plan(mismatched_capture, authorization(), contract_value)
 
 
 def test_cancelled_review_never_starts_a_request():
@@ -1229,6 +1284,15 @@ def test_approved_images_are_hash_verified_and_sent_only_to_local_vision_model(t
     capture_directory = tmp_path / "run-0001"
     capture = run_fixture.make_capture(capture_directory)
     auth = authorization(("frameImages",))
+    plan = review_module.build_review_plan(capture, auth, contract(), capture_directory)
+    serialized_plan = json.dumps(plan, sort_keys=True)
+    assert plan["totals"]["imageCount"] == 1
+    assert plan["requests"][0]["imageCount"] == 1
+    assert '"images":' not in serialized_plan and "_imagesBase64" not in serialized_plan
+    unsupported_image_budget = copy.deepcopy(auth)
+    unsupported_image_budget["reviewBudget"]["maxImagesPerRequest"] = 0
+    with pytest.raises(review_module.ReviewError, match="text/image budget"):
+        review_module.build_review_plan(capture, unsupported_image_budget, contract(), capture_directory)
     transport = FakeTransport()
 
     result = review_module.review_evidence(
