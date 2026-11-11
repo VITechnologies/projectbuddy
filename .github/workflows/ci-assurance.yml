@@ -111,17 +111,43 @@ jobs:
               raise SystemExit("projectbuddy-ask coverage must be 100% line and branch")
           PY
 
+  source-config:
+    name: Source Configuration Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/source-config/global.json
+
+      - name: Test With Locked Dependencies
+        working-directory: tools/source-config
+        run: |
+          dotnet restore ProjectBuddy.SourceConfig.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.SourceConfig.Tests --no-restore --nologo
+
   toolchain-smoke-test:
     # Calls this repo's own reusable toolchain-smoke-test.yml against
     # itself (REQ-008): proves scripts/Test-ToolchainPresence.ps1's real
     # CI-dispatch path actually runs in this repo's own CI, not just in a
     # hypothetical consumer's. `projectbuddy-ref: ${{ github.sha }}`
-    # resolves dynamically to the exact commit under test on every run,
-    # so this never needs a hardcoded SHA to keep up to date.
+    # resolves to the PR head (or pushed commit) in the repository under test,
+    # so the reusable workflow can check out fork-only commits too.
     name: Toolchain Smoke Test (self-check)
     uses: ./.github/workflows/toolchain-smoke-test.yml
     with:
-      projectbuddy-ref: ${{ github.sha }}
+      projectbuddy-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      projectbuddy-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       tool-names: "git,pwsh,python3,jq"
       runs-on-json: '"ubuntu-latest"'
 

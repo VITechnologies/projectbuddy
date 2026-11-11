@@ -603,7 +603,15 @@ def main() -> int:
     runner_parser.set_defaults(func=cmd_register_runner)
 
     args = parser.parse_args()
-    return args.func(args)
+    return invoke_command(args)
+
+
+def invoke_command(args: argparse.Namespace) -> int:
+    try:
+        return args.func(args)
+    except winrm.exceptions.InvalidCredentialsError:
+        print("WinRM rejected the guest credentials; stopping without retrying.", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

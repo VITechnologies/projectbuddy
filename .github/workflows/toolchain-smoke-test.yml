@@ -27,6 +27,11 @@ on:
         description: "The exact commit SHA this reusable workflow was called at (the same ref the caller's own uses:@<ref> line pins) -- required so this workflow can check out its own repository's files, not the caller's."
         required: true
         type: string
+      projectbuddy-repository:
+        description: "Repository containing the ProjectBuddy ref to test. Defaults to the upstream repository for normal consumers."
+        required: false
+        type: string
+        default: VITechnologies/projectbuddy
       tool-names:
         description: "Comma-separated list of command names to check for on PATH (e.g. 'git,pwsh')."
         required: true
@@ -47,7 +52,7 @@ jobs:
       - name: Checkout ProjectBuddy
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: VITechnologies/projectbuddy
+          repository: ${{ inputs.projectbuddy-repository }}
           ref: ${{ inputs.projectbuddy-ref }}
 
       - name: Install PowerShell (if absent)

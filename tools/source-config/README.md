@@ -1,0 +1,90 @@
+# Source Configuration Prototype
+
+The .NET 10 CLI generates a pipeline JSON, VIPM TOML, and evidence report from
+an existing source manifest and an explicitly selected packed-library build.
+It is a candidate implementation, not a released onboarding command or proof
+that the generated configuration builds successfully on Windows.
+
+## Requirements
+
+- The pinned SDK in `global.json`.
+- Git and an existing checkout at an explicit 40- or 64-character commit ID.
+- A tracked VIPM TOML declaring project name, LabVIEW year and bitness, exact
+  VIPM dependency versions, and a standalone `lvproj` build target.
+- A tracked LabVIEW XML project containing that packed-library specification,
+  an explicit SBOM JSON path, and an explicit artifact directory.
+- A running local Ollama server with the selected model already installed.
+  There is no cloud or no-model fallback.
+- The engine's `pipeline-config.schema.json` and a new output directory outside
+  the inspected checkout. Its parent directory must already exist.
+
+Metadata files must match their Git blobs byte for byte. For Windows checkouts,
+disable automatic line-ending conversion when cloning this evidence checkout;
+otherwise converted metadata is rejected rather than silently treated as the
+pinned bytes. Symlinks and reparse points in inspected paths are refused.
+
+## Run
+
+From `tools/source-config`, replace the uppercase values with the selected
+repository, commit, paths, build key, and installed model:
+
+```bash
+dotnet restore ProjectBuddy.SourceConfig --locked-mode
+dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
+  --root /path/to/CHECKOUT \
+  --manifest vipm.toml \
+  --build BUILD_KEY \
+  --repository https://github.com/OWNER/REPOSITORY.git \
+  --revision COMMIT_ID \
+  --schema ../../pipeline-config.schema.json \
+  --output /path/to/NEW_OUTPUT_DIRECTORY \
+  --ollama-url http://127.0.0.1:11435 \
+  --model MODEL:TAG
+```
+
+The same options work with native Windows paths in PowerShell; supply the
+arguments on one line or use PowerShell continuation syntax, not Bash slashes.
+Use the port on which the operator's Ollama server actually listens. The CLI
+accepts only literal IPv4/IPv6 loopback HTTP(S) origins and refuses redirects.
+It does not change GPU settings or start, install, or download a model.
+
+## Outputs And Gates
+
+- `pipeline.json`: schema-validated native Windows route, pinned source commit,
+  and source-derived artifact metadata, with automatic cleanup disabled. For a
+  PPL, `artifactPath` is the file named by matching
+  `Destination[0].destName` and `TgtF_targetfileName` under the
+  `Bld_localDestDir`; the containing directory alone is not a valid artifact
+  path.
+- `vipm.toml`: preserved project/dependency values and only the selected build.
+  This slice does not synthesize missing manifests or resolve binary-VI imports.
+- `evidence.json`: input and output SHA-256 values, source revision, field
+  provenance, schema hash, model digest, decision, blockers, and validity flags.
+
+Exit 0 means deterministic checks and the mandatory local model review passed
+for this declared configuration scope. Exit 2 means drafts were produced but
+the model rejected or could not approve them. Exit 1 means an input, transport,
+review format, or other validation failed; do not consume partial output.
+Existing output directories are never reused. Neither successful generation
+nor model acceptance is native-build proof: `nativeBuildProven` remains false.
+
+The model reviews configuration consistency, not toolchain installation,
+signature availability, or completeness of dependencies hidden in binary VIs.
+A model's acceptance cannot override schema or source-evidence failures.
+Requests have a 90-second HTTP timeout, a bounded response size and token count,
+and no tool-execution channel. Source-derived prompt values remain untrusted.
+Keep generated evidence private when the inspected source or its paths are
+private. No configuration is registered, no workflow dispatched, no source
+command executed, and no VM, model, image, or volume is cleaned up.
+
+## Tests
+
+```bash
+dotnet restore ProjectBuddy.SourceConfig.Tests --locked-mode
+dotnet test ProjectBuddy.SourceConfig.Tests --no-restore
+```
+
+Tests use synthetic Git repositories and mocked review results. They do not
+require Ollama, LabVIEW, GPU access, or a registered runner. Linux and Windows
+CI jobs run the same suite; actual CI results and a native LabVIEW build remain
+separate gates. The planned contract is the wiki's `REQ-108` and `TEST-110`.

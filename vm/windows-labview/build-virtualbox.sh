@@ -296,10 +296,20 @@ run_redacted() {
   fi
   printf '+ VBoxManage unattended install %s --iso=%s --user=%s --user-password-file=<redacted> --full-user-name=%q --hostname=%s --image-index=%s --install-additions --script-template=%s --start-vm=%s\n' \
     "$VM_NAME" "$ISO" "$GUEST_USER" "$GUEST_FULLNAME" "$GUEST_HOSTNAME" "$image_index" "$script_template" "$START_MODE"
+  local raw_output="$temporary_dir/unattended-install.raw.log"
+  local safe_output="$temporary_dir/unattended-install.log"
+  local command_status
+  set +e
   VBoxManage unattended install "$VM_NAME" --iso="$ISO" --user="$GUEST_USER" \
     --user-password-file="$password_copy" --full-user-name="$GUEST_FULLNAME" \
     --hostname="$GUEST_HOSTNAME" --image-index="$image_index" --install-additions \
-    --script-template="$script_template" --start-vm="$START_MODE"
+    --script-template="$script_template" --start-vm="$START_MODE" >"$raw_output" 2>&1
+  command_status=$?
+  set -e
+  sed -E 's/^([[:space:]]*(user-)?(admin-)?password[[:space:]]*[:=][[:space:]]*).*/\1<redacted>/I' \
+    "$raw_output" > "$safe_output"
+  cat "$safe_output" >&2
+  return "$command_status"
 }
 
 run VBoxManage createvm --name "$VM_NAME" --ostype "$os_type" --register --basefolder "$BASEFOLDER"
