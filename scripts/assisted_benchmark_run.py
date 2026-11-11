@@ -352,6 +352,7 @@ def orchestrate(
         "modelAssessmentSha256": assessment["modelAssessmentSha256"],
         "findingSha256": assessment["findingSha256"],
         "reviewSampling": assessment["sampling"],
+        "reviewLifecycle": assessment["lifecycle"],
         "reviewPromptVersion": assessment["promptVersion"],
         "reviewedFrameCount": assessment["reviewedFrameCount"],
         "advisoryOnly": assessment["advisoryOnly"],
@@ -382,8 +383,11 @@ def main(argv: list[str] | None = None) -> int:
         write_private_receipt(args.output, receipt)
         print(json.dumps({"status": "complete", "runId": receipt["runId"], "receiptSha256": receipt["receiptSha256"]}, sort_keys=True))
         return 0
+    except KeyboardInterrupt:
+        print("assisted-benchmark-run: cancelled; server completion may be unknown", file=sys.stderr)
+        return 130
     except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError) as error:
-        print(f"assisted-benchmark-run: refused ({type(error).__name__}); verify approved inputs and local evidence", file=sys.stderr)
+        print(f"assisted-benchmark-run: refused ({type(error).__name__}); no success; server completion may be unknown", file=sys.stderr)
         return 2
 
 

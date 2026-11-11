@@ -43,7 +43,8 @@ dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
   --model MODEL:TAG \
   --model-digest APPROVED_MODEL_SHA256 \
   --review-budget /path/to/APPROVED_BUDGET.json \
-  --review-privacy /path/to/APPROVED_PRIVACY.json
+  --review-privacy /path/to/APPROVED_PRIVACY.json \
+  --review-lifecycle /path/to/APPROVED_LIFECYCLE.json
 ```
 
 The same options work with native Windows paths in PowerShell; supply the
@@ -94,6 +95,35 @@ images. These example limits are not benchmark or GPU-capacity proof.
 
 ## Outputs And Gates
 
+`--review-lifecycle` is required. This example bounds the model-review session,
+including model preflight, inference, backoff and postflight (not earlier Git
+source discovery or a separate build):
+
+```json
+{
+  "schema": "projectbuddy/ollama-lifecycle@1",
+  "totalSeconds": 300,
+  "requestSeconds": 90,
+  "maxRequests": 16,
+  "maxRetries": 0,
+  "backoffSeconds": 0,
+  "residencySeconds": 30,
+  "maxImageCount": 0
+}
+```
+
+Linked cancellation tokens bound headers and body reads as well as overall
+review time. Request counts include metadata/postflight and retry attempts;
+running out cannot skip identity checks. Only declared transient HTTP/transport
+failures may retry with the same approved payload. Invalid schema/identity,
+privacy failure or timeout does not fall back to weaker settings. Ctrl+C cancels
+the client path and cannot produce valid configuration. A timeout/cancellation
+does not prove server computation stopped; diagnostics state that uncertainty.
+Requested residency is a finite TTL, never an unowned forced unload. The engine
+does not stop/reconfigure Ollama or delete models. Completion evidence records
+the policy, counts, consumed time and outcome. No CPU/GPU hard-limit enforcement
+is implied; unsupported extra policy fields are rejected.
+
 `--review-privacy` is required and uses this text-only policy (set an explicit,
 future timezone-bearing expiry for the authorized run):
 
@@ -142,7 +172,7 @@ nor model acceptance is native-build proof: `nativeBuildProven` remains false.
 The model reviews configuration consistency, not toolchain installation,
 signature availability, or completeness of dependencies hidden in binary VIs.
 A model's acceptance cannot override schema or source-evidence failures.
-Requests have a 90-second HTTP timeout, a bounded response size and token count,
+Requests have explicit finite review/request deadlines, bounded response size and token count,
 and no tool-execution channel. Source-derived prompt values remain untrusted.
 Keep generated evidence private when the inspected source or its paths are
 private. No configuration is registered, no workflow dispatched, no source
@@ -167,3 +197,5 @@ Budget/completeness behavior is specified in `REQ-111` and `TEST-113`
 (ProjectBuddy issue #232).
 Disclosure/retention behavior is specified in `REQ-113` and `TEST-115`
 (ProjectBuddy issue #234).
+Review lifecycle behavior is specified in `REQ-114` and `TEST-116`
+(ProjectBuddy issue #235).

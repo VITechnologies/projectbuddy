@@ -47,6 +47,8 @@ def authorization(fields=("captureMetadata", "resourceSamples"), **overrides):
         "approvedCalls": [{"tool": "get_benchmark_series", "arguments": {}}],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewLifecycle": {"schema": "projectbuddy/ollama-lifecycle@1", "totalSeconds": 300, "requestSeconds": 90,
+                    "maxRequests": 16, "maxRetries": 0, "backoffSeconds": 0, "residencySeconds": 30, "maxImageCount": 3},
         "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
                   "retainModelText": False, "expiresAt": "2099-01-01T00:00:00Z"},
         "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
@@ -150,6 +152,219 @@ def test_review_uses_only_per_run_approved_evidence_and_returns_provenance():
     prompt_data = json.loads(transport.payload["messages"][1]["content"])
     assert set(prompt_data) == {"captureMetadata", "resourceSamples"}
     assert "frames" not in prompt_data
+
+
+def test_cancelled_review_never_starts_a_request():
+    import threading
+
+    review_module = load_module("assisted_review_pre_cancelled", REVIEW_MODULE)
+    cancellation = threading.Event()
+    cancellation.set()
+    transport = FakeTransport()
+    with pytest.raises(review_module.ReviewError, match="cancel"):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport, cancel_event=cancellation)
+    assert transport.tag_calls == 0
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("overall, request_seconds", [(1, 1), (10, 1)])
+def test_monotonic_deadline_stops_after_slow_preflight(overall, request_seconds):
+    review_module = load_module("assisted_review_monotonic_deadline", REVIEW_MODULE)
+    now = [0.0]
+    auth = authorization()
+    auth["reviewLifecycle"].update({"totalSeconds": overall, "requestSeconds": request_seconds})
+
+    class SlowPreflight(FakeTransport):
+        def tags(self):
+            now[0] += 2
+            return super().tags()
+
+    transport = SlowPreflight()
+    with pytest.raises(review_module.ReviewDeadlineError, match="deadline"):
+        review_module.review_evidence(evidence(), auth, contract(), transport, clock=lambda: now[0])
+    assert transport.tag_calls == 1
+    assert transport.payloads == []
+
+
+def test_retry_is_bounded_and_uses_identical_approved_payload():
+    review_module = load_module("assisted_review_retry_policy", REVIEW_MODULE)
+    now = [0.0]
+    auth = authorization()
+    auth["reviewLifecycle"].update({"maxRetries": 1, "backoffSeconds": 1})
+
+    class RetryOnce(FakeTransport):
+        def __init__(self):
+            super().__init__()
+            self.attempts = []
+
+        def chat(self, payload):
+            self.attempts.append(copy.deepcopy(payload))
+            if len(self.attempts) == 1:
+                payload["options"]["num_ctx"] = 1
+                raise review_module.ReviewTransportError("fixture transient", True)
+            return super().chat(payload)
+
+    def wait(seconds):
+        now[0] += seconds
+        return False
+
+    transport = RetryOnce()
+    result = review_module.review_evidence(evidence(), auth, contract(), transport, clock=lambda: now[0], wait=wait)
+    assert transport.attempts[0] == transport.attempts[1]
+    assert result["lifecycle"]["requestCount"] == 5
+    assert result["lifecycle"]["retryCount"] == 1
+    assert result["lifecycle"]["consumedSeconds"] == 1
+    assert all(payload["keep_alive"] == 30 for payload in transport.attempts)
+
+
+@pytest.mark.parametrize("retryable", [True, False])
+def test_transport_retries_never_exceed_approval(retryable):
+    review_module = load_module("assisted_review_retry_limit", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewLifecycle"]["maxRetries"] = 1
+
+    class AlwaysFails(FakeTransport):
+        attempts = 0
+
+        def chat(self, payload):
+            self.attempts += 1
+            raise review_module.ReviewTransportError("fixture transport refusal", retryable)
+
+    transport = AlwaysFails()
+    with pytest.raises(review_module.ReviewTransportError):
+        review_module.review_evidence(evidence(), auth, contract(), transport)
+    assert transport.attempts == (2 if retryable else 1)
+
+
+def test_cancellation_after_response_prevents_postflight_and_success():
+    import threading
+
+    review_module = load_module("assisted_review_mid_cancel", REVIEW_MODULE)
+    cancellation = threading.Event()
+
+    class CancelAfterResponse(FakeTransport):
+        def chat(self, payload):
+            response = super().chat(payload)
+            cancellation.set()
+            return response
+
+    transport = CancelAfterResponse()
+    with pytest.raises(review_module.ReviewCancelledError):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport, cancel_event=cancellation)
+    assert transport.tag_calls == 1
+    assert len(transport.payloads) == 1
+
+
+def test_request_count_exhaustion_cannot_skip_postflight():
+    review_module = load_module("assisted_review_request_limit", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewLifecycle"]["maxRequests"] = 3
+    transport = FakeTransport()
+    with pytest.raises(review_module.ReviewError, match="request budget"):
+        review_module.review_evidence(evidence(), auth, contract(), transport)
+    assert transport.tag_calls == 1
+    assert len(transport.payloads) == 1
+
+
+def test_http_request_cancellation_closes_the_active_operation():
+    import asyncio
+    import httpx
+    import threading
+
+    review_module = load_module("assisted_review_http_cancellation", REVIEW_MODULE)
+    cancellation = threading.Event()
+    closed = []
+
+    async def blocked(request):
+        try:
+            cancellation.set()
+            await asyncio.Future()
+        finally:
+            closed.append(True)
+
+    transport = review_module.LocalOllama("http://127.0.0.1:11434", http_transport=httpx.MockTransport(blocked))
+    with pytest.raises(review_module.ReviewCancelledError):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport, cancel_event=cancellation)
+    assert closed == [True]
+
+
+def test_http_whole_request_timeout_closes_pending_headers():
+    import asyncio
+    import httpx
+
+    review_module = load_module("assisted_review_http_deadline", REVIEW_MODULE)
+    closed = []
+
+    async def blocked(request):
+        try:
+            await asyncio.Future()
+        finally:
+            closed.append(True)
+
+    transport = review_module.LocalOllama("http://127.0.0.1:11434", timeout=0.01, http_transport=httpx.MockTransport(blocked))
+    with pytest.raises(review_module.ReviewDeadlineError, match="server completion is unknown"):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("field,value", [("totalSeconds", float("inf")), ("requestSeconds", 0),
+    ("maxRequests", 0), ("maxRetries", 4), ("backoffSeconds", -1), ("residencySeconds", 0), ("maxImageCount", 4)])
+def test_invalid_lifecycle_never_contacts_the_daemon(field, value):
+    review_module = load_module("assisted_review_invalid_lifecycle", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewLifecycle"][field] = value
+    transport = FakeTransport()
+    with pytest.raises(review_module.ContractError, match="lifecycle"):
+        review_module.review_evidence(evidence(), auth, contract(), transport)
+    assert transport.tag_calls == 0
+    assert transport.payloads == []
+
+
+def test_cancelled_backoff_starts_no_retry():
+    import threading
+
+    review_module = load_module("assisted_review_cancelled_backoff", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewLifecycle"].update({"maxRetries": 2, "backoffSeconds": 1})
+    cancellation = threading.Event()
+
+    class RetryableFailure(FakeTransport):
+        attempts = 0
+
+        def chat(self, payload):
+            self.attempts += 1
+            raise review_module.ReviewTransportError("fixture transient", True)
+
+    def cancel_wait(seconds):
+        cancellation.set()
+        return True
+
+    transport = RetryableFailure()
+    with pytest.raises(review_module.ReviewCancelledError):
+        review_module.review_evidence(evidence(), auth, contract(), transport, cancel_event=cancellation, wait=cancel_wait)
+    assert transport.attempts == 1
+
+
+def test_invalid_model_output_is_not_retried_with_weaker_settings():
+    review_module = load_module("assisted_review_no_format_retry", REVIEW_MODULE)
+    auth = authorization()
+    auth["reviewLifecycle"]["maxRetries"] = 3
+    transport = FakeTransport(response=assessment_response(content={"decision": "pass"}))
+    with pytest.raises(review_module.ReviewError):
+        review_module.review_evidence(evidence(), auth, contract(), transport)
+    assert len(transport.payloads) == 1
+    assert transport.tag_calls == 1
+
+
+@pytest.mark.parametrize("residency", [0, -1, True, "5m", 301])
+def test_unowned_unload_or_unbounded_residency_is_never_constructed(residency):
+    review_module = load_module("assisted_review_no_unowned_unload", REVIEW_MODULE)
+    with pytest.raises(review_module.ReviewError, match="residency"):
+        review_module.build_review_request(MODEL["tag"], {"captureMetadata": {}},
+                                           keep_alive=residency, review_budget=authorization()["reviewBudget"])
+    transport = review_module.LocalOllama("http://127.0.0.1:11434")
+    with pytest.raises(review_module.ReviewError, match="residency"):
+        transport.chat({"keep_alive": residency})
 
 
 def test_request_cannot_silently_exceed_its_context_budget():
@@ -341,22 +556,19 @@ def test_invalid_postflight_cannot_produce_an_assessment(postflight):
     '{"models":[{"digest":"first","digest":"second"}]}',
 ])
 def test_duplicate_json_inventory_fields_are_rejected_before_chat(inventory):
+    import httpx
+
     review_module = load_module("assisted_review_duplicate_json", REVIEW_MODULE)
-    transport = review_module.LocalOllama("http://127.0.0.1:11434")
+    paths = []
 
-    class InventoryOpener:
-        def __init__(self):
-            self.paths = []
+    def respond(request):
+        paths.append(str(request.url))
+        return httpx.Response(200, content=inventory.encode())
 
-        def open(self, request, timeout):
-            self.paths.append(request.full_url)
-            return io.BytesIO(inventory.encode())
-
-    opener = InventoryOpener()
-    transport.opener = opener
+    transport = review_module.LocalOllama("http://127.0.0.1:11434", http_transport=httpx.MockTransport(respond))
     with pytest.raises(review_module.ReviewError, match="duplicate JSON fields"):
         review_module.review_evidence(evidence(), authorization(), contract(), transport)
-    assert opener.paths == ["http://127.0.0.1:11434/api/tags"]
+    assert paths == ["http://127.0.0.1:11434/api/tags"]
 
 
 @pytest.mark.parametrize("bad", [
@@ -752,7 +964,7 @@ def test_multiple_approved_frames_use_separate_single_image_requests(tmp_path):
     assert result["reviewedFrameCount"] == 3
     assert len(transport.payloads) == 3
     assert all(len(payload["messages"][1]["images"]) == 1 for payload in transport.payloads)
-    assert [payload["keep_alive"] for payload in transport.payloads] == ["5m", "5m", 0]
+    assert [payload["keep_alive"] for payload in transport.payloads] == [30, 30, 30]
     assert all(len(json.loads(payload["messages"][1]["content"])["frameImages"]["frames"]) == 1 for payload in transport.payloads)
 
     incomplete = FakeTransport(response=assessment_response(done=False))
