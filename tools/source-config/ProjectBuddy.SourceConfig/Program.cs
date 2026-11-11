@@ -2,12 +2,12 @@ using ProjectBuddy.SourceConfig;
 
 if (args is ["--help"])
 {
-	Console.WriteLine("source-config --root CHECKOUT --manifest vipm.toml --build KEY --repository HTTPS_URL --revision COMMIT --schema pipeline-config.schema.json --output NEW_DIRECTORY --ollama-url http://127.0.0.1:PORT --model NAME:TAG --model-digest SHA256 --review-budget POLICY_JSON");
+	Console.WriteLine("source-config --root CHECKOUT --manifest vipm.toml --build KEY --repository HTTPS_URL --revision COMMIT --schema pipeline-config.schema.json --output NEW_DIRECTORY --ollama-url http://127.0.0.1:PORT --model NAME:TAG --model-digest SHA256 --review-budget POLICY_JSON --review-privacy POLICY_JSON");
 	return 0;
 }
 try
 {
-	var required = new[] { "root", "manifest", "build", "repository", "revision", "schema", "output", "ollama-url", "model", "model-digest", "review-budget" };
+	var required = new[] { "root", "manifest", "build", "repository", "revision", "schema", "output", "ollama-url", "model", "model-digest", "review-budget", "review-privacy" };
 	Configuration.Require(args.Length == required.Length * 2, "All options are required; use --help.");
 	var options = new Dictionary<string, string>();
 	for (var index = 0; index < args.Length; index += 2)
@@ -17,13 +17,13 @@ try
 			&& options.TryAdd(args[index][2..], args[index + 1]), "Unknown, duplicate, or empty option.");
 	}
 	var settings = new Settings(options["root"], options["manifest"], options["build"], options["repository"],
-								options["revision"], options["schema"], options["output"], options["ollama-url"], options["model"], options["model-digest"], ReviewBudget.Read(options["review-budget"]));
+								options["revision"], options["schema"], options["output"], options["ollama-url"], options["model"], options["model-digest"], ReviewBudget.Read(options["review-budget"]), ReviewPrivacy.Read(options["review-privacy"]));
 	var valid = await Generation.RunAsync(settings, OllamaReview.RunAsync);
 	Console.WriteLine(valid ? "Configuration valid; native build remains unproven." : "Draft generated; model review blocks configuration validity.");
 	return valid ? 0 : 2;
 }
 catch (Exception error)
 {
-	Console.Error.WriteLine($"source-config: {error.GetType().Name}: {error.Message}");
+	Console.Error.WriteLine($"source-config: refused ({error.GetType().Name}); verify approved inputs and local evidence.");
 	return 1;
 }

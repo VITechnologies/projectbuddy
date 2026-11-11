@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -46,6 +47,8 @@ def authorization(fields=("captureMetadata", "resourceSamples"), **overrides):
         "approvedCalls": [{"tool": "get_benchmark_series", "arguments": {}}],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
+                  "retainModelText": False, "expiresAt": "2099-01-01T00:00:00Z"},
         "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
                  "modelDigest": MODEL["digest"], "contextTokens": 16384, "outputTokens": 512,
                  "templateReserveTokens": 1024, "imageTokensPerImage": 2048,
@@ -398,7 +401,8 @@ def test_aggregation_preserves_a_blocker_after_more_than_32_earlier_findings(tmp
         capture, authorization(("frameImages",)), contract(), SequentialTransport(), capture_directory
     )
     assert result["assessment"]["decision"] == "fail"
-    assert blocker in result["assessment"]["findings"]
+    assert any(finding["severity"] == "blocking" for finding in result["assessment"]["findings"])
+    assert hashlib.sha256(review_module._json_bytes(blocker)).hexdigest() in result["findingSha256"]
     review_module.validate_assessment(result["assessment"], {"frameImages"})
     assert result["aggregation"]["omittedNonBlockingFindingCount"] == 2
     assert result["aggregation"]["completedInputCount"] == 3
@@ -527,6 +531,94 @@ def test_approved_images_are_hash_verified_and_sent_only_to_local_vision_model(t
     assert "_imagesBase64" not in json.dumps(text_evidence)
     assert str(capture_directory) not in user_message["content"]
     assert result["advisoryOnly"] is True
+
+
+def test_images_require_explicit_disclosure_beyond_field_approval(tmp_path):
+    review_module = load_module("assisted_review_disclosure_required", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_disclosure_fixture", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    capture_directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(capture_directory)
+    auth = authorization(("frameImages",))
+    auth.pop("reviewPrivacy", None)
+    transport = FakeTransport()
+    with pytest.raises(review_module.ReviewError, match="privacy"):
+        review_module.review_evidence(capture, auth, contract(), transport, capture_directory)
+    assert transport.payloads == []
+
+
+def test_regions_strip_unapproved_pixels_metadata_and_model_prose(tmp_path):
+    from PIL import Image, ImageDraw, PngImagePlugin
+
+    review_module = load_module("assisted_review_privacy_canaries", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_privacy_canaries", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    capture_directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(capture_directory)
+    canary = "PRIVATE_CANARY_8471"
+    image = Image.new("RGB", (120, 40), "white")
+    drawing = ImageDraw.Draw(image)
+    drawing.rectangle((60, 0, 119, 39), fill="blue")
+    drawing.text((64, 4), canary, fill="white")
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_text("private-metadata", canary)
+    source = io.BytesIO()
+    image.save(source, format="PNG", pnginfo=metadata)
+    original = source.getvalue()
+    frame = capture["frames"][0]
+    (capture_directory / frame["frameFile"]).write_bytes(original)
+    frame.update({"width": 120, "height": 40, "sha256": hashlib.sha256(original).hexdigest()})
+    auth = authorization(("frameImages",))
+    auth["reviewPrivacy"].update({"imageMode": "regions", "frames": [
+        {"index": 0, "crop": [0, 0, 60, 40], "redactions": [[0, 0, 10, 10]]}
+    ]})
+    finding = {"severity": "blocking", "claim": canary, "evidenceFields": ["frameImages"]}
+    raw_assessment = assessment("fail", [finding])
+    raw_assessment["recommendation"] = canary
+    raw_assessment["uncertainties"] = [canary]
+    transport = FakeTransport(response=assessment_response(content=raw_assessment))
+    result = review_module.review_evidence(capture, auth, contract(), transport, capture_directory)
+    submitted = review_module.base64.b64decode(transport.payload["messages"][1]["images"][0])
+    assert canary.encode() not in submitted
+    with Image.open(io.BytesIO(submitted)) as transformed:
+        assert transformed.size == (60, 40)
+        assert transformed.getpixel((0, 0)) == (0, 0, 0)
+        assert transformed.getpixel((20, 20)) == (255, 255, 255)
+        assert transformed.info == {}
+    assert (capture_directory / frame["frameFile"]).read_bytes() == original
+    assert canary not in json.dumps(result)
+    prompt = json.loads(transport.payload["messages"][1]["content"])
+    assert prompt["frameImages"]["frames"][0]["submittedSha256"] == hashlib.sha256(submitted).hexdigest()
+    assert result["assessment"]["decision"] == "fail"
+    again = FakeTransport(response=assessment_response(content=raw_assessment))
+    review_module.review_evidence(capture, auth, contract(), again, capture_directory)
+    assert again.payloads == transport.payloads
+
+
+@pytest.mark.parametrize("problem", ["expired", "text-retention", "unknown-mode", "invalid-box", "outside-box", "missing-region"])
+def test_invalid_privacy_never_submits_images(tmp_path, problem):
+    review_module = load_module("assisted_review_bad_privacy", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_bad_privacy", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    capture_directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(capture_directory)
+    auth = authorization(("frameImages",))
+    policy = auth["reviewPrivacy"]
+    if problem == "expired":
+        policy["expiresAt"] = "2000-01-01T00:00:00Z"
+    elif problem == "text-retention":
+        policy["retainModelText"] = True
+    elif problem == "unknown-mode":
+        policy["imageMode"] = "automatic"
+    else:
+        policy.update({"imageMode": "regions", "frames": [{"index": 0, "crop": [0, 0, 1, 1], "redactions": []}]})
+        if problem == "invalid-box":
+            policy["frames"][0]["crop"][2] = 0
+        elif problem == "outside-box":
+            policy["frames"][0]["crop"][2] = 100
+        else:
+            policy["frames"][0]["index"] = 3
+    transport = FakeTransport()
+    with pytest.raises((review_module.ReviewError, review_module.ContractError), match="privacy"):
+        review_module.review_evidence(capture, auth, contract(), transport, capture_directory)
+    assert transport.payloads == []
 
 
 def test_approved_images_are_refused_for_a_text_only_model(tmp_path):

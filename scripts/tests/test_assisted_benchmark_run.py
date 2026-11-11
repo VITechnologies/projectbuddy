@@ -52,6 +52,8 @@ def authorization():
         ],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
+                  "retainModelText": False, "expiresAt": "2099-01-01T00:00:00Z"},
         "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
                  "modelDigest": MODEL["digest"], "contextTokens": 16384, "outputTokens": 512,
                  "templateReserveTokens": 1024, "imageTokensPerImage": 2048,
@@ -183,6 +185,7 @@ def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     assert receipt["pplProof"]["artifact"] == "lv_icon.lvlibp"
     assert receipt["approvedReviewModel"] == MODEL
     assert receipt["reviewModel"] == MODEL
+    assert receipt["reviewPrivacy"]["retainModelText"] is False
     assert receipt["reviewAggregation"] == {
         "policyVersion": "projectbuddy/assessment-aggregation@1",
         "requiredInputCount": 1,
@@ -253,6 +256,18 @@ for line in sys.stdin:
         result = client.call("get_benchmark_series", {})
     assert listed["toolCount"] == 13
     assert result["content"][0]["text"] == "get_benchmark_series"
+
+
+def test_entrypoint_does_not_echo_private_paths_in_errors(tmp_path, capsys):
+    module = load_module("assisted_run_private_error", SCRIPTS / "assisted_benchmark_run.py")
+    canary = "PRIVATE_CANARY_8471"
+    missing = str(tmp_path / canary)
+    result = module.main(["--authorization", missing, "--capture-directory", missing, "--ppl-proof", missing,
+                          "--contract", missing, "--ollama-url", "http://127.0.0.1:11434", "--output", missing,
+                          "--mcp-command", "node", "fixture.js"])
+    captured = capsys.readouterr()
+    assert result == 2
+    assert canary not in captured.err + captured.out
 
 
 def test_receipt_writer_is_private_atomic_and_does_not_overwrite(tmp_path: Path):

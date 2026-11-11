@@ -348,6 +348,9 @@ def orchestrate(
         "reviewBudget": assessment["reviewBudget"],
         "reviewRequestBudgets": assessment["requestBudgets"],
         "reviewModelBudget": assessment["modelBudget"],
+        "reviewPrivacy": assessment["reviewPrivacy"],
+        "modelAssessmentSha256": assessment["modelAssessmentSha256"],
+        "findingSha256": assessment["findingSha256"],
         "reviewPromptVersion": assessment["promptVersion"],
         "reviewedFrameCount": assessment["reviewedFrameCount"],
         "advisoryOnly": assessment["advisoryOnly"],
@@ -379,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "complete", "runId": receipt["runId"], "receiptSha256": receipt["receiptSha256"]}, sort_keys=True))
         return 0
     except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError) as error:
-        print(f"assisted-benchmark-run: refused: {error}", file=sys.stderr)
+        print(f"assisted-benchmark-run: refused ({type(error).__name__}); verify approved inputs and local evidence", file=sys.stderr)
         return 2
 
 

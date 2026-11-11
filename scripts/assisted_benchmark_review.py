@@ -5,15 +5,17 @@ from __future__ import annotations
 import hashlib
 import base64
 import ipaddress
+import io
 import json
 import math
 import re
 import urllib.error
 import urllib.request
+import warnings
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget
+from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
 PROMPT_VERSION = "1"
@@ -102,12 +104,52 @@ def _resource_summary(evidence: dict) -> dict:
     }
 
 
+def transform_frame(data: bytes, frame: dict, policy: dict) -> tuple[bytes, int, int]:
+    if policy["imageMode"] == "none":
+        raise ReviewError("review privacy policy does not approve images")
+    frame_policy = next((item for item in policy["frames"] if item["index"] == frame["index"]), None)
+    if policy["imageMode"] == "regions" and frame_policy is None:
+        raise ReviewError("review privacy policy has no region for a selected frame")
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        raise ReviewError("review privacy image transformation dependency is unavailable") from None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as decoded:
+                if decoded.format != "PNG" or decoded.width * decoded.height > 16 * 1024 * 1024:
+                    raise ReviewError("review privacy image decoding bound exceeded")
+                if decoded.size != (frame["width"], frame["height"]):
+                    raise ReviewError("review privacy image dimensions differ from verified evidence")
+                rgba = decoded.convert("RGBA")
+                image = Image.new("RGB", decoded.size, "black")
+                image.paste(rgba, mask=rgba.getchannel("A"))
+                if frame_policy is not None:
+                    for box in [frame_policy["crop"], *frame_policy["redactions"]]:
+                        if box[0] + box[2] > image.width or box[1] + box[3] > image.height:
+                            raise ReviewError("review privacy region exceeds source image bounds")
+                    drawing = ImageDraw.Draw(image)
+                    for left, top, width, height in frame_policy["redactions"]:
+                        drawing.rectangle((left, top, left + width - 1, top + height - 1), fill="black")
+                    left, top, width, height = frame_policy["crop"]
+                    image = image.crop((left, top, left + width, top + height))
+                output = io.BytesIO()
+                image.save(output, format="PNG")
+                return output.getvalue(), image.width, image.height
+    except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError):
+        raise ReviewError("review privacy image transformation failed") from None
+
+
 def select_evidence(evidence: object, authorization: object, contract: dict, capture_directory: Path | None = None) -> dict:
     approved = validate_authorization(authorization, contract)
     if not isinstance(evidence, dict) or evidence.get("schema") != "projectbuddy/assisted-benchmark-evidence@1":
         raise ReviewError("evidence schema is unsupported")
     if evidence.get("runId") != approved["runId"]:
         raise ReviewError("evidence run ID does not match the per-run authorization")
+    privacy = approved.get("reviewPrivacy")
+    if privacy is None:
+        raise ReviewError("an explicit review privacy policy is required")
 
     projections = {
         "captureMetadata": lambda: _capture_projection(evidence),
@@ -144,14 +186,17 @@ def select_evidence(evidence: object, authorization: object, contract: dict, cap
                 digest = hashlib.sha256(frame_data).hexdigest()
                 if digest != frame.get("sha256"):
                     raise ReviewError("approved frameImages file does not match its verified hash")
+                submitted, width, height = transform_frame(frame_data, frame, privacy)
                 total_image_bytes += image_bytes
                 if total_image_bytes > MAX_REVIEW_IMAGE_BYTES:
                     raise ReviewError("approved frameImages exceed the aggregate image-size bound")
                 frame_summaries.append({
                     "index": frame["index"], "sha256": digest,
-                    "width": frame["width"], "height": frame["height"],
+                    "width": width, "height": height,
+                    "submittedSha256": hashlib.sha256(submitted).hexdigest(),
+                    "privacyPolicySha256": hashlib.sha256(_json_bytes(privacy)).hexdigest(),
                 })
-                image_payloads.append(base64.b64encode(frame_data).decode("ascii"))
+                image_payloads.append(base64.b64encode(submitted).decode("ascii"))
             selected[field] = {"frames": frame_summaries, "_imagesBase64": image_payloads}
             continue
         if field not in projections or projections[field] is None:
@@ -479,6 +524,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
                 "5m" if index < len(positions) - 1 else 0, budget) for index, position in enumerate(positions)]
     budgets = [request_budget(payload, budget) for payload in requests]
     for call_index, image_position in enumerate(positions):
+        validate_review_privacy(approved["reviewPrivacy"])
         response = transport.chat(requests[call_index])
         if (response.get("model") != model["tag"] or response.get("done") is not True
                 or response.get("done_reason") != "stop" or "error" in response):
@@ -497,6 +543,16 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
 
     assessment, aggregation = _aggregate_assessments(assessments, set(selected), len(positions))
     _verify_model(transport, model)
+    privacy = validate_review_privacy(approved["reviewPrivacy"])
+    model_assessment_hash = hashlib.sha256(_json_bytes(assessment)).hexdigest()
+    finding_hashes = [hashlib.sha256(_json_bytes(finding)).hexdigest() for finding in assessment["findings"]]
+    assessment = {
+        "decision": assessment["decision"],
+        "findings": [{**finding, "claim": f"Model reported a {finding['severity']} finding; inspect approved evidence."}
+                     for finding in assessment["findings"]],
+        "uncertainties": ["Model reported unresolved evidence; operator review required." for _ in assessment["uncertainties"]],
+        "recommendation": "Retain verified evidence." if assessment["decision"] == "pass" else "Operator review required.",
+    }
     evidence_hash = hashlib.sha256(_json_bytes(selected)).hexdigest()
     return {
         "schema": ASSESSMENT_SCHEMA,
@@ -510,6 +566,9 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "reviewBudget": budget,
         "requestBudgets": budgets,
         "modelBudget": model_limits,
+        "reviewPrivacy": privacy,
+        "modelAssessmentSha256": model_assessment_hash,
+        "findingSha256": finding_hashes,
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

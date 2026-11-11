@@ -104,6 +104,13 @@ model tag/digest):
     "maxImageBytes": 0,
     "maxImagesPerRequest": 0
   },
+  "reviewPrivacy": {
+    "schema": "projectbuddy/ollama-privacy@1",
+    "imageMode": "none",
+    "frames": [],
+    "retainModelText": false,
+    "expiresAt": "<future ISO-8601 timestamp with timezone>"
+  },
   "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
   "allowVmLifecycle": false,
   "teardownOnNativePplFailure": false
@@ -179,6 +186,36 @@ image data in budget metadata. These checks trust local daemon metadata and the
 caller-reviewed template/media bounds; they do not prove model reasoning,
 authenticate weights, or establish GPU capacity. The policy implements the
 `REQ-111` / `TEST-113` contract for issue #232.
+
+## Disclosure And Retention
+
+Model review requires an explicit expiring `reviewPrivacy` policy in addition
+to approved evidence fields and budget. `imageMode: none` permits no images;
+`full-frame` explicitly grants the host-selected complete frames; `regions`
+requires one policy entry for each selected frame. Model output cannot change
+that policy. A region entry has this shape:
+
+```json
+{"index": 0, "crop": [0, 0, 600, 400], "redactions": [[10, 10, 100, 30]]}
+```
+
+Boxes are integer `[left, top, width, height]` coordinates in the original
+image, with positive sizes and no out-of-bounds area. Redactions are solid
+black and applied before cropping. Pillow 12.1.1 performs bounded PNG decoding,
+alpha compositing onto black, redaction/crop, and deterministic metadata-free
+PNG encoding without modifying captures. Install the pinned dependency with
+`python -m pip install Pillow==12.1.1` for image review; absent support refuses
+image inference. Source and submitted-image hashes plus policy hashes bind
+exact disclosure. Unknown or missing regions do not fall back to a desktop.
+
+`retainModelText` currently supports only `false`. Returned model prose is
+replaced by fixed host summaries; original validated assessment/finding hashes
+retain audit identity, not text. Expiry is rechecked before requests and final
+retention; it blocks reuse and reports explicit cleanup needs without deleting
+operator assets. Receipts stay private; entry-point errors do not echo private
+paths or raw model output. Synthetic canary tests verify these defined pixel,
+metadata, text, and failure paths, not detection of every unknown secret.
+This is the `REQ-113` / `TEST-115` contract for issue #234.
 
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing
