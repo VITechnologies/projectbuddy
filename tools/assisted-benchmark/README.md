@@ -92,6 +92,12 @@ model tag/digest):
   ],
   "targetVmUuids": [],
   "ollamaModel": {"tag": "projectbuddy:...", "digest": "<64 hex characters>"},
+  "reviewExecution": {
+    "schema": "projectbuddy/ollama-execution@1",
+    "modelDigest": "<same full lowercase model digest>",
+    "mode": "cpu-only",
+    "threads": 1
+  },
   "reviewBudget": {
     "schema": "projectbuddy/ollama-budget@1",
     "accounting": "utf8-byte-plus-approved-media@1",
@@ -250,6 +256,21 @@ metadata, text, and failure paths, not detection of every unknown secret.
 This is the `REQ-113` / `TEST-115` contract for issue #234.
 
 ## Review Lifecycle
+
+Actual model review also requires the explicit `reviewExecution` policy shown
+above. Only `cpu-only` mode and an integer thread count from 1 through 8 are
+supported, bound to the approved model digest. Missing/unknown/substituted controls
+are rejected before inference; planning MCP calls alone does not grant execution
+authority. The canonical request contains `num_gpu: 0` and exact `num_thread`
+before request hashing. Authorization, assessment/run provenance and checkpoint
+binding retain the policy, so changed execution conditions refuse checkpoint
+reuse rather than silently overriding transport options or server defaults.
+The concrete transport also refuses requests without supported CPU options.
+
+Requested CPU/thread options are not OS hard-limit or GPU-absence attestation;
+any separately approved residency observation is recorded as a separate fact.
+No service reconfiguration or model download is part of selecting this policy.
+This is the `REQ-118` / `TEST-119` follow-up for issue #244.
 
 Actual model review requires the explicit `reviewLifecycle` policy above.
 Overall and per-request deadlines use a monotonic clock and include preflight,

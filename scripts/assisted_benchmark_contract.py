@@ -176,6 +176,16 @@ def validate_snapshot(snapshot: object, contract: dict) -> dict:
     }
 
 
+def validate_review_execution(policy: object, model_digest: str) -> dict:
+    if not isinstance(policy, dict) or set(policy) != {"schema", "modelDigest", "mode", "threads"}:
+        raise ContractError("review execution policy fields are invalid")
+    if (policy["schema"] != "projectbuddy/ollama-execution@1" or policy["mode"] != "cpu-only"
+            or not isinstance(policy["modelDigest"], str) or not re.fullmatch(r"[a-f0-9]{64}", policy["modelDigest"])
+            or policy["modelDigest"] != model_digest or type(policy["threads"]) is not int or not 1 <= policy["threads"] <= 8):
+        raise ContractError("review execution policy is unsupported or differs from the approved model")
+    return dict(policy)
+
+
 def validate_review_lifecycle(policy: object) -> dict:
     keys = {"schema", "totalSeconds", "requestSeconds", "maxRequests", "maxRetries", "backoffSeconds",
             "residencySeconds", "maxImageCount"}
@@ -258,7 +268,7 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         "teardownOnNativePplFailure", "ollamaModel",
     }
     if (not isinstance(authorization, dict) or not required.issubset(authorization)
-            or set(authorization) - required - {"reviewBudget", "reviewPrivacy", "reviewLifecycle"}):
+            or set(authorization) - required - {"reviewBudget", "reviewPrivacy", "reviewLifecycle", "reviewExecution"}):
         raise ContractError("run authorization fields are invalid")
     if authorization["schema"] != AUTHORIZATION_SCHEMA:
         raise ContractError("unsupported run authorization schema")
@@ -332,6 +342,8 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         normalized["reviewPrivacy"] = validate_review_privacy(authorization["reviewPrivacy"])
     if "reviewLifecycle" in authorization:
         normalized["reviewLifecycle"] = validate_review_lifecycle(authorization["reviewLifecycle"])
+    if "reviewExecution" in authorization:
+        normalized["reviewExecution"] = validate_review_execution(authorization["reviewExecution"], normalized["ollamaModel"]["digest"])
     return normalized
 
 

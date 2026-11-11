@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from assisted_benchmark_checkpoint import CheckpointError, CheckpointStore
-from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy, validate_review_lifecycle
+from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy, validate_review_lifecycle, validate_review_execution
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
 PROMPT_VERSION = "2"
@@ -424,12 +424,13 @@ def request_budget(payload: dict, budget: dict) -> dict:
 
 
 def build_review_request(model_tag: str, selected_evidence: dict, image_position: int | None = None,
-                         keep_alive: int = 30, review_budget: dict | None = None) -> dict:
+                         keep_alive: int = 30, review_budget: dict | None = None, review_execution: dict | None = None) -> dict:
     if type(keep_alive) is not int or not 1 <= keep_alive <= 300:
         raise ReviewError("requested model residency must be a bounded TTL, not an unload")
     if not isinstance(review_budget, dict):
         raise ReviewError("an explicit approved review budget is required")
     budget = validate_review_budget(review_budget, review_budget.get("modelDigest"))
+    execution = validate_review_execution(review_execution, budget["modelDigest"])
     approved_fields = sorted(selected_evidence)
     prompt_fields = {
         field: {key: value for key, value in item.items() if not key.startswith("_")} if field == "frameImages" else item
@@ -454,7 +455,8 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
         "stream": False,
         "keep_alive": keep_alive,
         "format": assessment_schema(approved_fields, [frame["frameId"] for frame in prompt_fields.get("frameImages", {}).get("frames", [])]),
-        "options": {"num_ctx": budget["contextTokens"], "num_predict": budget["outputTokens"], "temperature": 0, "seed": 42},
+        "options": {"num_ctx": budget["contextTokens"], "num_predict": budget["outputTokens"], "temperature": 0,
+                "seed": 42, "num_gpu": 0, "num_thread": execution["threads"]},
         "messages": [
             {
                 "role": "system",
@@ -629,6 +631,10 @@ class LocalOllama:
     def chat(self, payload: dict) -> dict:
         if type(payload.get("keep_alive")) is not int or not 1 <= payload["keep_alive"] <= 300:
             raise ReviewError("requested model residency must be a bounded TTL, not an unload")
+            options = payload.get("options")
+            if (not isinstance(options, dict) or type(options.get("num_gpu")) is not int or options["num_gpu"] != 0
+                or type(options.get("num_thread")) is not int or not 1 <= options["num_thread"] <= 8):
+                raise ReviewError("local review transport requires explicit supported CPU execution options")
         return self._request("/api/chat", payload)
 
 
@@ -798,6 +804,8 @@ def collect_review_inputs(evidence, approved, selected, requests, budgets, posit
 def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None,
                     cancel_event=None, clock=time.monotonic, wait=None, checkpoint_path: Path | None = None, resume: bool = False) -> dict:
     approved = validate_authorization(authorization, contract)
+    if "reviewExecution" not in approved:
+        raise ReviewError("an explicit review execution policy is required")
     if "reviewLifecycle" not in approved:
         raise ReviewError("an explicit review lifecycle policy is required")
     lifecycle = ReviewLifecycle(approved["reviewLifecycle"], cancel_event, clock, wait)
@@ -812,7 +820,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
     model = approved["ollamaModel"]
     positions = range(image_count) if image_count > 1 else [0] if image_count == 1 else [None]
     positions = list(positions)
-    requests = [build_review_request(model["tag"], selected, position, lifecycle.policy["residencySeconds"], budget)
+    requests = [build_review_request(model["tag"], selected, position, lifecycle.policy["residencySeconds"], budget, approved["reviewExecution"])
                 for position in positions]
     budgets = [request_budget(payload, budget) for payload in requests]
     reviewed = selected.get("frameImages", {}).get("frames", [])
@@ -853,6 +861,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "assessment": assessment,
         "aggregation": aggregation,
         "reviewBudget": budget,
+        "reviewExecution": approved["reviewExecution"],
         "requestBudgets": budgets,
         "modelBudget": model_limits,
         "reviewPrivacy": privacy,

@@ -144,6 +144,61 @@ public class GenerationTests
     }
 
     [Fact]
+    public async Task ApprovedCpuOptionsAreHashedBeforeActualSubmission()
+    {
+        var settings = await Fixture();
+        settings = settings with { Execution = settings.Execution with { Threads = 2 } };
+        using var handler = new ReviewHttpHandler(Inventory());
+        Assert.True(await Generation.RunAsync(settings, (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        var body = Assert.Single(handler.InferenceBodies);
+        using var request = JsonDocument.Parse(body);
+        Assert.Equal(0, request.RootElement.GetProperty("options").GetProperty("num_gpu").GetInt32());
+        Assert.Equal(2, request.RootElement.GetProperty("options").GetProperty("num_thread").GetInt32());
+        using var evidence = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
+        Assert.Equal(2, evidence.RootElement.GetProperty("reviewExecution").GetProperty("Threads").GetInt32());
+        Assert.Equal(Configuration.Hash(body), evidence.RootElement.GetProperty("ollama").GetProperty("RequestBudget").GetProperty("RequestSha256").GetString());
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("zero")]
+    [InlineData("negative")]
+    [InlineData("excessive")]
+    [InlineData("mode")]
+    [InlineData("digest")]
+    public async Task UnsupportedExecutionPolicyNeverContactsTheModel(string problem)
+    {
+        var settings = await Fixture();
+        settings = settings with { Execution = problem switch
+        {
+            "missing" => null!,
+            "zero" => settings.Execution with { Threads = 0 },
+            "negative" => settings.Execution with { Threads = -1 },
+            "excessive" => settings.Execution with { Threads = 9 },
+            "mode" => settings.Execution with { Mode = "automatic" },
+            _ => settings.Execution with { ModelDigest = new string('b', 64) }
+        }};
+        using var handler = new ReviewHttpHandler(Inventory());
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Empty(handler.RequestPaths);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData("{\"schema\":\"projectbuddy/ollama-execution@1\",\"modelDigest\":\"fixture\",\"mode\":\"cpu-only\",\"threads\":true}")]
+    [InlineData("{\"schema\":\"projectbuddy/ollama-execution@1\",\"modelDigest\":\"fixture\",\"mode\":\"cpu-only\",\"threads\":1,\"num_gpu\":1}")]
+    public async Task UnknownOrBooleanExecutionControlsAreRefused(string policy)
+    {
+        var settings = await Fixture();
+        var path = Path.Combine(Path.GetDirectoryName(settings.Root)!, "execution.json");
+        await File.WriteAllTextAsync(path, policy);
+        var error = Record.Exception(() => ReviewExecutionPolicy.Read(path));
+        Assert.True(error is JsonException or InvalidDataException);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
     public async Task CancelledReviewStartsNoHttpRequest()
     {
         var settings = await Fixture();
@@ -352,7 +407,7 @@ public class GenerationTests
             ["repository"] = settings.Repository, ["revision"] = settings.Revision, ["schema"] = settings.Schema,
             ["output"] = settings.Output, ["ollama-url"] = settings.OllamaUrl, ["model"] = settings.Model,
             ["model-digest"] = settings.ModelDigest, ["review-budget"] = Path.Combine(settings.Root, canary),
-            ["review-privacy"] = "unused-fixture-path", ["review-lifecycle"] = "unused-fixture-path"
+            ["review-privacy"] = "unused-fixture-path", ["review-lifecycle"] = "unused-fixture-path", ["review-execution"] = "unused-fixture-path"
         };
         var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         start.ArgumentList.Add(typeof(Generation).Assembly.Location);
@@ -572,6 +627,7 @@ public class GenerationTests
         public int InferenceRequests { get; private set; }
         public List<string> RequestPaths { get; } = [];
         public List<int> Residencies { get; } = [];
+        public List<string> InferenceBodies { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -597,7 +653,9 @@ public class GenerationTests
                 Assert.Equal(HttpMethod.Post, request.Method);
                 Assert.Equal("/api/chat", request.RequestUri.AbsolutePath);
                 InferenceRequests++;
-                using var posted = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                InferenceBodies.Add(body);
+                using var posted = JsonDocument.Parse(body);
                 Residencies.Add(posted.RootElement.GetProperty("keep_alive").GetInt32());
                 content = JsonSerializer.Serialize(new
                 {
@@ -632,6 +690,7 @@ public class GenerationTests
                 16384, 512, 1024, 0, 65536, 0, 0),
             new ReviewPrivacy("projectbuddy/ollama-privacy@1", "none", JsonSerializer.SerializeToElement(Array.Empty<object>()),
                 false, DateTimeOffset.Parse("2099-01-01T00:00:00Z")),
-            new ReviewLifecyclePolicy("projectbuddy/ollama-lifecycle@1", 300, 90, 16, 0, 0, 30, 0));
+            new ReviewLifecyclePolicy("projectbuddy/ollama-lifecycle@1", 300, 90, 16, 0, 0, 30, 0),
+            new ReviewExecutionPolicy("projectbuddy/ollama-execution@1", new string('a', 64), "cpu-only", 1));
     }
 }

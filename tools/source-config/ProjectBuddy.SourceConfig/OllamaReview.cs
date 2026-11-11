@@ -8,6 +8,29 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.SourceConfig;
 
+public sealed record ReviewExecutionPolicy(string Schema, string ModelDigest, string Mode, int Threads)
+{
+    public void Validate(string digest)
+    {
+        Configuration.Require(Schema == "projectbuddy/ollama-execution@1" && Mode == "cpu-only"
+            && ModelDigest == digest && Regex.IsMatch(ModelDigest, "\\A[a-f0-9]{64}\\z")
+            && Threads is >= 1 and <= 8, "Unsupported or substituted review execution policy.");
+    }
+
+    public static ReviewExecutionPolicy Read(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        OllamaReview.ValidateJsonFields(document.RootElement);
+        Configuration.Require(document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Count() == 4, "Review execution requires exactly four policy fields.");
+        return document.RootElement.Deserialize<ReviewExecutionPolicy>(new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+        }) ?? throw new InvalidDataException("Invalid review execution policy.");
+    }
+}
+
 public sealed record ReviewLifecyclePolicy(string Schema, double TotalSeconds, double RequestSeconds,
     int MaxRequests, int MaxRetries, double BackoffSeconds, int ResidencySeconds, int MaxImageCount)
 {
@@ -282,6 +305,8 @@ public static class OllamaReview
         settings.Privacy!.Validate();
         Configuration.Require(settings.Lifecycle is not null, "An explicit review lifecycle policy is required.");
         settings.Lifecycle!.Validate();
+        Configuration.Require(settings.Execution is not null, "An explicit review execution policy is required.");
+        settings.Execution!.Validate(settings.ModelDigest!);
     }
 
     public static Task<Review> RunAsync(Settings settings, Draft draft)
@@ -351,7 +376,8 @@ public static class OllamaReview
             model = settings.Model,
             stream = false,
             keep_alive = settings.Lifecycle.ResidencySeconds,
-            options = new { num_ctx = settings.Budget.ContextTokens, num_predict = settings.Budget.OutputTokens, temperature = 0, seed = 42 },
+            options = new { num_ctx = settings.Budget.ContextTokens, num_predict = settings.Budget.OutputTokens,
+                temperature = 0, seed = 42, num_gpu = 0, num_thread = settings.Execution.Threads },
             format = JsonNode.Parse("""{"type":"object","properties":{"decision":{"type":"string","enum":["accept","reject","inconclusive"]},"blockers":{"type":"array","items":{"type":"string"}}},"required":["decision","blockers"],"additionalProperties":false}"""),
             messages = new[]
             {

@@ -52,6 +52,7 @@ def authorization():
         ],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewExecution": {"schema": "projectbuddy/ollama-execution@1", "modelDigest": MODEL["digest"], "mode": "cpu-only", "threads": 1},
         "reviewLifecycle": {"schema": "projectbuddy/ollama-lifecycle@1", "totalSeconds": 300, "requestSeconds": 90,
                     "maxRequests": 16, "maxRetries": 0, "backoffSeconds": 0, "residencySeconds": 30, "maxImageCount": 3},
         "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
@@ -187,6 +188,7 @@ def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     assert receipt["pplProof"]["artifact"] == "lv_icon.lvlibp"
     assert receipt["approvedReviewModel"] == MODEL
     assert receipt["reviewModel"] == MODEL
+    assert receipt["reviewExecution"]["threads"] == 1
     assert receipt["reviewPrivacy"]["retainModelText"] is False
     assert receipt["reviewSampling"]["coverageScope"] == "submitted-frames-only"
     assert receipt["reviewAggregation"] == {
