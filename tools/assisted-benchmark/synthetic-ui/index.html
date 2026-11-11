@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Synthetic Decision Bay</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #eaf0e8;
+      --muted: #9dac9f;
+      --canvas: #111a18;
+      --panel: #1a2723;
+      --line: #40544b;
+      --mint: #a4d6aa;
+      --amber: #f0bf67;
+      --coral: #e7836f;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --sans: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background-color: var(--canvas);
+      background-image: linear-gradient(135deg, rgba(164, 214, 170, .04) 1px, transparent 1px),
+                        linear-gradient(45deg, rgba(240, 191, 103, .025) 1px, transparent 1px);
+      background-size: 34px 34px, 68px 68px;
+      font-family: var(--sans);
+    }
+    main { width: min(100% - 32px, 1024px); margin: 0 auto; padding: 32px 0; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .mark { width: 34px; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid var(--mint); color: var(--mint); font: 700 14px var(--mono); }
+    .eyebrow, .label { color: var(--muted); font: 11px var(--mono); text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font-size: 22px; font-weight: 600; }
+    .capture { display: flex; align-items: center; gap: 9px; color: var(--mint); font: 11px var(--mono); text-transform: uppercase; }
+    .pulse { width: 8px; aspect-ratio: 1; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px rgba(164, 214, 170, .65); animation: pulse 2s ease-in-out infinite; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, .8fr); gap: 18px; margin-top: 24px; min-width: 0; }
+    .panel { min-width: 0; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(31, 47, 41, .96), rgba(24, 35, 32, .96)); }
+    .panel-head { display: flex; justify-content: space-between; gap: 12px; padding: 17px 19px; border-bottom: 1px solid var(--line); }
+    .task-id { color: var(--amber); font: 12px var(--mono); }
+    .status { color: var(--mint); font: 11px var(--mono); text-transform: uppercase; }
+    .status.recorded { color: var(--amber); }
+    .reading { padding: 26px 20px 22px; }
+    .reading-value { display: flex; align-items: baseline; gap: 12px; margin-top: 10px; }
+    .reading-value strong { font: 500 64px var(--mono); line-height: 1; }
+    .unit { color: var(--muted); font: 12px var(--mono); }
+    .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+    .datum { padding: 12px; border-left: 2px solid var(--line); background: rgba(10, 16, 14, .3); }
+    .datum strong { display: block; margin-top: 7px; color: var(--ink); font: 18px var(--mono); }
+    .rule { margin: 20px 0 0; color: #c4d0c6; font-size: 14px; line-height: 1.55; }
+    .targets { padding: 18px 19px 20px; border-top: 1px solid var(--line); }
+    .target-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; min-width: 0; }
+    .target { min-width: 0; min-height: 52px; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #53675c; color: var(--ink); background: #273832; }
+    .target-key { color: var(--mint); font: 11px var(--mono); }
+    .target:last-child .target-key { color: var(--coral); }
+    aside { display: flex; flex-direction: column; }
+    .aside-body { padding: 20px; }
+    .state-glyph { width: 54px; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid var(--amber); color: var(--amber); font: 20px var(--mono); }
+    .state-title { margin: 18px 0 6px; font-size: 17px; font-weight: 600; }
+    .state-copy { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .event { margin-top: auto; padding: 14px 19px; border-top: 1px solid var(--line); color: var(--muted); font: 10px var(--mono); overflow-wrap: anywhere; }
+    .error { display: none; margin-top: 16px; padding: 12px; border-left: 2px solid var(--coral); color: var(--coral); font: 12px var(--mono); }
+    @keyframes pulse { 50% { opacity: .4; } }
+    @media (max-width: 700px) {
+      main { width: min(100% - 24px, 540px); padding: 18px 0; }
+      header { align-items: flex-start; }
+      h1 { font-size: 19px; }
+      .capture { padding-top: 7px; font-size: 10px; }
+      .workspace { grid-template-columns: 1fr; gap: 12px; margin-top: 16px; }
+      aside { min-height: 180px; }
+      .reading-value strong { font-size: 56px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">DB</div>
+        <div><div class="eyebrow">Synthetic evaluation / station 04</div><h1>Decision Bay</h1></div>
+      </div>
+      <div class="capture"><span class="pulse" aria-hidden="true"></span>Capture fixture</div>
+    </header>
+    <div id="error" class="error" role="status">Signal unavailable</div>
+    <section class="workspace" aria-label="Synthetic decision task">
+      <article class="panel">
+        <div class="panel-head"><span id="task-id" class="task-id">TASK PENDING</span><span id="status" class="status">Awaiting decision</span></div>
+        <div class="reading">
+          <div class="label">Current reading</div>
+          <div class="reading-value"><strong id="reading">--</strong><span class="unit">load units</span></div>
+          <div class="comparison">
+            <div class="datum"><span class="label">Safe limit</span><strong id="limit">--</strong></div>
+            <div class="datum"><span class="label">State sequence</span><strong id="state-sequence">--</strong></div>
+          </div>
+          <p id="instruction" class="rule">Waiting for task state.</p>
+        </div>
+        <div class="targets"><div class="label">Available targets</div><div id="targets" class="target-list"></div></div>
+      </article>
+      <aside class="panel">
+        <div class="panel-head"><span class="label">Run state</span><span class="label">Local fixture</span></div>
+        <div class="aside-body">
+          <div class="state-glyph" aria-hidden="true">04</div>
+          <h2 id="state-title" class="state-title">Awaiting decision</h2>
+          <p id="state-copy" class="state-copy">Read the visible measurement and choose the matching target.</p>
+        </div>
+        <div id="event" class="event">EVENT: PENDING</div>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const errorNode = document.querySelector("#error");
+    const stateCopy = {
+      awaiting_decision: "Read the visible measurement and choose the matching target.",
+      decision_recorded: "One decision is recorded. This screen does not report task correctness."
+    };
+    function render(view) {
+      document.querySelector("#task-id").textContent = view.taskId;
+      document.querySelector("#reading").textContent = String(view.reading);
+      document.querySelector("#limit").textContent = String(view.limit);
+      document.querySelector("#instruction").textContent = view.instruction;
+      document.querySelector("#state-sequence").textContent = view.state === "awaiting_decision" ? "01 / 02" : "02 / 02";
+      document.querySelector("#status").textContent = view.state === "awaiting_decision" ? "Awaiting decision" : "Decision recorded";
+      document.querySelector("#status").classList.toggle("recorded", view.state !== "awaiting_decision");
+      document.querySelector("#state-title").textContent = view.state === "awaiting_decision" ? "Awaiting decision" : "Decision recorded";
+      document.querySelector("#state-copy").textContent = stateCopy[view.state] || "State unavailable.";
+      document.querySelector("#event").textContent = `EVENT: ${view.eventId}`;
+      const targets = document.querySelector("#targets");
+      targets.replaceChildren(...view.controls.map((control, index) => {
+        const node = document.createElement("div");
+        node.className = "target";
+        node.dataset.targetId = control.targetId;
+        const key = document.createElement("span");
+        key.className = "target-key";
+        key.textContent = `0${index + 1}`;
+        const label = document.createElement("span");
+        label.textContent = control.label;
+        node.append(key, label);
+        return node;
+      }));
+    }
+    async function refresh() {
+      try {
+        const response = await fetch("/api/view", { cache: "no-store" });
+        if (!response.ok) throw new Error("unavailable");
+        render(await response.json());
+        errorNode.style.display = "none";
+      } catch {
+        errorNode.style.display = "block";
+      }
+    }
+    refresh();
+    setInterval(refresh, 500);
+  </script>
+</body>
+</html>

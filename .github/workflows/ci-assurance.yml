@@ -31,6 +31,10 @@ jobs:
         shell: bash
         run: python -m pip install --upgrade pip==26.3 pytest==9.2.0 pytest-cov==7.1.0 pyyaml==6.0.3 pillow==12.1.1 httpx==0.28.1
 
+      - name: Install Hash-Locked Synthetic UI MCP SDK
+        shell: bash
+        run: python -m pip install --require-hashes -r tools/assisted-benchmark/requirements-synthetic-ui.txt
+
       - name: Run Tests With Coverage
         shell: bash
         # Scoped to scripts/, the directory with real, assertion-based

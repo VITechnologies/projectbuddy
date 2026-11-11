@@ -78,6 +78,39 @@ state. Do not treat successful fixture tests or constructed grants as live
 authorization, VM proof, or permission to start a run. P0 #251 is tracked under
 epic #250 and excludes SBOM and native Windows PPL work.
 
+## Synthetic UI P1 Fixture
+
+P1 #253 adds a standalone Windows 11 decision UI, deterministic seeded workload,
+and a separate harness-only oracle. The browser surface serves only `GET /` and
+`GET /api/view`; HTTP writes are refused. The `projectbuddy-synthetic-ui` MCP
+server exposes one closed-schema `click_target` action and returns only a
+task/event acknowledgement. The policy seals exactly two task-bound candidates
+(`approve` or `hold`); the model may select one, and that choice becomes terminal
+on success or failure with no retry. It does not expose oracle state, and the UI
+action does not grade itself. The multi-server grant binds server ID, source
+identity, contract digest, tool, exact arguments, call order, run, and VM; the
+router checks the server capability snapshot, one-of choice, expiry and immutable
+grant before dispatch. The existing LBA contract remains a separate server.
+
+Install the official MCP SDK and transitive dependencies from the hash-locked
+file before running the server or its integration test:
+
+```bash
+python3 -m pip install --require-hashes -r tools/assisted-benchmark/requirements-synthetic-ui.txt
+python3 scripts/assisted_benchmark_synthetic_ui_server.py --seed 99
+python3 scripts/assisted_benchmark_synthetic_ui_mcp_server.py --seed 99
+```
+
+The first command serves a read-only browser preview at `127.0.0.1:8765`; the
+stdio MCP server runs a task instance and its UI together. These commands do not
+start LBA capture, Ollama inference, VM provisioning, or teardown. The fixture
+oracle scores a structured model state claim separately from the actual action
+and task outcome. `scripts/assisted_benchmark_calibration.py` summarizes
+non-qualifying calibration records with mode-specific latency percentiles,
+bootstrap uncertainty, grounding, and task-success rates. It never sets or
+infers numeric qualification thresholds. No live calibration data or frozen
+thresholds exist yet.
+
 ## Capture and review
 
 The capture reader accepts only a finalized `stopped` run with a ready

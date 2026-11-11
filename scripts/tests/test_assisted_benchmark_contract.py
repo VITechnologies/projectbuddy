@@ -68,6 +68,63 @@ def authorization(contract, **overrides):
     return data
 
 
+def server_set_contract():
+    lba = load_contract()
+    ui = copy.deepcopy(lba)
+    ui["source"] = {
+        "repository": "VITechnologies/projectbuddy",
+        "revision": "a" * 40,
+        "serverName": "projectbuddy-synthetic-ui",
+        "serverVersion": "1.0.0",
+        "protocolVersion": "2025-06-18",
+    }
+    ui["toolGroups"] = {
+        "core": {
+            "required": True,
+            "tools": [{
+                "name": "click_target",
+                "effect": "coordination-write",
+                "mutatesState": True,
+                "requiresVmLifecycle": False,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "taskId": {"title": "Taskid", "type": "string"},
+                        "targetId": {"enum": ["approve", "hold"], "title": "Targetid", "type": "string"},
+                    },
+                    "required": ["taskId", "targetId"],
+                    "title": "click_targetArguments",
+                    "additionalProperties": False,
+                },
+            }],
+        },
+        "acg-grid": {"required": False, "tools": []},
+    }
+    return {
+        "schema": "projectbuddy/assisted-mcp-server-set@1",
+        "sourceRevision": lba["source"]["revision"],
+        "authorizationSchema": lba["authorizationSchema"],
+        "allowedEvidenceFields": lba["allowedEvidenceFields"],
+        "servers": {"lba": lba, "synthetic-ui": ui},
+    }
+
+
+def choice_authorization(server_set, **overrides):
+    approved_calls = [{"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}}]
+    choices = [{
+        "choiceId": "decision",
+        "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "approve"}},
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}},
+        ],
+    }]
+    return authorization(server_set, sourceRevision=server_set["sourceRevision"],
+                         approvedCalls=approved_calls, approvedCallChoices=choices, **overrides)
+
+
 def test_checked_in_contract_matches_actor_core_and_optional_grid_surface():
     module = load_module()
     contract = load_contract()
@@ -196,6 +253,56 @@ def test_invalid_authorization_fields_fail_closed():
     contract = load_contract()
     auth = authorization(contract, approvedCalls=[{"tool": "unknown_tool", "arguments": {}}])
     with pytest.raises(module.ContractError, match="unknown MCP tool"):
+        module.validate_authorization(auth, contract)
+
+
+def test_exactly_one_call_choice_authorizes_only_two_pinned_candidates():
+    module = load_module()
+    server_set = server_set_contract()
+    auth = choice_authorization(server_set)
+
+    validated = module.validate_authorization(auth, server_set)
+
+    assert validated["approvedCallChoices"][0]["choiceId"] == "decision"
+    assert len(validated["approvedCallChoices"][0]["candidates"]) == 2
+    for candidate in validated["approvedCallChoices"][0]["candidates"]:
+        assert module.authorize_tool_call(candidate["tool"], candidate["arguments"],
+                                          validated, server_set, candidate["serverId"])["allowed"] is True
+    with pytest.raises(module.ContractError, match="outside the pinned enum"):
+        module.authorize_tool_call("click_target", {"taskId": "synthetic-00000063", "targetId": "delete"},
+                                   validated, server_set, "synthetic-ui")
+
+
+@pytest.mark.parametrize("problem, message", [
+    ("candidate-count", "exactly two candidates"),
+    ("duplicate", "duplicate or already approved candidate"),
+    ("server", "MCP server ID is not in the pinned server set"),
+    ("tool", "unknown MCP tool"),
+])
+def test_invalid_choice_candidate_is_rejected(problem, message):
+    module = load_module()
+    server_set = server_set_contract()
+    auth = choice_authorization(server_set)
+    candidates = auth["approvedCallChoices"][0]["candidates"]
+    if problem == "candidate-count":
+        candidates.pop()
+    elif problem == "duplicate":
+        candidates[1] = copy.deepcopy(candidates[0])
+    elif problem == "server":
+        candidates[1]["serverId"] = "other-server"
+    else:
+        candidates[1]["tool"] = "unknown-tool"
+
+    with pytest.raises(module.ContractError, match=message):
+        module.validate_authorization(auth, server_set)
+
+
+def test_call_choice_is_not_available_for_legacy_single_server_contract():
+    module = load_module()
+    contract = load_contract()
+    auth = authorization(contract, approvedCallChoices=[{"choiceId": "decision", "selection": "exactly-one", "candidates": []}])
+
+    with pytest.raises(module.ContractError, match="require a pinned MCP server set"):
         module.validate_authorization(auth, contract)
 
 

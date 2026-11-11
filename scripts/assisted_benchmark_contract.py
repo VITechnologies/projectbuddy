@@ -13,6 +13,7 @@ from uuid import UUID
 
 DEFAULT_CONTRACT = Path(__file__).resolve().parents[1] / "tools" / "assisted-benchmark" / "lba-mcp-contract.json"
 CONTRACT_SCHEMA = "projectbuddy/lba-mcp-contract@1"
+SERVER_SET_SCHEMA = "projectbuddy/assisted-mcp-server-set@1"
 AUTHORIZATION_SCHEMA = "projectbuddy/assisted-benchmark-authorization@1"
 EFFECTS = {"read-only", "local-computation", "coordination-write", "plan-only"}
 
@@ -34,7 +35,7 @@ def load_contract(path: Path = DEFAULT_CONTRACT) -> dict:
     return value
 
 
-def validate_contract(contract: object) -> None:
+def _validate_single_contract(contract: object) -> None:
     if not isinstance(contract, dict) or contract.get("schema") != CONTRACT_SCHEMA:
         raise ContractError("unsupported contract schema")
     source = contract.get("source")
@@ -80,12 +81,59 @@ def validate_contract(contract: object) -> None:
         raise ContractError("allowed evidence fields must be unique")
 
 
+def validate_contract(contract: object) -> None:
+    if isinstance(contract, dict) and contract.get("schema") == SERVER_SET_SCHEMA:
+        expected_keys = {"schema", "sourceRevision", "authorizationSchema", "allowedEvidenceFields", "servers"}
+        if set(contract) != expected_keys or not isinstance(contract["sourceRevision"], str) or not re.fullmatch(r"[0-9a-f]{40}", contract["sourceRevision"]):
+            raise ContractError("MCP server-set fields or source revision are invalid")
+        if contract["authorizationSchema"] != AUTHORIZATION_SCHEMA:
+            raise ContractError("unsupported server-set authorization schema")
+        servers = contract["servers"]
+        if not isinstance(servers, dict) or len(servers) < 2:
+            raise ContractError("MCP server set must contain at least two servers")
+        identities: set[tuple[str, str, str]] = set()
+        allowed_evidence: set[str] = set()
+        for server_id, server_contract in servers.items():
+            if not isinstance(server_id, str) or not re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", server_id):
+                raise ContractError("MCP server ID is invalid")
+            _validate_single_contract(server_contract)
+            source = server_contract["source"]
+            identity = (source["serverName"], source["serverVersion"], source["revision"])
+            if identity in identities:
+                raise ContractError("MCP server identities must be unique")
+            identities.add(identity)
+            allowed_evidence.update(server_contract["allowedEvidenceFields"])
+        evidence_fields = contract["allowedEvidenceFields"]
+        if (not isinstance(evidence_fields, list) or not evidence_fields
+                or any(not isinstance(item, str) or not item for item in evidence_fields)
+                or len(set(evidence_fields)) != len(evidence_fields)
+                or set(evidence_fields) != allowed_evidence):
+            raise ContractError("server-set evidence fields must equal the unique union of server contracts")
+        return
+    _validate_single_contract(contract)
+
+
 def tool_registry(contract: dict) -> dict[str, dict]:
     return {
         tool["name"]: {**tool, "group": group_name}
         for group_name, group in contract["toolGroups"].items()
         for tool in group["tools"]
     }
+
+
+def tool_contract_for_call(contract: dict, tool_name: str, server_id: str | None = None) -> tuple[dict, dict]:
+    if contract.get("schema") == SERVER_SET_SCHEMA:
+        if not isinstance(server_id, str) or server_id not in contract["servers"]:
+            raise ContractError("MCP server ID is not in the pinned server set")
+        selected = contract["servers"][server_id]
+    else:
+        if server_id is not None and server_id != contract["source"]["serverName"]:
+            raise ContractError("MCP server identity differs from the pinned contract")
+        selected = contract
+    tool = tool_registry(selected).get(tool_name)
+    if tool is None:
+        raise ContractError("unknown MCP tool in the pinned contract for that server")
+    return selected, tool
 
 
 def _validate_arguments(value: object, schema: dict, path: str) -> None:
@@ -126,6 +174,8 @@ def _validate_arguments(value: object, schema: dict, path: str) -> None:
 
 def validate_snapshot(snapshot: object, contract: dict) -> dict:
     validate_contract(contract)
+    if contract["schema"] == SERVER_SET_SCHEMA:
+        raise ContractError("validate server-set capabilities with validate_server_snapshot")
     if not isinstance(snapshot, dict) or set(snapshot) != {"protocolVersion", "serverInfo", "tools"}:
         raise ContractError("capability snapshot must contain protocolVersion, serverInfo, and tools")
     source = contract["source"]
@@ -174,6 +224,14 @@ def validate_snapshot(snapshot: object, contract: dict) -> dict:
         "availableGroups": available_groups,
         "missingOptionalGroups": missing_optional_groups,
     }
+
+
+def validate_server_snapshot(snapshot: object, server_id: str, server_set: dict) -> dict:
+    validate_contract(server_set)
+    if server_set.get("schema") != SERVER_SET_SCHEMA or server_id not in server_set["servers"]:
+        raise ContractError("MCP server ID is not in the pinned server set")
+    result = validate_snapshot(snapshot, server_set["servers"][server_id])
+    return {**result, "serverId": server_id}
 
 
 def validate_review_execution(policy: object, model_digest: str) -> dict:
@@ -268,7 +326,7 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         "teardownOnNativePplFailure", "ollamaModel",
     }
     if (not isinstance(authorization, dict) or not required.issubset(authorization)
-            or set(authorization) - required - {"reviewBudget", "reviewPrivacy", "reviewLifecycle", "reviewExecution"}):
+            or set(authorization) - required - {"reviewBudget", "reviewPrivacy", "reviewLifecycle", "reviewExecution", "approvedCallChoices"}):
         raise ContractError("run authorization fields are invalid")
     if authorization["schema"] != AUTHORIZATION_SCHEMA:
         raise ContractError("unsupported run authorization schema")
@@ -292,24 +350,27 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         raise ContractError("run authorization Ollama model tag is invalid")
     if not isinstance(model["digest"], str) or not re.fullmatch(r"[0-9a-fA-F]{64}", model["digest"]):
         raise ContractError("run authorization Ollama model digest must be SHA-256")
-    registry = tool_registry(contract)
+    server_set = contract.get("schema") == SERVER_SET_SCHEMA
     approved_calls = authorization["approvedCalls"]
     if not isinstance(approved_calls, list) or not approved_calls:
         raise ContractError("run authorization approvedCalls must be a non-empty array")
     canonical_calls: list[dict] = []
     call_keys: set[str] = set()
     for call in approved_calls:
-        if not isinstance(call, dict) or set(call) != {"tool", "arguments"} or not isinstance(call["tool"], str):
-            raise ContractError("each approved MCP call must contain exactly tool and arguments")
-        tool = registry.get(call["tool"])
-        if tool is None:
-            raise ContractError("run authorization contains an unknown MCP tool")
+        expected_call_keys = {"serverId", "tool", "arguments"} if server_set else {"tool", "arguments"}
+        if not isinstance(call, dict) or set(call) != expected_call_keys or not isinstance(call["tool"], str):
+            raise ContractError("approved MCP call fields do not match the pinned contract mode")
+        server_id = call.get("serverId")
+        selected_contract, tool = tool_contract_for_call(contract, call["tool"], server_id)
         _validate_arguments(call["arguments"], tool["inputSchema"], call["tool"])
-        key = json.dumps({"tool": call["tool"], "arguments": call["arguments"]}, sort_keys=True, separators=(",", ":"))
+        normalized_call = {"tool": call["tool"], "arguments": call["arguments"]}
+        if server_set:
+            normalized_call["serverId"] = server_id
+        key = json.dumps(normalized_call, sort_keys=True, separators=(",", ":"))
         if key in call_keys:
             raise ContractError("run authorization contains a duplicate MCP call")
         call_keys.add(key)
-        canonical_calls.append({"tool": call["tool"], "arguments": call["arguments"]})
+        canonical_calls.append(normalized_call)
     vm_uuids = authorization["targetVmUuids"]
     if not isinstance(vm_uuids, list) or any(not isinstance(value, str) for value in vm_uuids):
         raise ContractError("run authorization targetVmUuids must be a string array")
@@ -336,6 +397,50 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
     normalized["approvedCalls"] = canonical_calls
     normalized["targetVmUuids"] = canonical_uuids
     normalized["ollamaModel"] = {"tag": model["tag"], "digest": model["digest"].lower()}
+    if "approvedCallChoices" in authorization:
+        choice_groups = authorization["approvedCallChoices"]
+        if not isinstance(choice_groups, list) or len(choice_groups) > 1:
+            raise ContractError("run authorization must contain at most one call choice group")
+        if choice_groups:
+            if not server_set:
+                raise ContractError("call choice groups require a pinned MCP server set")
+            group = choice_groups[0]
+            if (not isinstance(group, dict) or set(group) != {"choiceId", "selection", "candidates"}
+                    or not isinstance(group["choiceId"], str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", group["choiceId"])
+                    or group["selection"] != "exactly-one"
+                    or not isinstance(group["candidates"], list) or len(group["candidates"]) != 2):
+                raise ContractError("call choice group must contain exactly two candidates and one selection")
+            normalized_candidates: list[dict] = []
+            candidate_keys: set[str] = set()
+            candidate_servers: set[str] = set()
+            candidate_tools: set[str] = set()
+            for candidate in group["candidates"]:
+                if (not isinstance(candidate, dict) or set(candidate) != {"serverId", "tool", "arguments"}
+                        or not isinstance(candidate["tool"], str)):
+                    raise ContractError("call choice candidate fields are invalid")
+                server_id = candidate["serverId"]
+                selected_contract, tool = tool_contract_for_call(contract, candidate["tool"], server_id)
+                _validate_arguments(candidate["arguments"], tool["inputSchema"], candidate["tool"])
+                normalized_candidate = {
+                    "serverId": server_id,
+                    "tool": candidate["tool"],
+                    "arguments": candidate["arguments"],
+                }
+                key = json.dumps(normalized_candidate, sort_keys=True, separators=(",", ":"))
+                if key in candidate_keys or key in call_keys:
+                    raise ContractError("call choice contains duplicate or already approved candidate")
+                candidate_keys.add(key)
+                candidate_servers.add(server_id)
+                candidate_tools.add(candidate["tool"])
+                normalized_candidates.append(normalized_candidate)
+            if len(candidate_servers) != 1 or len(candidate_tools) != 1:
+                raise ContractError("call choice candidates must use one exact server and tool")
+            normalized["approvedCallChoices"] = [{
+                "choiceId": group["choiceId"],
+                "selection": "exactly-one",
+                "candidates": normalized_candidates,
+            }]
     if "reviewBudget" in authorization:
         normalized["reviewBudget"] = validate_review_budget(authorization["reviewBudget"], normalized["ollamaModel"]["digest"])
     if "reviewPrivacy" in authorization:
@@ -347,22 +452,30 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
     return normalized
 
 
-def authorize_tool_call(tool_name: str, arguments: object, authorization: object, contract: dict) -> dict:
+def authorize_tool_call(tool_name: str, arguments: object, authorization: object, contract: dict,
+                        server_id: str | None = None) -> dict:
     approved = validate_authorization(authorization, contract)
-    registry = tool_registry(contract)
-    tool = registry.get(tool_name)
-    if tool is None:
-        raise ContractError("requested MCP tool is not in the pinned contract")
+    server_set = contract.get("schema") == SERVER_SET_SCHEMA
+    selected_contract, tool = tool_contract_for_call(contract, tool_name, server_id)
     _validate_arguments(arguments, tool["inputSchema"], tool_name)
-    approved_key = json.dumps({"tool": tool_name, "arguments": arguments}, sort_keys=True, separators=(",", ":"))
-    if approved_key not in {
+    approved_call = {"tool": tool_name, "arguments": arguments}
+    if server_set:
+        approved_call["serverId"] = server_id
+    approved_key = json.dumps(approved_call, sort_keys=True, separators=(",", ":"))
+    approved_keys = {
         json.dumps(call, sort_keys=True, separators=(",", ":"))
         for call in approved["approvedCalls"]
-    }:
+    }
+    for group in approved.get("approvedCallChoices", []):
+        approved_keys.update(
+            json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+            for candidate in group["candidates"]
+        )
+    if approved_key not in approved_keys:
         raise ContractError("requested MCP call is outside the per-run approval")
     if tool["requiresVmLifecycle"] and not approved["allowVmLifecycle"]:
         raise ContractError("requested MCP tool requires VM lifecycle approval")
-    return {
+    decision = {
         "allowed": True,
         "runId": approved["runId"],
         "tool": tool_name,
@@ -371,6 +484,9 @@ def authorize_tool_call(tool_name: str, arguments: object, authorization: object
         "mutatesState": tool["mutatesState"],
         "executesMcpResultCommands": False,
     }
+    if server_set:
+        decision["serverId"] = server_id
+    return decision
 
 
 def authorize_ppl_failure_cleanup(authorization: object, vm_uuid: str, contract: dict) -> dict:
