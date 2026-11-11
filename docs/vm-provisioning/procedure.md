@@ -113,6 +113,15 @@ stopping at "ready for the operator to activate" for exactly this reason
 (and because concurrent first-boot VMs were observed to contend heavily
 for host CPU/disk during Windows Update/Defender housekeeping).
 
+Each failed provisioning attempt is treated as a poisoned candidate and is
+discarded before a retry **and after the final failed attempt**. The batch
+teardown verifies the VM name and configuration path under the selected
+storage root, refuses active snapshot serialization or external virtual
+disks, detaches optical media so shared installer ISOs are preserved, and
+removes only that VM's own storage directory. A specific WinRM credential
+rejection is not classified as guest poison: it stops retries and preserves
+the VM so the credential can be corrected without rebuilding Windows.
+
 ### Fleet status (`vm-fleet-status.yml`)
 
 Runs on a 30-minute schedule (plus `workflow_dispatch` and a push trigger
