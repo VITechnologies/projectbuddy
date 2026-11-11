@@ -287,6 +287,47 @@ Install Pillow 12.1.1 too when it is not already available and images are used.
 The contract is `REQ-114` / `TEST-116` for issue #235. These client-side limits
 are not GPU sizing, OS CPU preemption, or server-computation attestation.
 
+## Private Checkpoints And Resume
+
+Add `--checkpoint /absolute/private/review.json` to a new run to retain partial
+review work; add `--resume` with the same path and identical inputs to recover.
+The checkpoint path must differ from the final `--output` receipt path. A new
+run refuses an existing checkpoint unless resume is explicit. No raw image,
+prompt, response or unrestricted model prose is saved. The checkpoint retains
+only validated minimized per-input results, original-result/finding digests,
+model/template limits and consumed lifecycle budget.
+
+The `projectbuddy/assisted-review-checkpoint@1` binding hash covers the complete
+authorization, evidence, selected/transformed frame identities, ordered request
+hashes/options, model digest, prompt/schema versions, sampling, budget, privacy
+and residency policies. Changed inputs/approval or unsafe/corrupt state are
+refused without replacing the old checkpoint. Expired disclosure cannot be
+reused. Every reuse performs fresh model preflight and final postflight; newly
+checkpointed inputs also receive an identity check before persistence. Complete
+required coverage and final aggregation remain necessary for a distinct final
+receipt. A checkpoint always has `complete: false`, even when every per-input
+result is present, and cannot be written as a final run receipt.
+
+Custody is currently POSIX-only: a current-user 0700 directory, regular singly
+linked 0600 files, no symlinked path components, an exclusive nonblocking process
+lock, bounded JSON and a canonical self-hash. Unsupported platforms fail closed
+rather than weakening Windows ACLs. Temporary files are private, fsynced and
+atomically committed; failure preserves the last valid state. Locks are released
+on process exit; the harmless 0600 lock file remains for safe reuse. No operator
+assets or checkpoints are automatically deleted. Self-hashes detect inconsistent
+state, not malicious same-user rewriting or model attestation.
+
+Resume restores consumed request/retry/time budget instead of resetting it. An
+uncertain in-flight marker reserves worst-case remaining request attempts and
+their time budget; receipts expose `reservedUnknownRequestCount` and
+`priorServerCompletionUnknown`. This is conservative accounting, not proof that
+old server computation stopped. Exhausted budget blocks reuse. Raw assessment
+audit identity uses `modelAssessmentHashPolicy: ordered-input-digests@1`, so
+fresh and resumed runs derive the same result/finding hashes without storing
+model prose. Existing minimized views and scoped frame references are preserved.
+The contract is `REQ-115` / `TEST-117`, with partial-state separation exercised
+by `TEST-118`, for issue #236. Checkpoints are not release/build qualification.
+
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing
 `lv_icon.lvlibp` proof. Native build failures and exact-VM poison teardown remain
