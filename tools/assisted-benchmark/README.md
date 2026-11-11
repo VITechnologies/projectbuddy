@@ -74,6 +74,29 @@ Ollama model tag/digest, evidence fields, and lifecycle/cleanup authority. The
 receipt writer requires a new output file under a private POSIX directory,
 writes atomically with mode `0600`, and prints only completion and receipt hash.
 
+To inspect the same authorized evidence and canonical request costs without
+starting either client, use plan-only mode:
+
+```bash
+python3 scripts/assisted_benchmark_run.py \
+  --plan-only \
+  --authorization <protected-run-authorization.json> \
+  --capture-directory <capture-run-directory> \
+  --ppl-proof <verified-lv-icon-ppl-receipt.json> \
+  --contract tools/assisted-benchmark/lba-mcp-contract.json
+```
+
+The minimized JSON is written to stdout; prompts, images, paths and source text
+are not included. It reports per-request and aggregate conservative byte/token
+bounds, context/output limits, image and sampled-evidence counts, and canonical
+request/policy hashes. Model metadata compatibility is not queried, latency is
+not estimated, and server completion is `not-started`. This is a workload plan,
+not an assessment, latency prediction, success receipt or build proof. In
+`--plan-only` mode, endpoint, MCP, receipt, checkpoint/resume and refusal-output
+options are rejected; no external client, network request, or output file is
+created. The plan is reproducible only for identical canonical inputs and
+policies, and its hashes do not attest to model identity or runtime conditions.
+
 For a read-only capture assessment, an authorization has this shape (replace
 the example run/model values with the actual stopped run and locally verified
 model tag/digest):

@@ -436,6 +436,81 @@ def request_budget(payload: dict, budget: dict) -> dict:
             "coverage": "all-submitted-evidence; no truncation"}
 
 
+def build_review_plan(evidence: object, authorization: object, contract: dict,
+                      capture_directory: Path | None = None) -> dict:
+    approved = validate_authorization(authorization, contract)
+    required = ("reviewBudget", "reviewPrivacy", "reviewLifecycle", "reviewExecution")
+    if any(key not in approved for key in required):
+        raise ReviewError("an explicit budget, privacy, lifecycle, and execution policy is required")
+    if approved["sourceRevision"] != contract["source"]["revision"]:
+        raise ReviewError("authorization source revision does not match the pinned actor contract")
+    if (not isinstance(evidence, dict) or evidence.get("actorVersion") != contract["source"]["serverVersion"]
+            or evidence.get("actorRevision") != contract["source"]["revision"]
+            or evidence.get("captureState") != "stopped" or evidence.get("workload") != approved["workload"]):
+        raise ReviewError("capture actor identity does not match the pinned contract")
+    budget = validate_review_budget(approved["reviewBudget"], approved["ollamaModel"]["digest"])
+    lifecycle = validate_review_lifecycle(approved["reviewLifecycle"])
+    execution = validate_review_execution(approved["reviewExecution"], approved["ollamaModel"]["digest"])
+    selected = select_evidence(evidence, approved, contract, capture_directory)
+    image_count = len(selected.get("frameImages", {}).get("_imagesBase64", []))
+    if image_count > lifecycle["maxImageCount"]:
+        raise ReviewError("review lifecycle image-count bound exceeded")
+    positions = range(image_count) if image_count > 1 else [0] if image_count == 1 else [None]
+    payloads = [build_review_request(approved["ollamaModel"]["tag"], selected, position,
+                                     lifecycle["residencySeconds"], budget, execution)
+                for position in positions]
+    budgets = [request_budget(payload, budget) for payload in payloads]
+    operation_count = len(payloads) + 3
+    worst_case_attempt_count = operation_count * (lifecycle["maxRetries"] + 1)
+    if worst_case_attempt_count > lifecycle["maxRequests"]:
+        raise ReviewError("lifecycle request budget cannot cover the approved request/retry envelope")
+    frame_hashes = selected.get("frameHashes", {})
+    frame_images = selected.get("frameImages", {})
+    frame_sample_count = max(len(frame_hashes.get("sampledFrames", [])), len(frame_images.get("frames", [])))
+    core = {
+        "schema": "projectbuddy/assisted-review-plan@1",
+        "status": "plan-only",
+        "complete": False,
+        "inferencePerformed": False,
+        "nativeBuildProven": False,
+        "modelDigest": approved["ollamaModel"]["digest"],
+        "authorizationSha256": hashlib.sha256(_json_bytes(approved)).hexdigest(),
+        "evidence": {
+            "fields": sorted(selected),
+            "fieldCount": len(selected),
+            "captureFrameCount": evidence.get("frameCount", 0) if isinstance(evidence, dict) else 0,
+            "sampledFrameCount": frame_sample_count,
+            "submittedImageCount": image_count,
+            "coverage": "authorized-selected-sample-only",
+            "allSelectedEvidenceIncluded": True,
+            "truncated": False,
+        },
+        "requests": [
+            {"ordinal": index + 1, **item}
+            for index, item in enumerate(budgets)
+        ],
+        "totals": {
+            "inferenceRequestCount": len(budgets),
+            "textBytes": sum(item["textBytes"] for item in budgets),
+            "inputTokenUpperBound": sum(item["inputTokenUpperBound"] for item in budgets),
+            "outputTokenLimit": sum(item["outputTokens"] for item in budgets),
+            "imageCount": sum(item["imageCount"] for item in budgets),
+        },
+        "requestEnvelope": {
+            "operationCount": operation_count,
+            "worstCaseAttemptCount": worst_case_attempt_count,
+            "maxRequests": lifecycle["maxRequests"],
+            "maxRetriesPerOperation": lifecycle["maxRetries"],
+        },
+        "limits": {"reviewBudget": budget, "reviewExecution": execution, "reviewLifecycle": lifecycle},
+        "modelMetadataCompatibility": "unknown-not-queried",
+        "latencyEstimateSeconds": None,
+        "latencyStatus": "unknown-not-estimated",
+        "serverCompletion": "not-started",
+    }
+    return {**core, "planSha256": hashlib.sha256(_json_bytes(core)).hexdigest()}
+
+
 def build_review_request(model_tag: str, selected_evidence: dict, image_position: int | None = None,
                          keep_alive: int = 30, review_budget: dict | None = None, review_execution: dict | None = None) -> dict:
     if type(keep_alive) is not int or not 1 <= keep_alive <= 300:

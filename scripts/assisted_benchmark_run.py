@@ -24,7 +24,7 @@ from assisted_benchmark_contract import (
     validate_authorization,
     validate_snapshot,
 )
-from assisted_benchmark_review import LocalOllama, ReviewError, review_evidence
+from assisted_benchmark_review import LocalOllama, ReviewError, build_review_plan, review_evidence
 from assisted_benchmark_checkpoint import CheckpointError
 from assisted_benchmark_observation import RefusalObserver, write_private_observation
 
@@ -379,27 +379,41 @@ def orchestrate(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plan-only", action="store_true", help="print a minimized offline workload plan without MCP or Ollama calls")
     parser.add_argument("--authorization", type=Path, required=True)
     parser.add_argument("--capture-directory", type=Path, required=True)
     parser.add_argument("--ppl-proof", type=Path, required=True)
     parser.add_argument("--contract", type=Path, required=True)
-    parser.add_argument("--ollama-url", required=True)
-    parser.add_argument("--output", type=Path, required=True, help="new absolute receipt path in a private directory")
+    parser.add_argument("--ollama-url")
+    parser.add_argument("--output", type=Path, help="new absolute receipt path in a private directory")
     parser.add_argument("--checkpoint", type=Path, help="private POSIX partial-review state, never a success receipt")
     parser.add_argument("--resume", action="store_true", help="reuse only an exactly matching private checkpoint")
     parser.add_argument("--failure-observation", type=Path, help="optional private non-success observation, never a run receipt")
-    parser.add_argument("--mcp-command", nargs="+", required=True)
+    parser.add_argument("--mcp-command", nargs="+")
     args = parser.parse_args(argv)
     observer = RefusalObserver()
 
     def record_refusal(error, exit_code):
-        if args.failure_observation is not None:
+        if not args.plan_only and args.failure_observation is not None:
             try:
                 write_private_observation(args.failure_observation, observer.snapshot(error, exit_code))
             except Exception:
                 print("assisted-benchmark-run: non-success observation unavailable; original outcome preserved", file=sys.stderr)
 
     try:
+        if args.plan_only:
+            if any((args.ollama_url, args.output, args.checkpoint, args.resume,
+                    args.failure_observation, args.mcp_command)):
+                raise RunError("plan-only mode does not accept inference, MCP, receipt, checkpoint, resume, or refusal-output options")
+            contract = load_contract(args.contract)
+            authorization = validate_authorization(json.loads(args.authorization.read_text(encoding="utf-8")), contract)
+            capture = validate_capture(args.capture_directory, contract["source"]["serverVersion"], contract["source"]["revision"])
+            proof = validate_ppl_build_proof(json.loads(args.ppl_proof.read_text(encoding="utf-8")))
+            plan = build_review_plan({**capture, "benchmarkResult": proof}, authorization, contract, args.capture_directory)
+            print(json.dumps(plan, sort_keys=True, separators=(",", ":")))
+            return 0
+        if not args.ollama_url or args.output is None or args.mcp_command is None:
+            raise RunError("inference mode requires Ollama URL, receipt output, and MCP command; use --help")
         if args.failure_observation is not None:
             excluded = [args.output, args.authorization, args.contract, args.ppl_proof, args.capture_directory]
             if args.checkpoint is not None:
@@ -431,15 +445,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except KeyboardInterrupt as error:
         record_refusal(error, 130)
-        print("assisted-benchmark-run: cancelled; server completion may be unknown", file=sys.stderr)
+        message = ("assisted-benchmark-run: plan cancelled; no external calls made"
+                   if args.plan_only else
+                   "assisted-benchmark-run: cancelled; server completion may be unknown")
+        print(message, file=sys.stderr)
         return 130
     except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError, CheckpointError) as error:
         record_refusal(error, 2)
-        print(f"assisted-benchmark-run: refused ({type(error).__name__}); no success; server completion may be unknown", file=sys.stderr)
+        message = (f"assisted-benchmark-run: plan refused ({type(error).__name__}); no external calls made"
+                   if args.plan_only else
+                   f"assisted-benchmark-run: refused ({type(error).__name__}); no success; server completion may be unknown")
+        print(message, file=sys.stderr)
         return 2
     except Exception as error:
         record_refusal(error, 1)
-        print("assisted-benchmark-run: internal failure; no success; server completion may be unknown", file=sys.stderr)
+        message = ("assisted-benchmark-run: internal plan failure; no external calls made"
+                   if args.plan_only else
+                   "assisted-benchmark-run: internal failure; no success; server completion may be unknown")
+        print(message, file=sys.stderr)
         return 1
 
 
