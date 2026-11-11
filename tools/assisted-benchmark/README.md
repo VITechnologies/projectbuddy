@@ -36,6 +36,37 @@ The snapshot must contain the actual `tools/list` array; the empty array above
 is only a shape illustration and will be rejected because required tools are
 missing.
 
+## Live Run Policy Primitives
+
+`scripts/assisted_benchmark_live_policy.py` contains offline policy/compiler and
+broker primitives for the follow-on live-agent design in ProjectBuddy #250.
+`validate_live_policy` checks a versioned policy against a caller-pinned digest
+and the pinned LBA contract, including a host identity digest derived from the
+local OS `/etc/machine-id` with the `projectbuddy/host-identity@1` domain
+separator. The raw machine-id is not retained or emitted. This catches
+accidental cross-host replay, but it is not hardware attestation and a cloned
+machine-id can impersonate the host. `compile_provision_permit` scopes one create
+request; `claim_provision_permit_once` durably consumes it; `bind_created_vm`
+requires before/after inventory plus the provisioner-returned UUID and the
+private claim before sealing the run grant. `LiveRunBroker` checks exact ordered
+tool/argument pairs against that grant and consumes it once from a private
+ledger; `teardown_target` returns only the bound UUID, once.
+
+These are not a live coordinator or CLI: this module does not invoke a
+provisioner, VirtualBox, MCP, Ollama, download, guest bootstrap, VIPM, or
+teardown. The caller must pin the trusted policy digest in reviewed runner
+configuration and pass the same active `ProvisioningLock` to permit creation,
+claim, and UUID binding. The compiler/binder reject an absent or released lock
+and a claim ledger outside its private lock directory. Hold the lock from
+inventory snapshot through UUID sealing, independently verify the provisioner result and host inventory, and
+route teardown through a separately tested identity-checking adapter. The
+current lock and one-use ledgers require current-user POSIX custody (0700
+directory/0600 files); unsupported custody fails closed. Self-hashes detect
+tampering but are not signatures or protection against a malicious same-user
+process. Do not treat successful fixture tests or constructed grants as live
+authorization, VM proof, or permission to start a run. P0 #251 is tracked under
+epic #250 and excludes SBOM and native Windows PPL work.
+
 ## Capture and review
 
 The capture reader accepts only a finalized `stopped` run with a ready
