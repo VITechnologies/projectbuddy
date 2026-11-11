@@ -10,7 +10,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
-from assisted_benchmark_contract import ContractError, authorize_tool_call, validate_authorization
+from assisted_benchmark_contract import (
+    SERVER_SET_SCHEMA,
+    ContractError,
+    authorize_tool_call,
+    validate_authorization,
+)
 
 POLICY_SCHEMA = "projectbuddy/assisted-live-run-policy@1"
 PROVISION_SCHEMA = "projectbuddy/assisted-live-vm-permit@1"
@@ -233,6 +238,8 @@ def _authorization(policy: dict, run_id: str, vm_uuid: str, issued_at: datetime)
         "teardownOnNativePplFailure": False,
         **{key: template[key] for key in ("reviewBudget", "reviewPrivacy", "reviewLifecycle", "reviewExecution")},
     }
+    if "approvedCallChoices" in template:
+        value["approvedCallChoices"] = template["approvedCallChoices"]
     return value
 
 
@@ -265,7 +272,9 @@ def validate_live_policy(policy: object, contract: dict, trusted_policy_sha256: 
         raise LivePolicyError("trusted policy digest is invalid")
     if sha256(policy) != trusted_policy_sha256:
         raise LivePolicyError("live-run policy does not match the digest pinned by the runner")
-    if policy["sourceRevision"] != contract.get("source", {}).get("revision"):
+    contract_revision = (contract.get("sourceRevision") if contract.get("schema") == SERVER_SET_SCHEMA
+                         else contract.get("source", {}).get("revision"))
+    if policy["sourceRevision"] != contract_revision:
         raise LivePolicyError("live-run policy source revision differs from the pinned contract")
     provision = policy["provisioning"]
     if not isinstance(provision, dict) or set(provision) != PROVISIONING_KEYS or provision["maxVms"] != 1:
@@ -280,7 +289,9 @@ def validate_live_policy(policy: object, contract: dict, trusted_policy_sha256: 
         if type(provision[key]) is not int or not low <= provision[key] <= high:
             raise LivePolicyError("provisioning resource bounds are invalid")
     template = policy["authorizationTemplate"]
-    if not isinstance(template, dict) or set(template) != AUTHORIZATION_TEMPLATE_KEYS:
+    if (not isinstance(template, dict)
+            or set(template) not in {frozenset(AUTHORIZATION_TEMPLATE_KEYS),
+                                     frozenset(AUTHORIZATION_TEMPLATE_KEYS | {"approvedCallChoices"})}):
         raise LivePolicyError("authorization template fields are invalid")
     issued_at = _utc(now)
     probe_uuid = "00000000-0000-4000-8000-000000000001"
@@ -618,6 +629,8 @@ class LiveRunBroker:
         self.run_claim = claim_run_grant_once(validated, policy, contract, trusted_policy_sha256, self.clock())
         self._next_index = 0
         self._in_flight = False
+        self._in_flight_choice = False
+        self._choice_selected = False
         self._terminal = False
         self._teardown_issued = False
 
@@ -642,9 +655,10 @@ class LiveRunBroker:
     def _deny(self, message: str):
         self._terminal = True
         self._in_flight = False
+        self._in_flight_choice = False
         raise LivePolicyError(message)
 
-    def begin_call(self, tool: str, arguments: object, vm_uuid: str) -> dict:
+    def begin_call(self, tool: str, arguments: object, vm_uuid: str, server_id: str | None = None) -> dict:
         if self._terminal or self._in_flight:
             raise LivePolicyError("run grant is terminal or has an in-flight call")
         grant = self._check_host()
@@ -655,20 +669,44 @@ class LiveRunBroker:
         if current_uuid != grant["vmUuid"] or _utc(self.clock()) >= _utc(grant["expiresAt"]):
             self._deny("MCP call is outside the run grant identity or time bound")
         calls = self.calls
-        if self._next_index >= len(calls):
-            self._deny("run grant has no remaining MCP calls")
-        expected = calls[self._next_index]
+        choice_group = None
+        if self._next_index < len(calls):
+            expected_calls = [calls[self._next_index]]
+        else:
+            choices = self.authorization.get("approvedCallChoices", [])
+            if self._choice_selected or not choices:
+                self._deny("run grant has no remaining MCP calls")
+            choice_group = choices[0]
+            expected_calls = choice_group["candidates"]
         try:
-            proposed = canonical_json({"tool": tool, "arguments": arguments})
+            server_set = self.contract.get("schema") == SERVER_SET_SCHEMA
+            if server_set and not isinstance(server_id, str):
+                self._deny("MCP call requires an explicit pinned server identity")
+            if not server_set and server_id is not None and server_id != self.contract["source"]["serverName"]:
+                self._deny("MCP server identity differs from the pinned contract")
+            proposed_call = {"tool": tool, "arguments": arguments}
+            if server_set:
+                proposed_call["serverId"] = server_id
+            proposed = canonical_json(proposed_call)
         except LivePolicyError:
             self._deny("MCP call is not canonical JSON")
-        if proposed != canonical_json(expected):
+        expected = next((candidate for candidate in expected_calls
+                         if proposed == canonical_json(candidate)), None)
+        if expected is None:
             self._deny("MCP call differs from the next exact run grant entry")
         try:
-            decision = authorize_tool_call(tool, arguments, grant["authorization"], self.contract)
+            decision = authorize_tool_call(tool, arguments, grant["authorization"], self.contract, server_id)
         except ContractError as error:
             self._deny(f"MCP call failed pinned contract authorization: {error}")
+        if self.contract.get("schema") == SERVER_SET_SCHEMA:
+            decision["arguments"] = json.loads(canonical_json(arguments))
+            decision["contractSha256"] = grant["contractSha256"]
+            decision["serverIdentity"] = dict(self.contract["servers"][server_id]["source"])
+            decision["expiresAt"] = grant["expiresAt"]
+        if choice_group is not None:
+            decision["choiceId"] = choice_group["choiceId"]
         self._in_flight = True
+        self._in_flight_choice = choice_group is not None
         return {**decision, "callIndex": self._next_index, "vmUuid": current_uuid, "grantSha256": grant["grantSha256"]}
 
     def complete_call(self, succeeded: bool) -> None:
@@ -677,12 +715,21 @@ class LiveRunBroker:
         grant = self._check_host()
         if _utc(self.clock()) >= _utc(grant["expiresAt"]):
             self._deny("run grant expired while the MCP call was in flight")
+        choice_in_flight = self._in_flight_choice
         self._in_flight = False
+        self._in_flight_choice = False
         if not succeeded:
+            if choice_in_flight:
+                self._choice_selected = True
+            self._terminal = True
+            return
+        if choice_in_flight:
+            self._choice_selected = True
             self._terminal = True
             return
         self._next_index += 1
-        if self._next_index == len(self.calls):
+        if (self._next_index == len(self.calls)
+                and not self.authorization.get("approvedCallChoices")):
             self._terminal = True
 
     def abort(self) -> None:

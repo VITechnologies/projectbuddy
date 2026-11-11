@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,11 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY / "scripts"))
 
 import assisted_benchmark_live_policy as live_policy
+from assisted_benchmark_synthetic_ui_mcp_server import (
+    MCP_SERVER_NAME,
+    MCP_SERVER_VERSION,
+    UI_TOOL_INPUT_SCHEMA,
+)
 derive_host_identity_sha256 = live_policy.host_identity_sha256
 get_host_ledger_directory = live_policy._live_run_ledger_directory
 
@@ -61,6 +67,39 @@ def test_persistent_host_ledger_ignores_home_environment(monkeypatch, tmp_path):
 
 def contract():
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+def server_set_contract(ui_protocol_version="2025-06-18"):
+    lba_contract = contract()
+    ui_contract = copy.deepcopy(lba_contract)
+    ui_contract["source"] = {
+        "repository": "VITechnologies/projectbuddy",
+        "revision": "a" * 40,
+        "serverName": MCP_SERVER_NAME,
+        "serverVersion": MCP_SERVER_VERSION,
+        "protocolVersion": ui_protocol_version,
+    }
+    ui_contract["toolGroups"] = {
+        "core": {
+            "required": True,
+            "tools": [
+                {
+                    "name": "click_target",
+                    "effect": "coordination-write",
+                    "mutatesState": True,
+                    "requiresVmLifecycle": False,
+                    "inputSchema": copy.deepcopy(UI_TOOL_INPUT_SCHEMA),
+                }
+            ],
+        },
+        "acg-grid": {"required": False, "tools": []},
+    }
+    return {
+        "schema": "projectbuddy/assisted-mcp-server-set@1",
+        "sourceRevision": lba_contract["source"]["revision"],
+        "authorizationSchema": lba_contract["authorizationSchema"],
+        "allowedEvidenceFields": lba_contract["allowedEvidenceFields"],
+        "servers": {"lba": lba_contract, "synthetic-ui": ui_contract},
+    }
 
 
 def trusted_digest(value=None):
@@ -420,3 +459,422 @@ def test_sealed_run_grant_cannot_be_replayed_in_a_second_broker(tmp_path):
     with pytest.raises(live_policy.LivePolicyError, match="already been claimed"):
         live_policy.LiveRunBroker(grant, value, contract_value, trusted_digest(value),
                                   clock=lambda: NOW + timedelta(seconds=1))
+
+
+def test_multiserver_grant_binds_exact_server_identity_through_dispatch():
+    from types import SimpleNamespace
+
+    from assisted_benchmark_mcp_router import McpRouterError, PinnedMcpRouter
+
+    with pytest.raises(McpRouterError, match="requires a pinned MCP server set"):
+        PinnedMcpRouter(contract(), {}, {}, {})
+
+    contract_value = server_set_contract()
+    value = policy()
+    value["sourceRevision"] = contract_value["sourceRevision"]
+    value["provisioning"]["guestOs"] = "windows"
+    value["authorizationTemplate"]["approvedCalls"] = [
+        {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+    ]
+    value["authorizationTemplate"]["approvedCallChoices"] = [{
+        "choiceId": "decision",
+        "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "approve"}},
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}},
+        ],
+    }]
+    grant = grant_for(value=value, contract_value=contract_value)
+    broker = live_policy.LiveRunBroker(grant, value, contract_value, trusted_digest(value),
+                                       clock=lambda: NOW + timedelta(seconds=1))
+
+    def snapshot(server_contract):
+        source = server_contract["source"]
+        tools = [tool for group in server_contract["toolGroups"].values() for tool in group["tools"]]
+        return {
+            "protocolVersion": source["protocolVersion"],
+            "serverInfo": {"name": source["serverName"], "version": source["serverVersion"]},
+            "tools": [{"name": tool["name"], "description": tool["name"],
+                       "inputSchema": tool["inputSchema"]} for tool in tools],
+        }
+
+    class RecordingClient:
+        def __init__(self, response=None):
+            self.calls = []
+            self.response = {"ok": True} if response is None else response
+
+        async def call_tool(self, tool_name, arguments):
+            self.calls.append((tool_name, arguments))
+            return self.response
+
+    clients = {server_id: RecordingClient() for server_id in contract_value["servers"]}
+    snapshots = {
+        server_id: snapshot(server_contract)
+        for server_id, server_contract in contract_value["servers"].items()
+    }
+    router = PinnedMcpRouter(
+        contract_value,
+        grant["authorization"],
+        snapshots,
+        clients,
+    )
+    altered_snapshots = copy.deepcopy(snapshots)
+    altered_snapshots["synthetic-ui"]["serverInfo"]["name"] = "different-server"
+    with pytest.raises(McpRouterError, match="capability snapshot differs"):
+        PinnedMcpRouter(contract_value, grant["authorization"], altered_snapshots, clients)
+    with pytest.raises(McpRouterError, match="exactly match"):
+        PinnedMcpRouter(contract_value, grant["authorization"], snapshots, {"lba": clients["lba"]})
+
+    first = broker.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+    assert first["serverId"] == "lba"
+    missing_inertness = {key: item for key, item in first.items() if key != "executesMcpResultCommands"}
+    with pytest.raises(McpRouterError, match="effect differs from the pinned server tool"):
+        asyncio.run(router.dispatch(missing_inertness))
+    assert clients["lba"].calls == []
+    assert asyncio.run(router.dispatch(first)) == {"ok": True}
+    broker.complete_call(True)
+    second = broker.begin_call("click_target", {"taskId": "synthetic-00000063", "targetId": "approve"},
+                               CREATED_VM, server_id="synthetic-ui")
+    assert second["serverId"] == "synthetic-ui"
+    assert second["choiceId"] == "decision"
+    assert second["effect"] == "coordination-write"
+    assert second["choiceId"] == "decision"
+    assert asyncio.run(router.dispatch(second)) == {"ok": True}
+    broker.complete_call(True)
+    with pytest.raises(live_policy.LivePolicyError, match="terminal or has an in-flight"):
+        broker.begin_call("click_target", {"taskId": "synthetic-00000063", "targetId": "hold"},
+                          CREATED_VM, server_id="synthetic-ui")
+    second_choice = {**second, "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}}
+    with pytest.raises(McpRouterError, match="authorization sequence is exhausted"):
+        asyncio.run(router.dispatch(second_choice))
+    assert clients["lba"].calls == [("get_host_capabilities", {})]
+    assert clients["synthetic-ui"].calls == [
+        ("click_target", {"taskId": "synthetic-00000063", "targetId": "approve"})
+    ]
+    altered_decision = {**second, "serverIdentity": contract_value["servers"]["lba"]["source"]}
+    with pytest.raises(McpRouterError, match="identity or contract digest changed"):
+        asyncio.run(router.dispatch(altered_decision))
+
+    action_policy = policy()
+    action_policy["sourceRevision"] = contract_value["sourceRevision"]
+    action_policy["policyId"] = "synthetic-ui-route-tamper"
+    action_policy["provisioning"]["guestOs"] = "windows"
+    action_policy["authorizationTemplate"]["approvedCalls"] = [
+        {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+    ]
+    action_policy["authorizationTemplate"]["approvedCallChoices"] = [{
+        "choiceId": "decision", "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "approve"}},
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}},
+        ],
+    }]
+    action_grant = grant_for(value=action_policy, contract_value=contract_value,
+                             run_id="33333333-4444-4555-8666-777777777777")
+    action_broker = live_policy.LiveRunBroker(
+        action_grant, action_policy, contract_value, trusted_digest(action_policy),
+        clock=lambda: NOW + timedelta(seconds=1),
+    )
+    action_clients = {server_id: RecordingClient() for server_id in contract_value["servers"]}
+    action_router = PinnedMcpRouter(contract_value, action_grant["authorization"], snapshots, action_clients)
+    action_preamble = action_broker.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+    asyncio.run(action_router.dispatch(action_preamble))
+    action_broker.complete_call(True)
+    decision = action_broker.begin_call(
+        "click_target", {"taskId": "synthetic-00000063", "targetId": "approve"},
+        CREATED_VM, server_id="synthetic-ui",
+    )
+    altered_effect = {**decision, "effect": "read-only"}
+    with pytest.raises(McpRouterError, match="effect differs from the pinned server tool"):
+        asyncio.run(action_router.dispatch(altered_effect))
+    assert action_clients["synthetic-ui"].calls == []
+    decision["arguments"]["targetId"] = "unapproved"
+    with pytest.raises(McpRouterError, match="differs from the next exact grant call"):
+        asyncio.run(action_router.dispatch(decision))
+    assert action_clients["synthetic-ui"].calls == []
+    action_broker.complete_call(False)
+    with pytest.raises(live_policy.LivePolicyError, match="terminal or has an in-flight"):
+        action_broker.begin_call("click_target", {"taskId": "synthetic-00000063", "targetId": "hold"},
+                                 CREATED_VM, server_id="synthetic-ui")
+    assert action_broker.teardown_target()["vmUuid"] == CREATED_VM
+
+    failed_policy = choice_policy(contract_value)
+    failed_value = failed_policy[0]
+    failed_value["policyId"] = "synthetic-ui-choice-failure"
+    failed_value["provisioning"]["guestOs"] = "windows"
+    failed_grant = grant_for(value=failed_value, contract_value=contract_value,
+                             run_id="77777777-8888-4999-8aaa-bbbbbbbbbbbb")
+    failed_broker = live_policy.LiveRunBroker(
+        failed_grant, failed_value, contract_value, trusted_digest(failed_value),
+        clock=lambda: NOW + timedelta(seconds=1),
+    )
+    failed_clients = {
+        "lba": RecordingClient(),
+        "synthetic-ui": RecordingClient(SimpleNamespace(is_error=True)),
+    }
+    failed_router = PinnedMcpRouter(
+        contract_value, failed_grant["authorization"], snapshots, failed_clients,
+    )
+    failed_preamble = failed_broker.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+    asyncio.run(failed_router.dispatch(failed_preamble))
+    failed_broker.complete_call(True)
+    failed_decision = failed_broker.begin_call(
+        "click_target", {"taskId": "synthetic-00000063", "targetId": "approve"},
+        CREATED_VM, server_id="synthetic-ui",
+    )
+    with pytest.raises(McpRouterError, match="client rejected"):
+        asyncio.run(failed_router.dispatch(failed_decision))
+    failed_broker.complete_call(False)
+    with pytest.raises(McpRouterError, match="authorization sequence is exhausted"):
+        asyncio.run(failed_router.dispatch({
+            **failed_decision,
+            "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"},
+        }))
+    assert failed_clients["synthetic-ui"].calls == [
+        ("click_target", {"taskId": "synthetic-00000063", "targetId": "approve"})
+    ]
+    assert failed_broker.teardown_target()["vmUuid"] == CREATED_VM
+
+    expiry_policy = policy()
+    expiry_policy["sourceRevision"] = contract_value["sourceRevision"]
+    expiry_policy["policyId"] = "synthetic-ui-dispatch-expiry"
+    expiry_policy["provisioning"]["guestOs"] = "windows"
+    expiry_policy["authorizationTemplate"]["approvedCalls"] = [
+        {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+    ]
+    expiry_policy["authorizationTemplate"]["approvedCallChoices"] = [{
+        "choiceId": "decision", "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "approve"}},
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}},
+        ],
+    }]
+    expiry_grant = grant_for(value=expiry_policy, contract_value=contract_value,
+                             run_id="66666666-7777-4888-8999-aaaaaaaaaaaa")
+    expiry_broker = live_policy.LiveRunBroker(
+        expiry_grant, expiry_policy, contract_value, trusted_digest(expiry_policy),
+        clock=lambda: NOW + timedelta(seconds=1),
+    )
+    expiry_clients = {server_id: RecordingClient() for server_id in contract_value["servers"]}
+    expiry_time = [NOW + timedelta(seconds=1)]
+    expiry_router = PinnedMcpRouter(
+        contract_value, expiry_grant["authorization"], snapshots, expiry_clients,
+        clock=lambda: expiry_time[0],
+    )
+    expiry_preamble = expiry_broker.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+    asyncio.run(expiry_router.dispatch(expiry_preamble))
+    expiry_broker.complete_call(True)
+    expiry_time[0] = NOW + timedelta(seconds=121)
+    expiry_decision = expiry_broker.begin_call(
+        "click_target", {"taskId": "synthetic-00000063", "targetId": "approve"},
+        CREATED_VM, server_id="synthetic-ui",
+    )
+    with pytest.raises(McpRouterError, match="expired before client dispatch"):
+        asyncio.run(expiry_router.dispatch(expiry_decision))
+    assert expiry_clients["synthetic-ui"].calls == []
+    expiry_broker.complete_call(False)
+    assert expiry_broker.teardown_target()["vmUuid"] == CREATED_VM
+
+    wrong_policy = {**value, "policyId": "synthetic-live-ui-wrong-route"}
+    wrong_route = live_policy.LiveRunBroker(
+        grant_for(value=wrong_policy, contract_value=contract_value,
+                  run_id="22222222-3333-4444-8555-666666666666"),
+        wrong_policy, contract_value, trusted_digest(wrong_policy),
+        clock=lambda: NOW + timedelta(seconds=1),
+    )
+    wrong_route.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+    wrong_route.complete_call(True)
+    with pytest.raises(live_policy.LivePolicyError, match="differs from the next exact"):
+        wrong_route.begin_call("click_target", {"taskId": "synthetic-00000063", "targetId": "approve"},
+                               CREATED_VM, server_id="lba")
+    assert wrong_route.teardown_target()["vmUuid"] == CREATED_VM
+
+
+def test_stdio_ui_action_flows_through_server_set_broker_router_and_oracle():
+    import socket
+    import subprocess
+    from urllib.request import urlopen
+
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    from assisted_benchmark_mcp_router import PinnedMcpRouter
+    from assisted_benchmark_synthetic_oracle import SyntheticUiOracle
+
+    async def exercise_run():
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            ui_port = listener.getsockname()[1]
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=[str(REPOSITORY / "scripts" / "assisted_benchmark_synthetic_ui_mcp_server.py"),
+                  "--seed", "100", "--ui-port", str(ui_port)],
+            cwd=REPOSITORY,
+        )
+        async with stdio_client(parameters, errlog=subprocess.DEVNULL) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                initialization = await session.initialize()
+                tools = await session.list_tools()
+                contract_value = server_set_contract(initialization.protocol_version)
+                value = policy()
+                value["sourceRevision"] = contract_value["sourceRevision"]
+                value["provisioning"]["guestOs"] = "windows"
+                value["authorizationTemplate"]["approvedCalls"] = [
+                    {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+                ]
+                value["authorizationTemplate"]["approvedCallChoices"] = [{
+                    "choiceId": "decision", "selection": "exactly-one",
+                    "candidates": [
+                        {"serverId": "synthetic-ui", "tool": "click_target",
+                         "arguments": {"taskId": "synthetic-00000064", "targetId": "approve"}},
+                        {"serverId": "synthetic-ui", "tool": "click_target",
+                         "arguments": {"taskId": "synthetic-00000064", "targetId": "hold"}},
+                    ],
+                }]
+                grant = grant_for(value=value, contract_value=contract_value,
+                                  run_id="55555555-6666-4777-8888-999999999999")
+                broker = live_policy.LiveRunBroker(
+                    grant, value, contract_value, trusted_digest(value),
+                    clock=lambda: NOW + timedelta(seconds=1),
+                )
+
+                class LbaFixtureClient:
+                    async def call_tool(self, _tool_name, _arguments):
+                        return {"fixture": "lba-read"}
+
+                server_snapshots = {}
+                for server_id, server_contract in contract_value["servers"].items():
+                    source = server_contract["source"]
+                    server_snapshots[server_id] = {
+                        "protocolVersion": source["protocolVersion"],
+                        "serverInfo": {"name": source["serverName"], "version": source["serverVersion"]},
+                        "tools": [
+                            {"name": tool["name"], "description": tool["name"], "inputSchema": tool["inputSchema"]}
+                            for group in server_contract["toolGroups"].values() for tool in group["tools"]
+                        ],
+                    }
+                server_snapshots["synthetic-ui"] = {
+                    "protocolVersion": initialization.protocol_version,
+                    "serverInfo": {"name": initialization.server_info.name, "version": initialization.server_info.version},
+                    "tools": [{"name": tool.name, "description": tool.description,
+                               "inputSchema": tool.input_schema} for tool in tools.tools],
+                }
+                router = PinnedMcpRouter(
+                    contract_value, grant["authorization"], server_snapshots,
+                    {"lba": LbaFixtureClient(), "synthetic-ui": session},
+                )
+
+                def read_view():
+                    with urlopen(f"http://127.0.0.1:{ui_port}/api/view") as response:
+                        return json.loads(response.read())
+
+                before = read_view()
+                lba_decision = broker.begin_call("get_host_capabilities", {}, CREATED_VM, server_id="lba")
+                assert await router.dispatch(lba_decision) == {"fixture": "lba-read"}
+                broker.complete_call(True)
+                model_selected_target = "hold"
+                decision = broker.begin_call(
+                    "click_target", {"taskId": before["taskId"], "targetId": model_selected_target},
+                    CREATED_VM, server_id="synthetic-ui",
+                )
+                assert decision["choiceId"] == "decision"
+                result = await router.dispatch(decision)
+                broker.complete_call(result.is_error is not True)
+                after = read_view()
+                oracle = SyntheticUiOracle().evaluate_observation(
+                    after["taskId"], after,
+                    decision["arguments"]["targetId"],
+                    {"reading": before["reading"], "limit": before["limit"]},
+                )
+                return broker, result, before, after, oracle
+
+    broker, result, before, after, oracle = asyncio.run(exercise_run())
+
+    assert result.is_error is not True
+    assert before["state"] == "awaiting_decision"
+    assert after["state"] == "decision_recorded"
+    assert oracle.state_grounded is True
+    assert oracle.action_correct is True
+    assert oracle.task_success is True
+    assert broker.teardown_target()["vmUuid"] == CREATED_VM
+
+
+def choice_policy(contract_value=None):
+    selected_contract = server_set_contract() if contract_value is None else contract_value
+    value = policy()
+    value["sourceRevision"] = selected_contract["sourceRevision"]
+    value["authorizationTemplate"]["approvedCalls"] = [
+        {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+    ]
+    value["authorizationTemplate"]["approvedCallChoices"] = [{
+        "choiceId": "decision",
+        "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "approve"}},
+            {"serverId": "synthetic-ui", "tool": "click_target",
+             "arguments": {"taskId": "synthetic-00000063", "targetId": "hold"}},
+        ],
+    }]
+    return value, selected_contract
+
+
+@pytest.mark.parametrize("problem", ["candidate-count", "duplicate", "server", "tool", "different-tool"])
+def test_call_choice_group_is_narrow_and_server_bound(problem):
+    value, contract_value = choice_policy()
+    candidates = value["authorizationTemplate"]["approvedCallChoices"][0]["candidates"]
+    if problem == "candidate-count":
+        candidates.pop()
+    elif problem == "duplicate":
+        candidates[1] = copy.deepcopy(candidates[0])
+    elif problem == "server":
+        candidates[1]["serverId"] = "other-server"
+    elif problem == "different-tool":
+        ui_tools = contract_value["servers"]["synthetic-ui"]["toolGroups"]["core"]["tools"]
+        other_tool = copy.deepcopy(ui_tools[0])
+        other_tool["name"] = "alternate_click"
+        other_tool["inputSchema"] = {
+            "type": "object", "properties": {}, "additionalProperties": False,
+        }
+        ui_tools.append(other_tool)
+        candidates[1]["tool"] = "alternate_click"
+        candidates[1]["arguments"] = {}
+    else:
+        candidates[1]["tool"] = "get_host_capabilities"
+
+    with pytest.raises(live_policy.LivePolicyError, match="authorization template is invalid"):
+        live_policy.validate_live_policy(value, contract_value, trusted_digest(value), NOW)
+
+
+def test_call_choice_groups_are_rejected_for_legacy_single_server_contract():
+    value = policy()
+    value["authorizationTemplate"]["approvedCallChoices"] = [{
+        "choiceId": "decision",
+        "selection": "exactly-one",
+        "candidates": [
+            {"serverId": "lba", "tool": "get_host_capabilities", "arguments": {}},
+            {"serverId": "lba", "tool": "get_benchmark_series", "arguments": {}},
+        ],
+    }]
+
+    with pytest.raises(live_policy.LivePolicyError, match="call choice groups require a pinned MCP server set"):
+        live_policy.validate_live_policy(value, contract(), trusted_digest(value), NOW)
+
+
+def test_call_choice_candidates_remain_bound_to_trusted_policy_after_grant_rehash():
+    value, contract_value = choice_policy()
+    grant = grant_for(value=value, contract_value=contract_value,
+                      run_id="88888888-9999-4aaa-8bbb-cccccccccccc")
+    altered_grant = copy.deepcopy(grant)
+    altered_grant["authorization"]["approvedCallChoices"][0]["candidates"][0]["arguments"]["taskId"] = "synthetic-00000064"
+    altered_core = {key: item for key, item in altered_grant.items() if key != "grantSha256"}
+    altered_grant["grantSha256"] = live_policy.sha256(altered_core)
+
+    with pytest.raises(live_policy.LivePolicyError, match="authorization differs from the trusted policy"):
+        live_policy.validate_run_grant(altered_grant, value, contract_value, trusted_digest(value), NOW)
