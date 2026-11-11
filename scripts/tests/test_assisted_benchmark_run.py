@@ -175,6 +175,8 @@ def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     assert receipt["schema"] == "projectbuddy/assisted-benchmark-run@1"
     assert receipt["runId"] == "run-0001"
     assert receipt["pplProof"]["artifact"] == "lv_icon.lvlibp"
+    assert receipt["approvedReviewModel"] == MODEL
+    assert receipt["reviewModel"] == MODEL
     assert [item["tool"] for item in receipt["mcp"]["calls"]] == ["get_host_capabilities", "get_benchmark_series"]
     assert all("resultSha256" in item and "text" not in item for item in receipt["mcp"]["calls"])
     assert receipt["assessment"]["decision"] == "pass"

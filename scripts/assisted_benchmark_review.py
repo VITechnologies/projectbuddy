@@ -308,6 +308,14 @@ class LocalOllama:
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def _request(self, path: str, payload: dict | None = None) -> dict:
+        def unique_fields(pairs):
+            fields = {}
+            for key, value in pairs:
+                if key in fields:
+                    raise ReviewError("local Ollama response has duplicate JSON fields")
+                fields[key] = value
+            return fields
+
         data = _json_bytes(payload) if payload is not None else None
         request = urllib.request.Request(
             f"{self.endpoint}{path}", data=data,
@@ -323,7 +331,7 @@ class LocalOllama:
         if len(raw) > MAX_RESPONSE_BYTES:
             raise ReviewError("local Ollama response exceeds the configured bound")
         try:
-            result = json.loads(raw)
+            result = json.loads(raw, object_pairs_hook=unique_fields)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ReviewError("local Ollama response is not valid JSON") from error
         if not isinstance(result, dict):
@@ -342,10 +350,17 @@ class LocalOllama:
 
 def _verify_model(transport, model: dict) -> None:
     response = transport.tags()
-    models = response.get("models")
+    models = response.get("models") if isinstance(response, dict) else None
     if not isinstance(models, list):
         raise ReviewError("local Ollama model inventory is invalid")
-    matches = [item for item in models if isinstance(item, dict) and item.get("name") == model["tag"]]
+    for item in models:
+        if (not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip()
+                or not isinstance(item.get("digest"), str) or len(item["digest"]) != 64
+                or any(character not in "0123456789abcdef" for character in item["digest"])):
+            raise ReviewError("local Ollama model inventory entry is invalid")
+        if "model" in item and item["model"] != item["name"]:
+            raise ReviewError("local Ollama model inventory entry is ambiguous")
+    matches = [item for item in models if item["name"] == model["tag"]]
     if len(matches) != 1 or matches[0].get("digest") != model["digest"]:
         raise ReviewError("approved Ollama model tag/digest is not installed locally")
 
@@ -407,6 +422,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "schema": ASSESSMENT_SCHEMA,
         "runId": approved["runId"],
         "evidenceSha256": evidence_hash,
+        "approvedModel": {"tag": model["tag"], "digest": model["digest"]},
         "model": {"tag": model["tag"], "digest": model["digest"]},
         "promptVersion": PROMPT_VERSION,
         "assessment": assessment,

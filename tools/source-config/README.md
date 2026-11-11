@@ -13,7 +13,8 @@ that the generated configuration builds successfully on Windows.
   VIPM dependency versions, and a standalone `lvproj` build target.
 - A tracked LabVIEW XML project containing that packed-library specification,
   an explicit SBOM JSON path, and an explicit artifact directory.
-- A running local Ollama server with the selected model already installed.
+- A running local Ollama server with the selected model already installed,
+  plus its caller-approved model tag and full lowercase SHA-256 digest.
   There is no cloud or no-model fallback.
 - The engine's `pipeline-config.schema.json` and a new output directory outside
   the inspected checkout. Its parent directory must already exist.
@@ -39,7 +40,8 @@ dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
   --schema ../../pipeline-config.schema.json \
   --output /path/to/NEW_OUTPUT_DIRECTORY \
   --ollama-url http://127.0.0.1:11435 \
-  --model MODEL:TAG
+  --model MODEL:TAG \
+  --model-digest APPROVED_MODEL_SHA256
 ```
 
 The same options work with native Windows paths in PowerShell; supply the
@@ -47,6 +49,15 @@ arguments on one line or use PowerShell continuation syntax, not Bash slashes.
 Use the port on which the operator's Ollama server actually listens. The CLI
 accepts only literal IPv4/IPv6 loopback HTTP(S) origins and refuses redirects.
 It does not change GPU settings or start, install, or download a model.
+
+`--model-digest` is required approval input, not a value selected automatically
+from the server. Inventory discovery alone does not grant approval. Before any
+review prompt is sent, the selected tag must resolve uniquely to that exact
+digest; malformed/ambiguous inventory or a different installed digest blocks
+inference. The identity is checked again after review. Missing or changed
+postflight identity leaves no generated configuration or success evidence.
+The local daemon remains a trusted dependency; these checks are not a signed
+attestation of the model weights or protection against a malicious daemon.
 
 ## Outputs And Gates
 
@@ -59,7 +70,8 @@ It does not change GPU settings or start, install, or download a model.
 - `vipm.toml`: preserved project/dependency values and only the selected build.
   This slice does not synthesize missing manifests or resolve binary-VI imports.
 - `evidence.json`: input and output SHA-256 values, source revision, field
-  provenance, schema hash, model digest, decision, blockers, and validity flags.
+  provenance, schema hash, caller approval (`approvedOllama`), verified model
+  identity (`ollama`), decision, blockers, and validity flags.
 
 Exit 0 means deterministic checks and the mandatory local model review passed
 for this declared configuration scope. Exit 2 means drafts were produced but
@@ -84,7 +96,11 @@ dotnet restore ProjectBuddy.SourceConfig.Tests --locked-mode
 dotnet test ProjectBuddy.SourceConfig.Tests --no-restore
 ```
 
-Tests use synthetic Git repositories and mocked review results. They do not
+Tests use synthetic Git repositories, mocked review results, and fake HTTP
+handlers covering zero-inference preflight rejection and postflight identity
+failure. They do not
 require Ollama, LabVIEW, GPU access, or a registered runner. Linux and Windows
 CI jobs run the same suite; actual CI results and a native LabVIEW build remain
 separate gates. The planned contract is the wiki's `REQ-108` and `TEST-110`.
+Caller-approved model identity is specified in `REQ-109` and `TEST-111`
+(ProjectBuddy issue #230).

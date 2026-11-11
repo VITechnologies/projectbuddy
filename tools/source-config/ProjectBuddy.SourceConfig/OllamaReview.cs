@@ -16,10 +16,23 @@ public static class OllamaReview
         return uri!;
     }
 
-    public static async Task<Review> RunAsync(Settings settings, Draft draft)
+    public static void ValidateModelIdentity(Settings settings)
     {
-        Configuration.Require(Regex.IsMatch(settings.Model, "\\A[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*\\z"), "Select an explicit local model name:tag.");
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+        Configuration.Require(settings.Model is not null
+            && Regex.IsMatch(settings.Model, "\\A[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*\\z"), "Select an explicit local model name:tag.");
+        Configuration.Require(settings.ModelDigest is not null
+            && Regex.IsMatch(settings.ModelDigest, "\\A[a-f0-9]{64}\\z"), "Select a caller-approved full lowercase SHA-256 model digest.");
+    }
+
+    public static Task<Review> RunAsync(Settings settings, Draft draft)
+    {
+        ValidateModelIdentity(settings);
+        return RunAsync(settings, draft, new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+    }
+
+    internal static async Task<Review> RunAsync(Settings settings, Draft draft, HttpMessageHandler handler)
+    {
+        ValidateModelIdentity(settings);
         using var client = new HttpClient(handler)
         {
             BaseAddress = Endpoint(settings.OllamaUrl),
@@ -29,12 +42,32 @@ public static class OllamaReview
         async Task<string> Digest()
         {
             var tags = await client.GetFromJsonAsync<JsonElement>("api/tags");
-            var matches = tags.GetProperty("models").EnumerateArray()
-                .Where(model => model.GetProperty("name").GetString() == settings.Model).ToArray();
-            Configuration.Require(matches.Length == 1, "Selected model must already be installed locally.");
-            return matches[0].GetProperty("digest").GetString()!;
+            Configuration.Require(tags.ValueKind == JsonValueKind.Object
+                && tags.EnumerateObject().Count(property => property.Name == "models") == 1
+                && tags.GetProperty("models").ValueKind == JsonValueKind.Array, "Invalid local model inventory.");
+            var matches = new List<string>();
+            foreach (var model in tags.GetProperty("models").EnumerateArray())
+            {
+                Configuration.Require(model.ValueKind == JsonValueKind.Object
+                    && model.EnumerateObject().Count(property => property.Name == "name") == 1
+                    && model.EnumerateObject().Count(property => property.Name == "digest") == 1
+                    && model.GetProperty("name").ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(model.GetProperty("name").GetString())
+                    && model.GetProperty("digest").ValueKind == JsonValueKind.String
+                    && Regex.IsMatch(model.GetProperty("digest").GetString()!, "\\A[a-f0-9]{64}\\z"),
+                    "Invalid local model inventory entry.");
+                var name = model.GetProperty("name").GetString();
+                var aliases = model.EnumerateObject().Where(property => property.Name == "model").ToArray();
+                Configuration.Require(aliases.Length <= 1 && (aliases.Length == 0
+                    || aliases[0].Value.ValueKind == JsonValueKind.String && aliases[0].Value.GetString() == name),
+                    "Ambiguous local model inventory entry.");
+                if (name == settings.Model) matches.Add(model.GetProperty("digest").GetString()!);
+            }
+            Configuration.Require(matches.Count == 1, "Selected model must have exactly one installed inventory entry.");
+            return matches[0];
         }
         var digest = await Digest();
+        Configuration.Require(digest == settings.ModelDigest, "Installed model does not match the caller-approved digest.");
         var evidence = JsonSerializer.Serialize(new
         {
             selectedProfile = "source-manifest packed library",
@@ -61,7 +94,7 @@ public static class OllamaReview
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var review = Parse(document.RootElement, settings.Model, digest);
-        Configuration.Require(await Digest() == digest, "Model identity changed during review.");
+        Configuration.Require(await Digest() == settings.ModelDigest, "Model identity changed during review.");
         return review;
     }
 

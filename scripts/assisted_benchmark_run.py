@@ -342,6 +342,7 @@ def orchestrate(
         "assessment": assessment["assessment"],
         "assessmentSha256": _sha256(canonical_json(assessment["assessment"])),
         "reviewEvidenceSha256": assessment["evidenceSha256"],
+        "approvedReviewModel": assessment["approvedModel"],
         "reviewModel": assessment["model"],
         "reviewPromptVersion": assessment["promptVersion"],
         "reviewedFrameCount": assessment["reviewedFrameCount"],
