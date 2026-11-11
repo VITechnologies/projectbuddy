@@ -126,7 +126,7 @@ public class GenerationTests
     {
         var settings = await Fixture();
         using var handler = new ReviewHttpHandler("{invalid-json");
-        await Assert.ThrowsAsync<JsonException>(() => Generation.RunAsync(settings,
+        await Assert.ThrowsAnyAsync<JsonException>(() => Generation.RunAsync(settings,
             (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
         Assert.Equal(0, handler.InferenceRequests);
         Assert.False(Directory.Exists(settings.Output));
@@ -140,6 +140,139 @@ public class GenerationTests
         await Assert.ThrowsAsync<HttpRequestException>(() => Generation.RunAsync(settings,
             (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
         Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task CancelledReviewStartsNoHttpRequest()
+    {
+        var settings = await Fixture();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var handler = new ReviewHttpHandler(Inventory());
+        await Assert.ThrowsAsync<ReviewCancelledException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, cancellation.Token)));
+        Assert.Empty(handler.RequestPaths);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MonotonicReviewDeadlineStopsSlowPreflight(bool overall)
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { TotalSeconds = overall ? 1 : 10, RequestSeconds = 1 } };
+        var elapsed = 0.0;
+        using var handler = new ReviewHttpHandler(Inventory(), onRequest: _ => elapsed += 2);
+        await Assert.ThrowsAsync<ReviewDeadlineException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, elapsed: () => elapsed)));
+        Assert.Single(handler.RequestPaths);
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task CancelledRequestCannotProceedToInference()
+    {
+        var settings = await Fixture();
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new ReviewHttpHandler(Inventory(), onRequest: _ => cancellation.Cancel());
+        await Assert.ThrowsAsync<ReviewCancelledException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, cancellation.Token)));
+        Assert.Single(handler.RequestPaths);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task TransientRetryIsBoundedAndResidencyIsNotAnUnload()
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { MaxRetries = 1, BackoffSeconds = 1 } };
+        var failed = false;
+        var elapsed = 0.0;
+        using var handler = new ReviewHttpHandler(Inventory(), responseStatus: (path, _) =>
+        {
+            if (path == "/api/chat" && !failed) { failed = true; return HttpStatusCode.ServiceUnavailable; }
+            return null;
+        });
+        Assert.True(await Generation.RunAsync(settings, (approved, draft) => OllamaReview.RunAsync(approved, draft, handler,
+            elapsed: () => elapsed, delay: (duration, _) => { elapsed += duration.TotalSeconds; return Task.CompletedTask; })));
+        Assert.Equal(2, handler.RequestPaths.Count(path => path == "/api/chat"));
+        Assert.All(handler.Residencies, residency => Assert.Equal(30, residency));
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
+        var lifecycle = report.RootElement.GetProperty("ollama").GetProperty("Lifecycle");
+        Assert.Equal(5, lifecycle.GetProperty("RequestCount").GetInt32());
+        Assert.Equal(1, lifecycle.GetProperty("RetryCount").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(503, 2)]
+    [InlineData(403, 1)]
+    public async Task RetriesDoNotWeakenRequestOrStatusPolicy(int status, int expected)
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { MaxRetries = 1 } };
+        using var handler = new ReviewHttpHandler(Inventory(), responseStatus: (path, _) => path == "/api/chat" ? (HttpStatusCode)status : null);
+        await Assert.ThrowsAsync<HttpRequestException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(expected, handler.RequestPaths.Count(path => path == "/api/chat"));
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task RequestBudgetCannotBeUsedToSkipPostflight()
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { MaxRequests = 3 } };
+        using var handler = new ReviewHttpHandler(Inventory());
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(3, handler.RequestPaths.Count);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task CancelledBackoffStartsNoRetry()
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { MaxRetries = 2, BackoffSeconds = 1 } };
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new ReviewHttpHandler(Inventory(), responseStatus: (path, _) => path == "/api/chat" ? HttpStatusCode.ServiceUnavailable : null);
+        await Assert.ThrowsAsync<ReviewCancelledException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler, cancellation.Token,
+                delay: (_, token) => { cancellation.Cancel(); return Task.FromCanceled(token); })));
+        Assert.Single(handler.RequestPaths, path => path == "/api/chat");
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task MalformedModelOutputDoesNotTriggerFormatRetry()
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = settings.Lifecycle with { MaxRetries = 3 } };
+        using var handler = new ReviewHttpHandler(Inventory(), reviewContent: "{\"decision\":\"accept\"}");
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Single(handler.RequestPaths, path => path == "/api/chat");
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData("time")]
+    [InlineData("requests")]
+    [InlineData("residency")]
+    public async Task InvalidLifecycleNeverStartsAReview(string problem)
+    {
+        var settings = await Fixture();
+        settings = settings with { Lifecycle = problem switch
+        {
+            "time" => settings.Lifecycle with { TotalSeconds = double.PositiveInfinity },
+            "requests" => settings.Lifecycle with { MaxRequests = 0 },
+            _ => settings.Lifecycle with { ResidencySeconds = 0 }
+        }};
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (_, _) => throw new Exception("must not reach model")));
         Assert.False(Directory.Exists(settings.Output));
     }
 
@@ -219,7 +352,7 @@ public class GenerationTests
             ["repository"] = settings.Repository, ["revision"] = settings.Revision, ["schema"] = settings.Schema,
             ["output"] = settings.Output, ["ollama-url"] = settings.OllamaUrl, ["model"] = settings.Model,
             ["model-digest"] = settings.ModelDigest, ["review-budget"] = Path.Combine(settings.Root, canary),
-            ["review-privacy"] = "unused-fixture-path"
+            ["review-privacy"] = "unused-fixture-path", ["review-lifecycle"] = "unused-fixture-path"
         };
         var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         start.ArgumentList.Add(typeof(Generation).Assembly.Location);
@@ -432,20 +565,27 @@ public class GenerationTests
     private sealed class ReviewHttpHandler(string preflight, string? postflight = null,
         bool unavailablePostflight = false, string responseModel = "fixture:1", bool unavailablePreflight = false,
         string? metadataOverride = null, int? inputCount = 64, int? outputCount = 16, string reason = "stop",
-        string? reviewContent = null) : HttpMessageHandler
+        string? reviewContent = null, Action<string>? onRequest = null,
+        Func<string, int, HttpStatusCode?>? responseStatus = null) : HttpMessageHandler
     {
         public int InventoryRequests { get; private set; }
         public int InferenceRequests { get; private set; }
+        public List<string> RequestPaths { get; } = [];
+        public List<int> Residencies { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("127.0.0.1", request.RequestUri!.Host);
+            RequestPaths.Add(request.RequestUri.AbsolutePath);
+            onRequest?.Invoke(request.RequestUri.AbsolutePath);
+            var failure = responseStatus?.Invoke(request.RequestUri.AbsolutePath, RequestPaths.Count);
+            if (failure is not null) return new HttpResponseMessage(failure.Value);
             string content;
             if (request.Method == HttpMethod.Get && request.RequestUri.AbsolutePath == "/api/tags")
             {
                 InventoryRequests++;
                 if (InventoryRequests == 1 && unavailablePreflight || InventoryRequests > 1 && unavailablePostflight)
-                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
                 content = InventoryRequests == 1 ? preflight : postflight ?? preflight;
             }
             else if (request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath == "/api/show")
@@ -457,16 +597,18 @@ public class GenerationTests
                 Assert.Equal(HttpMethod.Post, request.Method);
                 Assert.Equal("/api/chat", request.RequestUri.AbsolutePath);
                 InferenceRequests++;
+                using var posted = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                Residencies.Add(posted.RootElement.GetProperty("keep_alive").GetInt32());
                 content = JsonSerializer.Serialize(new
                 {
                     model = responseModel, done = true, done_reason = reason, prompt_eval_count = inputCount, eval_count = outputCount,
                     message = new { content = reviewContent ?? "{\"decision\":\"accept\",\"blockers\":[]}" }
                 });
             }
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(content, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 
@@ -489,6 +631,7 @@ public class GenerationTests
             new ReviewBudget("projectbuddy/ollama-budget@1", "utf8-byte-plus-approved-media@1", new string('a', 64),
                 16384, 512, 1024, 0, 65536, 0, 0),
             new ReviewPrivacy("projectbuddy/ollama-privacy@1", "none", JsonSerializer.SerializeToElement(Array.Empty<object>()),
-                false, DateTimeOffset.Parse("2099-01-01T00:00:00Z")));
+                false, DateTimeOffset.Parse("2099-01-01T00:00:00Z")),
+            new ReviewLifecyclePolicy("projectbuddy/ollama-lifecycle@1", 300, 90, 16, 0, 0, 30, 0));
     }
 }

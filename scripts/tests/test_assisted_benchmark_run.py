@@ -52,6 +52,8 @@ def authorization():
         ],
         "targetVmUuids": [],
         "ollamaModel": dict(MODEL),
+        "reviewLifecycle": {"schema": "projectbuddy/ollama-lifecycle@1", "totalSeconds": 300, "requestSeconds": 90,
+                    "maxRequests": 16, "maxRetries": 0, "backoffSeconds": 0, "residencySeconds": 30, "maxImageCount": 3},
         "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
                   "retainModelText": False, "expiresAt": "2099-01-01T00:00:00Z"},
         "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",

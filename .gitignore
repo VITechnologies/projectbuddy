@@ -5,6 +5,7 @@ __pycache__/
 *.iso
 coverage.xml
 .pytest_cache/
+.venv/
 .coverage
 
 # .NET build output (tools/peer/ask)

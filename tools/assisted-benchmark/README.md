@@ -111,6 +111,16 @@ model tag/digest):
     "retainModelText": false,
     "expiresAt": "<future ISO-8601 timestamp with timezone>"
   },
+  "reviewLifecycle": {
+    "schema": "projectbuddy/ollama-lifecycle@1",
+    "totalSeconds": 300,
+    "requestSeconds": 90,
+    "maxRequests": 16,
+    "maxRetries": 0,
+    "backoffSeconds": 0,
+    "residencySeconds": 30,
+    "maxImageCount": 0
+  },
   "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
   "allowVmLifecycle": false,
   "teardownOnNativePplFailure": false
@@ -238,6 +248,44 @@ operator assets. Receipts stay private; entry-point errors do not echo private
 paths or raw model output. Synthetic canary tests verify these defined pixel,
 metadata, text, and failure paths, not detection of every unknown secret.
 This is the `REQ-113` / `TEST-115` contract for issue #234.
+
+## Review Lifecycle
+
+Actual model review requires the explicit `reviewLifecycle` policy above.
+Overall and per-request deadlines use a monotonic clock and include preflight,
+inference, retry backoff and postflight. HTTP requests include header/body time,
+bounded streamed responses and cancellation; metadata and retry attempts consume
+the request count. Exhaustion cannot skip postflight or produce a success record.
+Image review additionally needs an approved `maxImageCount` up to three; requests
+remain sequential. The host checks cancellation/deadlines again before I/O.
+
+Only declared transient transport/status errors may retry, at most three times,
+using the same approved payload and bounded backoff. Format/identity/privacy
+errors and ambiguous client timeouts do not trigger weaker or unbounded retries.
+Cancellation stops further scheduling; pending client operations are cancelled
+and closed before returning. Ctrl+C returns cancellation rather than success.
+Timeout/cancellation does not prove server computation stopped, so failure
+diagnostics preserve that uncertainty and never force daemon/model teardown.
+
+Every request uses the approved finite residency TTL (1..300 seconds), not
+`keep_alive: 0`; this does not assert exclusive ownership of a shared model.
+Assessment/run receipts record lifecycle policy, counts, consumed time and
+completion outcome. No daemon reconfiguration, model deletion, or unowned unload
+is performed. Unsupported resource controls are rejected, not represented as
+enforced. Synchronous review requires a non-async caller.
+
+Python uses pinned httpx 0.28.1 with proxies/redirects disabled and no compressed
+response fallback. An isolated local setup is:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install httpx==0.28.1
+.venv/bin/python -m pytest scripts/tests/ -q --tb=short
+```
+
+Install Pillow 12.1.1 too when it is not already available and images are used.
+The contract is `REQ-114` / `TEST-116` for issue #235. These client-side limits
+are not GPU sizing, OS CPU preemption, or server-computation attestation.
 
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing

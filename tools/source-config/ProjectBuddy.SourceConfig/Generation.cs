@@ -10,12 +10,13 @@ namespace ProjectBuddy.SourceConfig;
 
 public sealed record Settings(string Root, string Manifest, string Build, string Repository,
     string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest,
-    ReviewBudget Budget, ReviewPrivacy Privacy);
+    ReviewBudget Budget, ReviewPrivacy Privacy, ReviewLifecyclePolicy Lifecycle);
 public sealed record Review(string Decision, string[] Blockers, string Model, string Digest)
 {
     public ReviewRequestBudget? RequestBudget { get; init; }
     public ReviewModelBudget? ModelBudget { get; init; }
     public string? ModelOutputSha256 { get; init; }
+    public ReviewLifecycleEvidence? Lifecycle { get; init; }
     public bool Accepted => Decision == "accept" && Blockers.Length == 0;
 }
 public sealed record InputFile(string Text, string Sha256);
@@ -71,9 +72,11 @@ public static class Generation
             approvedOllama = new { model = settings.Model, digest = settings.ModelDigest },
             reviewBudget = settings.Budget,
             reviewPrivacy = settings.Privacy,
+            reviewLifecycle = settings.Lifecycle,
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");
+        settings.Privacy.Validate();
         CreatePrivateDirectory(output);
         CheckLinks(output);
         foreach (var file in new Dictionary<string, string>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime, timezone
@@ -175,6 +176,23 @@ def validate_snapshot(snapshot: object, contract: dict) -> dict:
     }
 
 
+def validate_review_lifecycle(policy: object) -> dict:
+    keys = {"schema", "totalSeconds", "requestSeconds", "maxRequests", "maxRetries", "backoffSeconds",
+            "residencySeconds", "maxImageCount"}
+    if not isinstance(policy, dict) or set(policy) != keys or policy["schema"] != "projectbuddy/ollama-lifecycle@1":
+        raise ContractError("review lifecycle policy fields are invalid")
+    for key, low, high in (("totalSeconds", 1, 900), ("requestSeconds", 1, 120), ("backoffSeconds", 0, 5)):
+        value = policy[key]
+        if type(value) not in {int, float} or not math.isfinite(value) or not low <= value <= high:
+            raise ContractError("review lifecycle time bounds are invalid")
+    for key, low, high in (("maxRequests", 1, 128), ("maxRetries", 0, 3), ("residencySeconds", 1, 300), ("maxImageCount", 0, 3)):
+        if type(policy[key]) is not int or not low <= policy[key] <= high:
+            raise ContractError("review lifecycle count/residency bounds are invalid")
+    if policy["requestSeconds"] > policy["totalSeconds"]:
+        raise ContractError("review lifecycle request deadline exceeds overall deadline")
+    return dict(policy)
+
+
 def validate_review_privacy(policy: object) -> dict:
     keys = {"schema", "imageMode", "frames", "retainModelText", "expiresAt"}
     if not isinstance(policy, dict) or set(policy) != keys:
@@ -240,7 +258,7 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         "teardownOnNativePplFailure", "ollamaModel",
     }
     if (not isinstance(authorization, dict) or not required.issubset(authorization)
-            or set(authorization) - required - {"reviewBudget", "reviewPrivacy"}):
+            or set(authorization) - required - {"reviewBudget", "reviewPrivacy", "reviewLifecycle"}):
         raise ContractError("run authorization fields are invalid")
     if authorization["schema"] != AUTHORIZATION_SCHEMA:
         raise ContractError("unsupported run authorization schema")
@@ -312,6 +330,8 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         normalized["reviewBudget"] = validate_review_budget(authorization["reviewBudget"], normalized["ollamaModel"]["digest"])
     if "reviewPrivacy" in authorization:
         normalized["reviewPrivacy"] = validate_review_privacy(authorization["reviewPrivacy"])
+    if "reviewLifecycle" in authorization:
+        normalized["reviewLifecycle"] = validate_review_lifecycle(authorization["reviewLifecycle"])
     return normalized
 
 

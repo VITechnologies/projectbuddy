@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import base64
 import ipaddress
 import io
 import json
 import math
 import re
-import urllib.error
-import urllib.request
+import threading
+import time
 import warnings
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy
+import httpx
+
+from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy, validate_review_lifecycle
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
 PROMPT_VERSION = "2"
@@ -29,6 +32,89 @@ ALLOWED_SEVERITIES = {"info", "warning", "blocking"}
 
 class ReviewError(ValueError):
     pass
+
+
+class ReviewCancelledError(ReviewError):
+    pass
+
+
+class ReviewDeadlineError(ReviewError):
+    pass
+
+
+class ReviewTransportError(ReviewError):
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class ReviewLifecycle:
+    def __init__(self, policy: dict, cancel_event=None, clock=time.monotonic, wait=None):
+        self.policy = validate_review_lifecycle(policy)
+        self.cancel_event = cancel_event if cancel_event is not None else threading.Event()
+        self.clock = clock
+        self.wait = wait if wait is not None else self.cancel_event.wait
+        self.started = clock()
+        self.requests = 0
+        self.retries = 0
+        self.check()
+
+    def remaining(self) -> float:
+        return self.policy["totalSeconds"] - (self.clock() - self.started)
+
+    def check(self) -> None:
+        if self.cancel_event.is_set():
+            raise ReviewCancelledError("review cancelled; server completion may be unknown")
+        if self.remaining() <= 0:
+            raise ReviewDeadlineError("review deadline exceeded; server completion is unknown")
+
+    def call(self, operation):
+        for attempt in range(self.policy["maxRetries"] + 1):
+            self.check()
+            if self.requests >= self.policy["maxRequests"]:
+                raise ReviewError("review request budget exhausted; assessment incomplete")
+            self.requests += 1
+            started = self.clock()
+            try:
+                result = operation()
+            except ReviewTransportError as error:
+                self.check()
+                if self.clock() - started >= self.policy["requestSeconds"]:
+                    raise ReviewDeadlineError("request deadline exceeded; server completion is unknown") from None
+                if not error.retryable or attempt == self.policy["maxRetries"]:
+                    raise
+                self.retries += 1
+                delay = min(self.policy["backoffSeconds"], self.remaining())
+                if delay and self.wait(delay):
+                    raise ReviewCancelledError("review cancelled during retry backoff") from None
+                continue
+            self.check()
+            if self.clock() - started >= self.policy["requestSeconds"]:
+                raise ReviewDeadlineError("request deadline exceeded; server completion is unknown")
+            return result
+        raise ReviewError("review retries exhausted")
+
+    def summary(self) -> dict:
+        self.check()
+        return {"policy": self.policy, "requestCount": self.requests, "retryCount": self.retries,
+                "consumedSeconds": round(max(0.0, self.clock() - self.started), 6), "outcome": "completed",
+                "serverCompletion": "responses received; no forced unload or daemon mutation"}
+
+
+class LifecycleTransport:
+    def __init__(self, transport, lifecycle: ReviewLifecycle):
+        self.transport = transport.bound(lifecycle) if isinstance(transport, LocalOllama) else transport
+        self.lifecycle = lifecycle
+
+    def tags(self):
+        return self.lifecycle.call(self.transport.tags)
+
+    def show(self, model):
+        return self.lifecycle.call(lambda: self.transport.show(model))
+
+    def chat(self, payload):
+        encoded = _json_bytes(payload)
+        return self.lifecycle.call(lambda: self.transport.chat(json.loads(encoded)))
 
 
 def _json_bytes(value: object) -> bytes:
@@ -301,7 +387,9 @@ def request_budget(payload: dict, budget: dict) -> dict:
 
 
 def build_review_request(model_tag: str, selected_evidence: dict, image_position: int | None = None,
-                         keep_alive: str | int = 0, review_budget: dict | None = None) -> dict:
+                         keep_alive: int = 30, review_budget: dict | None = None) -> dict:
+    if type(keep_alive) is not int or not 1 <= keep_alive <= 300:
+        raise ReviewError("requested model residency must be a bounded TTL, not an unload")
     if not isinstance(review_budget, dict):
         raise ReviewError("an explicit approved review budget is required")
     budget = validate_review_budget(review_budget, review_budget.get("modelDigest"))
@@ -418,16 +506,17 @@ def _loopback_url(endpoint: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, response, code, message, headers, new_url):
-        return None
-
-
 class LocalOllama:
-    def __init__(self, endpoint: str, timeout: float = 90.0):
+    def __init__(self, endpoint: str, timeout: float = 90.0, http_transport=None, lifecycle=None):
         self.endpoint = _loopback_url(endpoint)
+        if type(timeout) not in {int, float} or not math.isfinite(timeout) or not 0 < timeout <= 120:
+            raise ReviewError("local request timeout must be finite and bounded")
         self.timeout = timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.http_transport = http_transport
+        self.lifecycle = lifecycle
+
+    def bound(self, lifecycle):
+        return LocalOllama(self.endpoint, self.timeout, self.http_transport, lifecycle)
 
     def _request(self, path: str, payload: dict | None = None) -> dict:
         def unique_fields(pairs):
@@ -439,19 +528,61 @@ class LocalOllama:
             return fields
 
         data = _json_bytes(payload) if payload is not None else None
-        request = urllib.request.Request(
-            f"{self.endpoint}{path}", data=data,
-            headers={"Content-Type": "application/json"} if data is not None else {},
-        )
+        timeout = min(self.timeout, self.lifecycle.policy["requestSeconds"], self.lifecycle.remaining()) if self.lifecycle else self.timeout
+
+        async def perform():
+            if self.lifecycle:
+                self.lifecycle.check()
+            async with httpx.AsyncClient(transport=self.http_transport, trust_env=False, follow_redirects=False, timeout=timeout) as client:
+                headers = {"Accept-Encoding": "identity"}
+                if data is not None:
+                    headers["Content-Type"] = "application/json"
+                if self.lifecycle:
+                    self.lifecycle.check()
+                async with client.stream("POST" if data is not None else "GET", f"{self.endpoint}{path}", content=data, headers=headers) as response:
+                    if not response.is_success:
+                        raise ReviewTransportError(f"local Ollama rejected request (HTTP {response.status_code})",
+                                                   response.status_code in {429, 500, 502, 503, 504})
+                    if response.headers.get("Content-Encoding", "identity").lower() != "identity":
+                        raise ReviewError("compressed local responses are unsupported")
+                    chunks = []
+                    size = 0
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        size += len(chunk)
+                        if size > MAX_RESPONSE_BYTES:
+                            raise ReviewError("local Ollama response exceeds the configured bound")
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+
+        async def bounded():
+            operation = asyncio.create_task(perform())
+
+            async def cancellation():
+                while self.lifecycle is None or not self.lifecycle.cancel_event.is_set():
+                    await asyncio.sleep(0.05)
+
+            monitor = asyncio.create_task(cancellation())
+            try:
+                async with asyncio.timeout(timeout):
+                    done, _pending = await asyncio.wait({operation, monitor}, return_when=asyncio.FIRST_COMPLETED)
+                    if monitor in done:
+                        raise ReviewCancelledError("review cancelled during request; server completion is unknown")
+                    return await operation
+            except (TimeoutError, httpx.TimeoutException):
+                raise ReviewDeadlineError("request deadline exceeded; server completion is unknown") from None
+            except httpx.TransportError:
+                raise ReviewTransportError("local Ollama transport failed; server completion may be unknown", True) from None
+            finally:
+                operation.cancel()
+                monitor.cancel()
+                await asyncio.gather(operation, monitor, return_exceptions=True)
+
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
-                raw = response.read(MAX_RESPONSE_BYTES + 1)
-        except urllib.error.HTTPError as error:
-            raise ReviewError(f"local Ollama endpoint rejected {path} (HTTP {error.code})") from None
-        except (OSError, urllib.error.URLError, TimeoutError) as error:
-            raise ReviewError(f"local Ollama {path} transport failed ({type(error).__name__})") from None
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise ReviewError("local Ollama response exceeds the configured bound")
+            asyncio.get_running_loop()
+        except RuntimeError:
+            raw = asyncio.run(bounded())
+        else:
+            raise ReviewError("synchronous model review requires a non-async caller")
         try:
             result = json.loads(raw, object_pairs_hook=unique_fields)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -467,6 +598,8 @@ class LocalOllama:
         return self._request("/api/show", {"model": model})
 
     def chat(self, payload: dict) -> dict:
+        if type(payload.get("keep_alive")) is not int or not 1 <= payload["keep_alive"] <= 300:
+            raise ReviewError("requested model residency must be a bounded TTL, not an unload")
         return self._request("/api/chat", payload)
 
 
@@ -533,12 +666,20 @@ def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], r
     return result, summary
 
 
-def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None) -> dict:
+def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None,
+                    cancel_event=None, clock=time.monotonic, wait=None) -> dict:
     approved = validate_authorization(authorization, contract)
+    if "reviewLifecycle" not in approved:
+        raise ReviewError("an explicit review lifecycle policy is required")
+    lifecycle = ReviewLifecycle(approved["reviewLifecycle"], cancel_event, clock, wait)
+    transport = LifecycleTransport(transport, lifecycle)
     budget = approved.get("reviewBudget")
     if budget is None:
         raise ReviewError("an explicit approved review budget is required")
     selected = select_evidence(evidence, approved, contract, capture_directory)
+    image_count = len(selected.get("frameImages", {}).get("_imagesBase64", []))
+    if image_count > lifecycle.policy["maxImageCount"]:
+        raise ReviewError("review lifecycle image-count bound exceeded")
     model = approved["ollamaModel"]
     _verify_model(transport, model)
     show = getattr(transport, "show", None)
@@ -547,12 +688,11 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         if not isinstance(metadata, dict) or "vision" not in metadata.get("capabilities", []):
             raise ReviewError("approved frameImages require a locally installed vision-capable Ollama model")
     model_limits = model_budget(metadata, budget)
-    image_count = len(selected.get("frameImages", {}).get("_imagesBase64", []))
     positions = range(image_count) if image_count > 1 else [0] if image_count == 1 else [None]
     assessments = []
     positions = list(positions)
-    requests = [build_review_request(model["tag"], selected, position,
-                "5m" if index < len(positions) - 1 else 0, budget) for index, position in enumerate(positions)]
+    requests = [build_review_request(model["tag"], selected, position, lifecycle.policy["residencySeconds"], budget)
+                for position in positions]
     budgets = [request_budget(payload, budget) for payload in requests]
     reviewed = selected.get("frameImages", {}).get("frames", [])
     frame_ids = {frame["frameId"] for frame in reviewed}
@@ -613,6 +753,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "modelAssessmentSha256": model_assessment_hash,
         "findingSha256": finding_hashes,
         "sampling": sampling,
+        "lifecycle": lifecycle.summary(),
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -6,6 +7,142 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.SourceConfig;
+
+public sealed record ReviewLifecyclePolicy(string Schema, double TotalSeconds, double RequestSeconds,
+    int MaxRequests, int MaxRetries, double BackoffSeconds, int ResidencySeconds, int MaxImageCount)
+{
+    public void Validate()
+    {
+        Configuration.Require(Schema == "projectbuddy/ollama-lifecycle@1"
+            && double.IsFinite(TotalSeconds) && TotalSeconds is >= 1 and <= 900
+            && double.IsFinite(RequestSeconds) && RequestSeconds is >= 1 and <= 120 && RequestSeconds <= TotalSeconds
+            && double.IsFinite(BackoffSeconds) && BackoffSeconds is >= 0 and <= 5
+            && MaxRequests is >= 1 and <= 128 && MaxRetries is >= 0 and <= 3
+            && ResidencySeconds is >= 1 and <= 300 && MaxImageCount is >= 0 and <= 3,
+            "Invalid bounded review lifecycle policy.");
+    }
+
+    public static ReviewLifecyclePolicy Read(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        OllamaReview.ValidateJsonFields(document.RootElement);
+        Configuration.Require(document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Count() == 8, "Review lifecycle requires exactly eight policy fields.");
+        return document.RootElement.Deserialize<ReviewLifecyclePolicy>(new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+        }) ?? throw new InvalidDataException("Invalid review lifecycle policy.");
+    }
+}
+
+public sealed class ReviewCancelledException : OperationCanceledException
+{
+    public ReviewCancelledException() : base("Review cancelled; server completion may be unknown.") { }
+}
+
+public sealed class ReviewDeadlineException : TimeoutException
+{
+    public ReviewDeadlineException() : base("Review deadline exceeded; server completion is unknown.") { }
+}
+
+public sealed record ReviewLifecycleEvidence(ReviewLifecyclePolicy Policy, int RequestCount, int RetryCount,
+    double ConsumedSeconds, string Outcome, string ServerCompletion);
+
+internal sealed class ReviewExecution : IDisposable
+{
+    private readonly ReviewLifecyclePolicy policy;
+    private readonly CancellationToken caller;
+    private readonly CancellationTokenSource overall;
+    private readonly Func<double> elapsed;
+    private readonly Func<TimeSpan, CancellationToken, Task> delay;
+    private int requests;
+    private int retries;
+
+    public ReviewExecution(ReviewLifecyclePolicy policy, CancellationToken caller, Func<double>? elapsed = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        policy.Validate();
+        this.policy = policy;
+        this.caller = caller;
+        var started = Stopwatch.GetTimestamp();
+        this.elapsed = elapsed ?? (() => Stopwatch.GetElapsedTime(started).TotalSeconds);
+        this.delay = delay ?? ((duration, token) => Task.Delay(duration, token));
+        overall = CancellationTokenSource.CreateLinkedTokenSource(caller);
+        overall.CancelAfter(TimeSpan.FromSeconds(policy.TotalSeconds));
+        try { Check(); }
+        catch { overall.Dispose(); throw; }
+    }
+
+    public void Check()
+    {
+        if (caller.IsCancellationRequested) throw new ReviewCancelledException();
+        if (overall.IsCancellationRequested || elapsed() >= policy.TotalSeconds) throw new ReviewDeadlineException();
+    }
+
+    public async Task<JsonDocument> RequestAsync(HttpClient client, string path, object? payload = null)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            Check();
+            Configuration.Require(requests < policy.MaxRequests, "Review request budget exhausted; assessment incomplete.");
+            requests++;
+            var started = elapsed();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Min(policy.RequestSeconds, policy.TotalSeconds - started)));
+            try
+            {
+                using var request = new HttpRequestMessage(payload is null ? HttpMethod.Get : HttpMethod.Post, path);
+                request.Headers.AcceptEncoding.ParseAdd("identity");
+                if (payload is not null) request.Content = JsonContent.Create(payload);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                Configuration.Require(!response.Content.Headers.ContentEncoding.Any(value => value != "identity"),
+                    "Compressed local responses are unsupported.");
+                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                using var buffer = new MemoryStream();
+                var bytes = new byte[65536];
+                while (true)
+                {
+                    var count = await stream.ReadAsync(bytes, timeout.Token);
+                    if (count == 0) break;
+                    Configuration.Require(buffer.Length + count <= 1024 * 1024, "Local review response exceeds the configured bound.");
+                    buffer.Write(bytes, 0, count);
+                }
+                Check();
+                if (elapsed() - started >= policy.RequestSeconds) throw new ReviewDeadlineException();
+                return JsonDocument.Parse(buffer.ToArray());
+            }
+            catch (OperationCanceledException)
+            {
+                if (caller.IsCancellationRequested) throw new ReviewCancelledException();
+                throw new ReviewDeadlineException();
+            }
+            catch (HttpRequestException error) when (attempt < policy.MaxRetries
+                && (error.StatusCode is null || (int)error.StatusCode is 429 or 500 or 502 or 503 or 504))
+            {
+                Check();
+                if (elapsed() - started >= policy.RequestSeconds) throw new ReviewDeadlineException();
+                retries++;
+                try { await delay(TimeSpan.FromSeconds(Math.Min(policy.BackoffSeconds, policy.TotalSeconds - elapsed())), overall.Token); }
+                catch (OperationCanceledException)
+                {
+                    if (caller.IsCancellationRequested) throw new ReviewCancelledException();
+                    throw new ReviewDeadlineException();
+                }
+            }
+        }
+    }
+
+    public ReviewLifecycleEvidence Summary()
+    {
+        Check();
+        return new(policy, requests, retries, Math.Round(Math.Max(0, elapsed()), 6), "completed",
+            "responses received; no forced unload or daemon mutation");
+    }
+
+    public void Dispose() => overall.Dispose();
+}
 
 public sealed record ReviewPrivacy(string Schema, string ImageMode, JsonElement Frames,
     bool RetainModelText, DateTimeOffset ExpiresAt)
@@ -143,26 +280,34 @@ public static class OllamaReview
         settings.Budget!.Validate(settings.ModelDigest!);
         Configuration.Require(settings.Privacy is not null, "An explicit review privacy policy is required.");
         settings.Privacy!.Validate();
+        Configuration.Require(settings.Lifecycle is not null, "An explicit review lifecycle policy is required.");
+        settings.Lifecycle!.Validate();
     }
 
     public static Task<Review> RunAsync(Settings settings, Draft draft)
+        => RunAsync(settings, draft, CancellationToken.None);
+
+    public static Task<Review> RunAsync(Settings settings, Draft draft, CancellationToken cancellation)
     {
         ValidateModelIdentity(settings);
-        return RunAsync(settings, draft, new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+        return RunAsync(settings, draft, new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }, cancellation);
     }
 
-    internal static async Task<Review> RunAsync(Settings settings, Draft draft, HttpMessageHandler handler)
+    internal static async Task<Review> RunAsync(Settings settings, Draft draft, HttpMessageHandler handler,
+        CancellationToken cancellation = default, Func<double>? elapsed = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         ValidateModelIdentity(settings);
+        using var execution = new ReviewExecution(settings.Lifecycle, cancellation, elapsed, delay);
         using var client = new HttpClient(handler)
         {
             BaseAddress = Endpoint(settings.OllamaUrl),
-            Timeout = TimeSpan.FromSeconds(90),
+            Timeout = Timeout.InfiniteTimeSpan,
             MaxResponseContentBufferSize = 1024 * 1024
         };
         async Task<string> Digest()
         {
-            var tags = await client.GetFromJsonAsync<JsonElement>("api/tags");
+            using var inventory = await execution.RequestAsync(client, "api/tags");
+            var tags = inventory.RootElement;
             Configuration.Require(tags.ValueKind == JsonValueKind.Object
                 && tags.EnumerateObject().Count(property => property.Name == "models") == 1
                 && tags.GetProperty("models").ValueKind == JsonValueKind.Array, "Invalid local model inventory.");
@@ -189,9 +334,7 @@ public static class OllamaReview
         }
         var digest = await Digest();
         Configuration.Require(digest == settings.ModelDigest, "Installed model does not match the caller-approved digest.");
-        using var showResponse = await client.PostAsJsonAsync("api/show", new { model = settings.Model });
-        showResponse.EnsureSuccessStatusCode();
-        using var metadata = JsonDocument.Parse(await showResponse.Content.ReadAsStringAsync());
+        using var metadata = await execution.RequestAsync(client, "api/show", new { model = settings.Model });
         ValidateJsonFields(metadata.RootElement);
         var modelBudget = settings.Budget.CheckModel(metadata.RootElement);
         var evidence = JsonSerializer.Serialize(new
@@ -207,7 +350,7 @@ public static class OllamaReview
         {
             model = settings.Model,
             stream = false,
-            keep_alive = 0,
+            keep_alive = settings.Lifecycle.ResidencySeconds,
             options = new { num_ctx = settings.Budget.ContextTokens, num_predict = settings.Budget.OutputTokens, temperature = 0, seed = 42 },
             format = JsonNode.Parse("""{"type":"object","properties":{"decision":{"type":"string","enum":["accept","reject","inconclusive"]},"blockers":{"type":"array","items":{"type":"string"}}},"required":["decision","blockers"],"additionalProperties":false}"""),
             messages = new[]
@@ -218,9 +361,7 @@ public static class OllamaReview
         };
         var requestBudget = settings.Budget.Check(JsonSerializer.SerializeToElement(payload));
         settings.Privacy.Validate();
-        using var response = await client.PostAsJsonAsync("api/chat", payload);
-        response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        using var document = await execution.RequestAsync(client, "api/chat", payload);
         ValidateJsonFields(document.RootElement);
         Configuration.Require(document.RootElement.TryGetProperty("prompt_eval_count", out var promptCount)
             && promptCount.ValueKind == JsonValueKind.Number && promptCount.TryGetInt32(out var inputTokens)
@@ -232,7 +373,7 @@ public static class OllamaReview
         var review = Parse(document.RootElement, settings.Model, digest);
         Configuration.Require(await Digest() == settings.ModelDigest, "Model identity changed during review.");
         settings.Privacy.Validate();
-        return review with { RequestBudget = requestBudget, ModelBudget = modelBudget };
+        return review with { RequestBudget = requestBudget, ModelBudget = modelBudget, Lifecycle = execution.Summary() };
     }
 
     public static Review Parse(JsonElement response, string model, string digest)
