@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -124,6 +125,7 @@ def test_review_uses_only_per_run_approved_evidence_and_returns_provenance():
     assert result["schema"] == "projectbuddy/assisted-benchmark-assessment@1"
     assert result["runId"] == "run-0001"
     assert result["model"] == MODEL
+    assert result["approvedModel"] == MODEL
     assert result["advisoryOnly"] is True
     assert transport.tag_calls == 2
     prompt_data = json.loads(transport.payload["messages"][1]["content"])
@@ -153,6 +155,113 @@ def test_review_refuses_model_digest_change_during_assessment():
     transport = FakeTransport(digests=[MODEL["digest"], "0" * 64])
     with pytest.raises(review_module.ReviewError, match="digest is not installed"):
         review_module.review_evidence(evidence(), authorization(), contract(), transport)
+
+
+def test_malformed_inventory_entry_prevents_inference():
+    review_module = load_module("assisted_review_malformed_inventory", REVIEW_MODULE)
+
+    class MalformedInventory(FakeTransport):
+        def tags(self):
+            return {"models": [None, {"name": MODEL["tag"], "digest": MODEL["digest"]}]}
+
+    transport = MalformedInventory()
+    with pytest.raises(review_module.ReviewError, match="inventory"):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("entry", [
+    {}, {"name": MODEL["tag"]}, {"digest": MODEL["digest"]},
+    {"name": None, "digest": MODEL["digest"]},
+    {"name": " ", "digest": MODEL["digest"]},
+    {"name": "other:1", "digest": 3},
+    {"name": "other:1", "digest": "abc"},
+    {"name": "other:1", "digest": "g" * 64},
+    {"name": MODEL["tag"], "model": "other:1", "digest": MODEL["digest"]},
+    {"name": MODEL["tag"], "digest": MODEL["digest"]},
+])
+def test_invalid_or_duplicate_inventory_prevents_inference(entry):
+    review_module = load_module("assisted_review_invalid_inventory", REVIEW_MODULE)
+
+    class InvalidInventory(FakeTransport):
+        def tags(self):
+            return {"models": [entry, {"name": MODEL["tag"], "digest": MODEL["digest"]}]}
+
+    transport = InvalidInventory()
+    with pytest.raises(review_module.ReviewError):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("inventory", [None, [], {}, {"models": None}, {"models": {}}, {"models": []}])
+def test_missing_or_malformed_inventory_prevents_inference(inventory):
+    review_module = load_module("assisted_review_missing_inventory", REVIEW_MODULE)
+
+    class MissingInventory(FakeTransport):
+        def tags(self):
+            return inventory
+
+    transport = MissingInventory()
+    with pytest.raises(review_module.ReviewError):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("approved_model", [
+    None, {}, {"tag": MODEL["tag"]}, {"tag": MODEL["tag"], "digest": "abc"},
+    {"tag": MODEL["tag"], "digest": "g" * 64},
+])
+def test_missing_or_invalid_model_approval_never_contacts_ollama(approved_model):
+    review_module = load_module("assisted_review_invalid_approval", REVIEW_MODULE)
+    transport = FakeTransport()
+    with pytest.raises(review_module.ContractError):
+        review_module.review_evidence(evidence(), authorization(ollamaModel=approved_model), contract(), transport)
+    assert transport.tag_calls == 0
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("postflight", ["malformed", "duplicate", "unavailable"])
+def test_invalid_postflight_cannot_produce_an_assessment(postflight):
+    review_module = load_module("assisted_review_postflight", REVIEW_MODULE)
+
+    class InvalidPostflight(FakeTransport):
+        def tags(self):
+            if self.tag_calls == 0:
+                return super().tags()
+            if postflight == "unavailable":
+                raise review_module.ReviewError("fixture endpoint unavailable")
+            if postflight == "malformed":
+                return {"models": [None]}
+            return {"models": [{"name": MODEL["tag"], "digest": MODEL["digest"]}] * 2}
+
+    transport = InvalidPostflight()
+    with pytest.raises(review_module.ReviewError):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert len(transport.payloads) == 1
+
+
+@pytest.mark.parametrize("inventory", [
+    '{"models":[],"models":[]}',
+    '{"models":[{"name":"other:1","name":"approved:1"}]}',
+    '{"models":[{"digest":"first","digest":"second"}]}',
+])
+def test_duplicate_json_inventory_fields_are_rejected_before_chat(inventory):
+    review_module = load_module("assisted_review_duplicate_json", REVIEW_MODULE)
+    transport = review_module.LocalOllama("http://127.0.0.1:11434")
+
+    class InventoryOpener:
+        def __init__(self):
+            self.paths = []
+
+        def open(self, request, timeout):
+            self.paths.append(request.full_url)
+            return io.BytesIO(inventory.encode())
+
+    opener = InventoryOpener()
+    transport.opener = opener
+    with pytest.raises(review_module.ReviewError, match="duplicate JSON fields"):
+        review_module.review_evidence(evidence(), authorization(), contract(), transport)
+    assert opener.paths == ["http://127.0.0.1:11434/api/tags"]
 
 
 @pytest.mark.parametrize("bad", [

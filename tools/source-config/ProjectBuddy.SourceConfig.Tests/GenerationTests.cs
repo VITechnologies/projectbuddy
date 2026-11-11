@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using ProjectBuddy.SourceConfig;
 using Xunit;
@@ -20,6 +22,8 @@ public class GenerationTests
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
         Assert.Equal(accepted, report.RootElement.GetProperty("configurationValid").GetBoolean());
         Assert.False(report.RootElement.GetProperty("nativeBuildProven").GetBoolean());
+        Assert.Equal(settings.ModelDigest, report.RootElement.GetProperty("approvedOllama").GetProperty("digest").GetString());
+        Assert.Equal(settings.ModelDigest, report.RootElement.GetProperty("ollama").GetProperty("Digest").GetString());
         var digest = Configuration.Hash(await File.ReadAllTextAsync(Path.Combine(settings.Output, "pipeline.json")));
         Assert.Equal(digest, report.RootElement.GetProperty("outputs").GetProperty("pipeline.json").GetString());
     }
@@ -45,6 +49,29 @@ public class GenerationTests
     }
 
     [Fact]
+    public async Task UnapprovedReviewIdentityLeavesNoConfiguration()
+    {
+        var settings = await Fixture();
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (_, _) => Task.FromResult(Verdict(true) with { Digest = new string('b', 64) })));
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
+    public async Task InvalidModelApprovalNeverReachesReview(string digest)
+    {
+        var settings = await Fixture();
+        settings = settings with { ModelDigest = digest };
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (_, _) => throw new Exception("must not reach model")));
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
     public async Task UnavailableModelLeavesNoConfiguration()
     {
         var settings = await Fixture();
@@ -61,6 +88,113 @@ public class GenerationTests
             await File.AppendAllTextAsync(Path.Combine(settings.Root, settings.Manifest), "\n# changed during review");
             return Verdict(true);
         }));
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Theory]
+    [InlineData("missing-models")]
+    [InlineData("not-object")]
+    [InlineData("not-array")]
+    [InlineData("null-entry")]
+    [InlineData("missing-name")]
+    [InlineData("missing-digest")]
+    [InlineData("non-string-digest")]
+    [InlineData("short-digest")]
+    [InlineData("non-hex-digest")]
+    [InlineData("duplicate-model")]
+    [InlineData("duplicate-name")]
+    [InlineData("duplicate-digest")]
+    [InlineData("duplicate-inventory")]
+    [InlineData("not-installed")]
+    [InlineData("mismatched-digest")]
+    [InlineData("alias-mismatch")]
+    public async Task InventoryErrorsSendNoEvidence(string problem)
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(InvalidInventory(problem));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.Equal(1, handler.InventoryRequests);
+        Assert.False(Directory.Exists(settings.Output));
+        Assert.Equal(new string('a', 64), settings.ModelDigest);
+    }
+
+    [Fact]
+    public async Task MalformedInventoryJsonSendsNoEvidence()
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler("{invalid-json");
+        await Assert.ThrowsAsync<JsonException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task UnavailablePreflightSendsNoEvidence()
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory(), unavailablePreflight: true);
+        await Assert.ThrowsAsync<HttpRequestException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(0, handler.InferenceRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task ApprovedHttpReviewBindsExpectedAndObservedIdentity()
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory());
+        Assert.True(await Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
+        Assert.Equal(2, handler.InventoryRequests);
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(settings.Output, "evidence.json")));
+        Assert.Equal(settings.Model, report.RootElement.GetProperty("approvedOllama").GetProperty("model").GetString());
+        Assert.Equal(settings.ModelDigest, report.RootElement.GetProperty("approvedOllama").GetProperty("digest").GetString());
+        Assert.Equal(settings.ModelDigest, report.RootElement.GetProperty("ollama").GetProperty("Digest").GetString());
+        Assert.Equal(settings.Revision, report.RootElement.GetProperty("revision").GetString());
+        Assert.False(report.RootElement.GetProperty("nativeBuildProven").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("mismatched-digest")]
+    [InlineData("duplicate-model")]
+    [InlineData("missing-models")]
+    [InlineData("not-installed")]
+    public async Task InvalidPostflightLeavesNoConfiguration(string problem)
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory(), InvalidInventory(problem));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
+        Assert.Equal(2, handler.InventoryRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task UnavailablePostflightLeavesNoConfiguration()
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory(), unavailablePostflight: true);
+        await Assert.ThrowsAsync<HttpRequestException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
+        Assert.Equal(2, handler.InventoryRequests);
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task WrongResponseModelLeavesNoConfiguration()
+    {
+        var settings = await Fixture();
+        using var handler = new ReviewHttpHandler(Inventory(), responseModel: "other:1");
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
         Assert.False(Directory.Exists(settings.Output));
     }
 
@@ -105,6 +239,67 @@ public class GenerationTests
 
     public static Review Verdict(bool accepted) => new(accepted ? "accept" : "reject", accepted ? [] : ["fixture blocker"], "fixture:1", new string('a', 64));
 
+    private static string Inventory(string name = "fixture:1", string? digest = null) =>
+        JsonSerializer.Serialize(new { models = new[] { new { name, model = name, digest = digest ?? new string('a', 64) } } });
+
+    private static string InvalidInventory(string problem) => problem switch
+    {
+        "missing-models" => "{}",
+        "not-object" => "[]",
+        "not-array" => "{\"models\":{}}",
+        "null-entry" => "{\"models\":[null]}",
+        "missing-name" => "{\"models\":[{\"digest\":\"" + new string('a', 64) + "\"}]}",
+        "missing-digest" => "{\"models\":[{\"name\":\"fixture:1\"}]}",
+        "non-string-digest" => "{\"models\":[{\"name\":\"fixture:1\",\"digest\":3}]}",
+        "short-digest" => Inventory(digest: "abc"),
+        "non-hex-digest" => Inventory(digest: new string('g', 64)),
+        "duplicate-model" => "{\"models\":[" + InventoryEntry() + "," + InventoryEntry() + "]}",
+        "duplicate-name" => "{\"models\":[{\"name\":\"other:1\",\"name\":\"fixture:1\",\"digest\":\"" + new string('a', 64) + "\"}]}",
+        "duplicate-digest" => "{\"models\":[{\"name\":\"fixture:1\",\"digest\":\"" + new string('b', 64) + "\",\"digest\":\"" + new string('a', 64) + "\"}]}",
+        "duplicate-inventory" => "{\"models\":[],\"models\":[" + InventoryEntry() + "]}",
+        "not-installed" => Inventory(name: "other:1"),
+        "mismatched-digest" => Inventory(digest: new string('b', 64)),
+        "alias-mismatch" => "{\"models\":[{\"name\":\"fixture:1\",\"model\":\"other:1\",\"digest\":\"" + new string('a', 64) + "\"}]}",
+        _ => throw new ArgumentException("Unknown inventory fixture.", nameof(problem))
+    };
+
+    private static string InventoryEntry() => JsonSerializer.Serialize(new { name = "fixture:1", digest = new string('a', 64) });
+
+    private sealed class ReviewHttpHandler(string preflight, string? postflight = null,
+        bool unavailablePostflight = false, string responseModel = "fixture:1", bool unavailablePreflight = false) : HttpMessageHandler
+    {
+        public int InventoryRequests { get; private set; }
+        public int InferenceRequests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("127.0.0.1", request.RequestUri!.Host);
+            string content;
+            if (request.Method == HttpMethod.Get && request.RequestUri.AbsolutePath == "/api/tags")
+            {
+                InventoryRequests++;
+                if (InventoryRequests == 1 && unavailablePreflight || InventoryRequests > 1 && unavailablePostflight)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                content = InventoryRequests == 1 ? preflight : postflight ?? preflight;
+            }
+            else
+            {
+                Assert.Equal(HttpMethod.Post, request.Method);
+                Assert.Equal("/api/chat", request.RequestUri.AbsolutePath);
+                InferenceRequests++;
+                content = JsonSerializer.Serialize(new
+                {
+                    model = responseModel, done = true, done_reason = "stop",
+                    message = new { content = "{\"decision\":\"accept\",\"blockers\":[]}" }
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
     public static async Task<Settings> Fixture()
     {
         var directory = Path.Combine(Path.GetTempPath(), "projectbuddy-source-config-" + Guid.NewGuid().ToString("N"));
@@ -120,6 +315,6 @@ public class GenerationTests
         var revision = await Generation.Git(root, "rev-parse", "HEAD");
         return new Settings(root, "vipm.toml", "ppl", "https://example.org/fixture.git", revision,
             Path.Combine(AppContext.BaseDirectory, "pipeline-config.schema.json"), Path.Combine(directory, "generated"),
-            "http://127.0.0.1:11435", "fixture:1");
+            "http://127.0.0.1:11435", "fixture:1", new string('a', 64));
     }
 }

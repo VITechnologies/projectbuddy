@@ -7,7 +7,7 @@ using Tomlyn;
 namespace ProjectBuddy.SourceConfig;
 
 public sealed record Settings(string Root, string Manifest, string Build, string Repository,
-    string Revision, string Schema, string Output, string OllamaUrl, string Model);
+    string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest);
 public sealed record Review(string Decision, string[] Blockers, string Model, string Digest)
 {
     public bool Accepted => Decision == "accept" && Blockers.Length == 0;
@@ -18,6 +18,7 @@ public static class Generation
 {
     public static async Task<bool> RunAsync(Settings settings, Func<Settings, Draft, Task<Review>> review)
     {
+        OllamaReview.ValidateModelIdentity(settings);
         var root = Path.GetFullPath(settings.Root);
         var output = Path.GetFullPath(settings.Output);
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output already exists; choose a new directory.");
@@ -35,8 +36,8 @@ public static class Generation
         var schema = await File.ReadAllTextAsync(settings.Schema);
         var draft = Configuration.Create(manifest.Text, project.Text, settings.Build, settings.Repository, settings.Revision, schema);
         var verdict = await review(settings, draft);
-        Configuration.Require(verdict.Model == settings.Model && verdict.Digest.Length == 64
-            && verdict.Digest.All(char.IsAsciiHexDigit), "Review must identify the selected model by digest.");
+        Configuration.Require(verdict.Model == settings.Model && verdict.Digest == settings.ModelDigest,
+            "Review must identify the caller-approved model tag and digest.");
         Configuration.Require(await ReadPinned(root, settings.Manifest) == manifest
             && await ReadPinned(root, buildPath) == project
             && await Git(root, "rev-parse", "HEAD") == settings.Revision, "Source changed during review.");
@@ -61,6 +62,7 @@ public static class Generation
                 artifactPath = draft.ArtifactPath,
                 runtimeAndCleanupPolicy = "native-windows; cleanup disabled"
             },
+            approvedOllama = new { model = settings.Model, digest = settings.ModelDigest },
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");

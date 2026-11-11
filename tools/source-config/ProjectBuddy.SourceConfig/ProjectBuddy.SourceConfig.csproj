@@ -9,6 +9,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ProjectBuddy.SourceConfig.Tests" />
     <PackageReference Include="Tomlyn" Version="0.19.0" />
     <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
   </ItemGroup>

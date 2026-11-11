@@ -111,6 +111,14 @@ frame/video bytes are not sent to remote services or included in the receipt.
 The `projectbuddy:0.1-qwen2.5vl-3b` identity is vision-capable; its tag and
 digest must still match the per-run authorization.
 
+The approved tag and full lowercase SHA-256 digest are required inputs, never
+adopted automatically from inventory discovery. Missing, malformed, duplicate,
+or conflicting inventory entries block inference; a postflight identity error
+blocks receipt completion. Assessment and run receipts retain approved model
+identity separately from the verified review identity (`approvedModel` / `model`
+and `approvedReviewModel` / `reviewModel`). This is the `REQ-109` / `TEST-111`
+contract in ProjectBuddy issue #230, not attestation of an untrusted local daemon.
+
 This prototype does **not** start, stop, create, delete, activate, or register a
 VM, and does not execute the PPL build; it validates an existing
 `lv_icon.lvlibp` proof. Native build failures and exact-VM poison teardown remain
