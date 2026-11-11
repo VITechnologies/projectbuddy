@@ -186,6 +186,7 @@ def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     assert receipt["approvedReviewModel"] == MODEL
     assert receipt["reviewModel"] == MODEL
     assert receipt["reviewPrivacy"]["retainModelText"] is False
+    assert receipt["reviewSampling"]["coverageScope"] == "submitted-frames-only"
     assert receipt["reviewAggregation"] == {
         "policyVersion": "projectbuddy/assessment-aggregation@1",
         "requiredInputCount": 1,

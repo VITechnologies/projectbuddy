@@ -156,8 +156,30 @@ with policy version and required/completed input counts. Uncertainties are
 deduplicated and bounded to 32; multiple distinct recommendations use an explicit
 combined-review recommendation and report how many original recommendations
 were omitted. This is the `REQ-110` / `TEST-112` contract for issue #231.
-Frame-specific finding references remain separate work in issue #233; category
-references are not presented as frame-level attribution or whole-capture proof.
+Image-based findings additionally retain frame-specific references as described
+below; category references alone are not presented as image attribution.
+
+## Frame Attribution And Coverage
+
+Every submitted image has a host-generated `frameId` binding run identity,
+manifest index, known/unknown timestamp, verified source-image hash, exact
+submitted-image hash, and privacy-policy hash. Each image request exposes only
+its own frame ID in the finding schema. Image findings must cite that ID using
+`frameRefs`; missing, duplicate, foreign-run, unreviewed, or substituted references
+are rejected. Findings retain these references through aggregation and prose
+minimization. Identical claims about different frames remain distinct.
+
+The recorded `projectbuddy/first-middle-last@1` policy selects at most three
+frames deterministically. Assessment `sampling` and run `reviewSampling` record
+selected IDs/indices/hashes/timestamps, available/reviewed/unreviewed counts,
+unknown timestamp count, and known time range. Missing timestamps remain null.
+Coverage is always `submitted-frames-only` for image review (or `metadata-only`
+without images), never a continuous-capture conclusion. Even
+`allManifestFramesReviewed: true` means only that every manifest frame was
+submitted, not that every interval/event was observed. A passing model decision
+applies only to its reviewed sample and is not absence-of-event or build proof.
+This is the `REQ-112` / `TEST-114` contract for issue #233; prompt version 2
+introduces the frame-reference response schema.
 
 ## Inference Budget
 
