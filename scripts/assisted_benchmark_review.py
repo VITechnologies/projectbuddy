@@ -365,6 +365,51 @@ def _verify_model(transport, model: dict) -> None:
         raise ReviewError("approved Ollama model tag/digest is not installed locally")
 
 
+def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], required_count: int) -> tuple[dict, dict]:
+    if (not isinstance(required_count, int) or isinstance(required_count, bool) or required_count < 1
+            or not isinstance(assessments, list) or len(assessments) != required_count):
+        raise ReviewError("assessment aggregation requires all expected inputs")
+    validated = [validate_assessment(item, approved_fields) for item in assessments]
+    findings = []
+    finding_keys = set()
+    uncertainties = []
+    recommendations = []
+    for item in validated:
+        for finding in item["findings"]:
+            normalized = {**finding, "evidenceFields": sorted(finding["evidenceFields"])}
+            identity = _json_bytes(normalized)
+            if identity not in finding_keys:
+                finding_keys.add(identity)
+                findings.append(normalized)
+        for uncertainty in item["uncertainties"]:
+            if uncertainty not in uncertainties:
+                uncertainties.append(uncertainty)
+        if item["recommendation"] and item["recommendation"] not in recommendations:
+            recommendations.append(item["recommendation"])
+    priority = {"blocking": 0, "warning": 1, "info": 2}
+    findings.sort(key=lambda finding: priority[finding["severity"]])
+    if sum(finding["severity"] == "blocking" for finding in findings) > 32:
+        raise ReviewError("assessment aggregation is incomplete: blocking findings exceed the output bound")
+    decisions = {item["decision"] for item in validated}
+    decision = "fail" if "fail" in decisions else "pass" if decisions == {"pass"} and not uncertainties else "inconclusive"
+    combined = {
+        "decision": decision,
+        "findings": findings[:32],
+        "uncertainties": uncertainties[:32],
+        "recommendation": recommendations[0] if len(recommendations) == 1 else "Review the combined per-frame findings and uncertainties.",
+    }
+    result = validate_assessment(combined, approved_fields)
+    summary = {
+        "policyVersion": "projectbuddy/assessment-aggregation@1",
+        "requiredInputCount": required_count,
+        "completedInputCount": len(validated),
+        "omittedNonBlockingFindingCount": max(0, len(findings) - 32),
+        "omittedUncertaintyCount": max(0, len(uncertainties) - 32),
+        "omittedRecommendationCount": len(recommendations) if len(recommendations) > 1 else 0,
+    }
+    return result, summary
+
+
 def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None) -> dict:
     approved = validate_authorization(authorization, contract)
     selected = select_evidence(evidence, approved, contract, capture_directory)
@@ -393,29 +438,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
             raise ReviewError("local Ollama assessment is not valid JSON") from error
         assessments.append(validate_assessment(assessment_data, set(selected)))
 
-    decisions = {item["decision"] for item in assessments}
-    if "fail" in decisions:
-        decision = "fail"
-    elif decisions == {"pass"}:
-        decision = "pass"
-    else:
-        decision = "inconclusive"
-    findings = []
-    uncertainties = []
-    for item in assessments:
-        for finding in item["findings"]:
-            if finding not in findings:
-                findings.append(finding)
-        for uncertainty in item["uncertainties"]:
-            if uncertainty not in uncertainties:
-                uncertainties.append(uncertainty)
-    recommendations = list(dict.fromkeys(item["recommendation"] for item in assessments if item["recommendation"]))
-    assessment = {
-        "decision": decision,
-        "findings": findings[:32],
-        "uncertainties": uncertainties[:32],
-        "recommendation": recommendations[0] if len(recommendations) == 1 else "Review the combined per-frame findings and uncertainties.",
-    }
+    assessment, aggregation = _aggregate_assessments(assessments, set(selected), len(positions))
     _verify_model(transport, model)
     evidence_hash = hashlib.sha256(_json_bytes(selected)).hexdigest()
     return {
@@ -426,6 +449,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "model": {"tag": model["tag"], "digest": model["digest"]},
         "promptVersion": PROMPT_VERSION,
         "assessment": assessment,
+        "aggregation": aggregation,
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

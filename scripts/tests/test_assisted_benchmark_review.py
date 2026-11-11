@@ -283,6 +283,148 @@ def test_model_output_must_be_complete_and_use_the_approved_model():
         review_module.review_evidence(evidence(), authorization(), contract(), wrong_model)
 
 
+def test_aggregation_preserves_a_blocker_after_more_than_32_earlier_findings(tmp_path):
+    review_module = load_module("assisted_review_late_blocker", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_late_blocker", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    capture_directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(capture_directory)
+    source_frame = capture["frames"][0]
+    frame_bytes = (capture_directory / source_frame["frameFile"]).read_bytes()
+    frames = []
+    for index in range(3):
+        filename = f"frame-{index + 1:05d}.png"
+        (capture_directory / filename).write_bytes(frame_bytes)
+        frames.append({**source_frame, "index": index, "tMs": index * 1000, "frameFile": filename})
+    capture["frames"] = frames
+    capture["frameCount"] = 3
+    earlier = [
+        {"severity": "info", "claim": f"earlier observation {index}", "evidenceFields": ["frameImages"]}
+        for index in range(33)
+    ]
+    blocker = {"severity": "blocking", "claim": "later blocking condition", "evidenceFields": ["frameImages"]}
+    responses = [assessment(findings=earlier[:32]), assessment(findings=earlier[32:]), assessment("fail", [blocker])]
+
+    class SequentialTransport(FakeTransport):
+        def chat(self, payload):
+            response = responses[len(self.payloads)]
+            self.payloads.append(payload)
+            return assessment_response(content=response)
+
+    result = review_module.review_evidence(
+        capture, authorization(("frameImages",)), contract(), SequentialTransport(), capture_directory
+    )
+    assert result["assessment"]["decision"] == "fail"
+    assert blocker in result["assessment"]["findings"]
+    review_module.validate_assessment(result["assessment"], {"frameImages"})
+    assert result["aggregation"]["omittedNonBlockingFindingCount"] == 2
+    assert result["aggregation"]["completedInputCount"] == 3
+
+
+@pytest.mark.parametrize("decisions, expected", [
+    (["pass"], "pass"), (["pass", "pass"], "pass"),
+    (["fail", "pass"], "fail"), (["pass", "fail"], "fail"),
+    (["fail", "inconclusive"], "fail"), (["inconclusive", "fail"], "fail"),
+    (["inconclusive"], "inconclusive"), (["pass", "inconclusive"], "inconclusive"),
+])
+def test_aggregation_preserves_decision_precedence(decisions, expected):
+    review_module = load_module("assisted_review_decision_precedence", REVIEW_MODULE)
+    blocker = {"severity": "blocking", "claim": "blocked", "evidenceFields": ["captureMetadata"]}
+    inputs = [assessment(decision, [blocker] if decision == "fail" else []) for decision in decisions]
+    result, summary = review_module._aggregate_assessments(inputs, {"captureMetadata"}, len(inputs))
+    assert result["decision"] == expected
+    assert summary["requiredInputCount"] == summary["completedInputCount"] == len(inputs)
+    review_module.validate_assessment(result, {"captureMetadata"})
+
+
+@pytest.mark.parametrize("inputs, required_count", [
+    ([], 0), ([], 1), ([assessment()], 2), ([assessment(), assessment()], 1),
+    ([assessment()], True), ([assessment()], -1), ([assessment()], 1.0),
+    ([None], 1), ([{"decision": "pass"}], 1),
+    ([assessment("fail")], 1),
+    ([assessment("pass", [{"severity": "blocking", "claim": "blocked", "evidenceFields": ["captureMetadata"]}])], 1),
+])
+def test_aggregation_refuses_incomplete_or_contradictory_inputs(inputs, required_count):
+    review_module = load_module("assisted_review_incomplete_aggregate", REVIEW_MODULE)
+    with pytest.raises(review_module.ReviewError):
+        review_module._aggregate_assessments(inputs, {"captureMetadata"}, required_count)
+
+
+def test_aggregation_refuses_blockers_that_exceed_the_output_bound():
+    review_module = load_module("assisted_review_blocker_overflow", REVIEW_MODULE)
+    blockers = [
+        {"severity": "blocking", "claim": f"blocker {index}", "evidenceFields": ["captureMetadata"]}
+        for index in range(33)
+    ]
+    with pytest.raises(review_module.ReviewError, match="incomplete.*blocking findings"):
+        review_module._aggregate_assessments(
+            [assessment("fail", blockers[:32]), assessment("fail", blockers[32:])], {"captureMetadata"}, 2
+        )
+
+
+def test_aggregation_retains_all_32_blockers_and_reports_optional_omissions():
+    review_module = load_module("assisted_review_blocker_boundary", REVIEW_MODULE)
+    blockers = [
+        {"severity": "blocking", "claim": f"blocker {index}", "evidenceFields": ["captureMetadata"]}
+        for index in range(32)
+    ]
+    optional = [
+        {"severity": "info", "claim": f"observation {index}", "evidenceFields": ["captureMetadata"]}
+        for index in range(64)
+    ]
+    inputs = [assessment(findings=optional[:32]), assessment(findings=optional[32:]), assessment("fail", blockers)]
+    result, summary = review_module._aggregate_assessments(inputs, {"captureMetadata"}, 3)
+    assert result["decision"] == "fail"
+    assert result["findings"] == blockers
+    assert summary["omittedNonBlockingFindingCount"] == 64
+
+
+def test_aggregation_uses_stable_severity_order_and_full_evidence_identity():
+    review_module = load_module("assisted_review_deduplication", REVIEW_MODULE)
+    info = {"severity": "info", "claim": "same observation", "evidenceFields": ["captureMetadata"]}
+    different_support = {**info, "evidenceFields": ["resourceSamples"]}
+    combined_support = {**info, "evidenceFields": ["resourceSamples", "captureMetadata"]}
+    warning = {"severity": "warning", "claim": "warning", "evidenceFields": ["captureMetadata"]}
+    blocker = {"severity": "blocking", "claim": "blocked", "evidenceFields": ["captureMetadata"]}
+    inputs = [
+        assessment(findings=[info, different_support, combined_support, warning]),
+        assessment("fail", [blocker, info, {**combined_support, "evidenceFields": list(reversed(combined_support["evidenceFields"]))}]),
+    ]
+    original = copy.deepcopy(inputs)
+    result, summary = review_module._aggregate_assessments(inputs, {"captureMetadata", "resourceSamples"}, 2)
+    assert result["findings"] == [blocker, warning, info, different_support,
+                                   {**combined_support, "evidenceFields": ["captureMetadata", "resourceSamples"]}]
+    assert inputs == original
+    assert review_module._aggregate_assessments(inputs, {"resourceSamples", "captureMetadata"}, 2) == (result, summary)
+
+
+def test_aggregation_does_not_pass_when_uncertainties_are_present():
+    review_module = load_module("assisted_review_uncertain_aggregate", REVIEW_MODULE)
+    inputs = [assessment(), assessment()]
+    inputs[0]["uncertainties"] = [f"unknown {index}" for index in range(32)]
+    inputs[1]["uncertainties"] = ["unknown 0", "unknown 32"]
+    inputs[1]["recommendation"] = "inspect the unresolved condition"
+    result, summary = review_module._aggregate_assessments(inputs, {"captureMetadata"}, 2)
+    assert result["decision"] == "inconclusive"
+    assert result["uncertainties"] == inputs[0]["uncertainties"]
+    assert summary["omittedUncertaintyCount"] == 1
+    assert summary["omittedRecommendationCount"] == 2
+
+
+def test_aggregation_revalidates_its_final_schema_and_decision(monkeypatch):
+    review_module = load_module("assisted_review_final_validation", REVIEW_MODULE)
+    original = review_module.validate_assessment
+    calls = []
+
+    def record_validation(value, approved_fields):
+        calls.append(copy.deepcopy(value))
+        return original(value, approved_fields)
+
+    monkeypatch.setattr(review_module, "validate_assessment", record_validation)
+    result, _summary = review_module._aggregate_assessments([assessment(), assessment()], {"captureMetadata"}, 2)
+    assert len(calls) == 3
+    assert calls[-1] == result
+
+
 def test_approved_images_are_hash_verified_and_sent_only_to_local_vision_model(tmp_path):
     review_module = load_module("assisted_review_images", REVIEW_MODULE)
     run_fixture = load_module("assisted_run_capture_fixture", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")

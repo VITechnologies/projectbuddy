@@ -177,6 +177,14 @@ def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
     assert receipt["pplProof"]["artifact"] == "lv_icon.lvlibp"
     assert receipt["approvedReviewModel"] == MODEL
     assert receipt["reviewModel"] == MODEL
+    assert receipt["reviewAggregation"] == {
+        "policyVersion": "projectbuddy/assessment-aggregation@1",
+        "requiredInputCount": 1,
+        "completedInputCount": 1,
+        "omittedNonBlockingFindingCount": 0,
+        "omittedUncertaintyCount": 0,
+        "omittedRecommendationCount": 0,
+    }
     assert [item["tool"] for item in receipt["mcp"]["calls"]] == ["get_host_capabilities", "get_benchmark_series"]
     assert all("resultSha256" in item and "text" not in item for item in receipt["mcp"]["calls"])
     assert receipt["assessment"]["decision"] == "pass"
