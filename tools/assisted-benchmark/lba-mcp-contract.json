@@ -1,0 +1,226 @@
+{
+  "schema": "projectbuddy/lba-mcp-contract@1",
+  "source": {
+    "repository": "svelderrainruiz/labview-benchmark-actor",
+    "revision": "7f65a2215b952e1f31bc3677087f14c8b528d789",
+    "serverName": "labview-benchmark-actor",
+    "serverVersion": "1.4.14",
+    "protocolVersion": "2025-06-18"
+  },
+  "authorizationSchema": "projectbuddy/assisted-benchmark-authorization@1",
+  "allowedEvidenceFields": [
+    "benchmarkResult",
+    "captureMetadata",
+    "frameImages",
+    "frameHashes",
+    "resourceSamples",
+    "vmIdentity",
+    "vmState"
+  ],
+  "toolGroups": {
+    "core": {
+      "required": true,
+      "tools": [
+        {
+          "name": "get_host_capabilities",
+          "effect": "read-only",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "get_benchmark_series",
+          "effect": "read-only",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "poll_coordination_bus",
+          "effect": "read-only",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "tail": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "How many of the most recent messages to read (default 10)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "post_coordination_note",
+          "effect": "coordination-write",
+          "mutatesState": true,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "ASCII coordination note body."
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    "acg-grid": {
+      "required": false,
+      "tools": [
+        {
+          "name": "spin_up_witness",
+          "effect": "plan-only",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "plane": {"type": "string", "enum": ["CODESPACE", "VBOX", "WIN"]}
+            },
+            "required": ["plane"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "run_quorum",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "bundles": {"type": "array", "items": {"type": "object"}},
+              "threshold": {"type": "number"}
+            },
+            "required": ["bundles"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "get_confidence",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "bundles": {"type": "array", "items": {"type": "object"}},
+              "threshold": {"type": "number"}
+            },
+            "required": ["bundles"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "verify_attestation",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "witnesses": {"type": "array", "items": {"type": "object"}},
+              "allowlist": {"type": "object"}
+            },
+            "required": ["witnesses"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "check_independence",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "witnesses": {"type": "array", "items": {"type": "object"}},
+              "enrollment": {"type": "object"}
+            },
+            "required": ["witnesses"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "assemble_witness",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "plane": {"type": "string"},
+              "gate": {"type": "object"},
+              "screenshot": {"type": "object"},
+              "capability": {"type": "object"},
+              "os": {"type": "string"},
+              "ubuntu": {"type": "string"}
+            },
+            "required": ["plane", "gate", "screenshot"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "verify_inclusion",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "attestation": {"type": "object"},
+              "inclusion": {"type": "object"},
+              "signedTreeHead": {"type": "object"},
+              "logPublicKeyPem": {"type": "string"}
+            },
+            "required": ["attestation", "inclusion", "signedTreeHead"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "verify_before_install",
+          "effect": "local-computation",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {"provenance": {"type": "object"}},
+            "required": ["provenance"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "teardown",
+          "effect": "plan-only",
+          "mutatesState": false,
+          "requiresVmLifecycle": false,
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "plane": {"type": "string", "enum": ["CODESPACE", "VBOX", "WIN"]},
+              "id": {"type": "string"}
+            },
+            "required": ["plane"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}
