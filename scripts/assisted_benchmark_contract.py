@@ -6,7 +6,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -175,6 +175,38 @@ def validate_snapshot(snapshot: object, contract: dict) -> dict:
     }
 
 
+def validate_review_privacy(policy: object) -> dict:
+    keys = {"schema", "imageMode", "frames", "retainModelText", "expiresAt"}
+    if not isinstance(policy, dict) or set(policy) != keys:
+        raise ContractError("review privacy policy fields are invalid")
+    if (policy["schema"] != "projectbuddy/ollama-privacy@1"
+            or policy["imageMode"] not in {"none", "full-frame", "regions"}
+            or policy["retainModelText"] is not False):
+        raise ContractError("review privacy policy mode is unsupported")
+    try:
+        expiry = datetime.fromisoformat(policy["expiresAt"].replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        raise ContractError("review privacy expiry is invalid") from None
+    if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
+        raise ContractError("review privacy policy expired or has no timezone; reuse refused, cleanup requires authorization")
+    frames = policy["frames"]
+    if (not isinstance(frames, list) or len(frames) > 3
+            or (policy["imageMode"] == "regions") != bool(frames)):
+        raise ContractError("review privacy regions are invalid")
+    indexes = set()
+    for frame in frames:
+        if (not isinstance(frame, dict) or set(frame) != {"index", "crop", "redactions"}
+                or type(frame["index"]) is not int or frame["index"] < 0 or frame["index"] in indexes
+                or not isinstance(frame["redactions"], list) or len(frame["redactions"]) > 128):
+            raise ContractError("review privacy frame policy is invalid")
+        indexes.add(frame["index"])
+        for box in [frame["crop"], *frame["redactions"]]:
+            if (not isinstance(box, list) or len(box) != 4 or any(type(value) is not int for value in box)
+                    or box[0] < 0 or box[1] < 0 or box[2] <= 0 or box[3] <= 0):
+                raise ContractError("review privacy region bounds are invalid")
+    return json.loads(json.dumps(policy))
+
+
 def validate_review_budget(budget: object, model_digest: str) -> dict:
     keys = {"schema", "accounting", "modelDigest", "contextTokens", "outputTokens", "templateReserveTokens",
             "imageTokensPerImage", "maxTextBytes", "maxImageBytes", "maxImagesPerRequest"}
@@ -208,7 +240,7 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
         "teardownOnNativePplFailure", "ollamaModel",
     }
     if (not isinstance(authorization, dict) or not required.issubset(authorization)
-            or set(authorization) - required - {"reviewBudget"}):
+            or set(authorization) - required - {"reviewBudget", "reviewPrivacy"}):
         raise ContractError("run authorization fields are invalid")
     if authorization["schema"] != AUTHORIZATION_SCHEMA:
         raise ContractError("unsupported run authorization schema")
@@ -278,6 +310,8 @@ def validate_authorization(authorization: object, contract: dict) -> dict:
     normalized["ollamaModel"] = {"tag": model["tag"], "digest": model["digest"].lower()}
     if "reviewBudget" in authorization:
         normalized["reviewBudget"] = validate_review_budget(authorization["reviewBudget"], normalized["ollamaModel"]["digest"])
+    if "reviewPrivacy" in authorization:
+        normalized["reviewPrivacy"] = validate_review_privacy(authorization["reviewPrivacy"])
     return normalized
 
 

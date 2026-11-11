@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ProjectBuddy.SourceConfig;
@@ -140,6 +141,100 @@ public class GenerationTests
             (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
         Assert.Equal(0, handler.InferenceRequests);
         Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public async Task GeneratedOutputsRequirePrivateCustody()
+    {
+        var settings = await Fixture();
+        Assert.True(await Generation.RunAsync(settings, (_, _) => Task.FromResult(Verdict(true))));
+        Generation.VerifyPrivate(settings.Output, true);
+        foreach (var path in Directory.GetFiles(settings.Output)) Generation.VerifyPrivate(path, false);
+        if (!OperatingSystem.IsWindows())
+        {
+            var evidence = Path.Combine(settings.Output, "evidence.json");
+            File.SetUnixFileMode(evidence, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+            Assert.Throws<InvalidDataException>(() => Generation.VerifyPrivate(evidence, false));
+        }
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("images")]
+    [InlineData("text-retention")]
+    public async Task InvalidPrivacyNeverReachesReview(string problem)
+    {
+        var settings = await Fixture();
+        settings = settings with { Privacy = problem switch
+        {
+            "expired" => settings.Privacy with { ExpiresAt = DateTimeOffset.Parse("2000-01-01T00:00:00Z") },
+            "images" => settings.Privacy with { ImageMode = "full-frame" },
+            _ => settings.Privacy with { RetainModelText = true }
+        }};
+        await Assert.ThrowsAsync<InvalidDataException>(() => Generation.RunAsync(settings,
+            (_, _) => throw new Exception("must not reach model")));
+        Assert.False(Directory.Exists(settings.Output));
+    }
+
+    [Fact]
+    public void ModelProseIsNotRetainedInStructuredReview()
+    {
+        const string canary = "PRIVATE_CANARY_8471";
+        var content = JsonSerializer.Serialize(new { decision = "reject", blockers = new[] { canary } });
+        using var response = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            model = "fixture:1", done = true, done_reason = "stop", message = new { content }
+        }));
+        var review = OllamaReview.Parse(response.RootElement, "fixture:1", new string('a', 64));
+        Assert.False(review.Accepted);
+        Assert.Single(review.Blockers);
+        Assert.DoesNotContain(canary, JsonSerializer.Serialize(review));
+        Assert.Equal(64, review.ModelOutputSha256!.Length);
+    }
+
+    [Fact]
+    public async Task ModelProseNeverReachesGeneratedEvidence()
+    {
+        var settings = await Fixture();
+        const string canary = "PRIVATE_CANARY_8471";
+        var content = JsonSerializer.Serialize(new { decision = "reject", blockers = new[] { canary } });
+        using var handler = new ReviewHttpHandler(Inventory(), reviewContent: content);
+        Assert.False(await Generation.RunAsync(settings, (approved, draft) => OllamaReview.RunAsync(approved, draft, handler)));
+        Assert.Equal(1, handler.InferenceRequests);
+        foreach (var path in Directory.GetFiles(settings.Output))
+        {
+            Assert.DoesNotContain(canary, await File.ReadAllTextAsync(path));
+            Generation.VerifyPrivate(path, false);
+        }
+    }
+
+    [Fact]
+    public async Task CliDiagnosticsDoNotEchoPrivateInputPaths()
+    {
+        var settings = await Fixture();
+        const string canary = "PRIVATE_CANARY_8471";
+        var options = new Dictionary<string, string>
+        {
+            ["root"] = settings.Root, ["manifest"] = settings.Manifest, ["build"] = settings.Build,
+            ["repository"] = settings.Repository, ["revision"] = settings.Revision, ["schema"] = settings.Schema,
+            ["output"] = settings.Output, ["ollama-url"] = settings.OllamaUrl, ["model"] = settings.Model,
+            ["model-digest"] = settings.ModelDigest, ["review-budget"] = Path.Combine(settings.Root, canary),
+            ["review-privacy"] = "unused-fixture-path"
+        };
+        var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        start.ArgumentList.Add(typeof(Generation).Assembly.Location);
+        foreach (var option in options)
+        {
+            start.ArgumentList.Add("--" + option.Key);
+            start.ArgumentList.Add(option.Value);
+        }
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var errors = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("source-config: refused (FileNotFoundException)", await errors);
+        Assert.DoesNotContain(canary, await output + await errors);
     }
 
     [Fact]
@@ -336,7 +431,8 @@ public class GenerationTests
 
     private sealed class ReviewHttpHandler(string preflight, string? postflight = null,
         bool unavailablePostflight = false, string responseModel = "fixture:1", bool unavailablePreflight = false,
-        string? metadataOverride = null, int? inputCount = 64, int? outputCount = 16, string reason = "stop") : HttpMessageHandler
+        string? metadataOverride = null, int? inputCount = 64, int? outputCount = 16, string reason = "stop",
+        string? reviewContent = null) : HttpMessageHandler
     {
         public int InventoryRequests { get; private set; }
         public int InferenceRequests { get; private set; }
@@ -364,7 +460,7 @@ public class GenerationTests
                 content = JsonSerializer.Serialize(new
                 {
                     model = responseModel, done = true, done_reason = reason, prompt_eval_count = inputCount, eval_count = outputCount,
-                    message = new { content = "{\"decision\":\"accept\",\"blockers\":[]}" }
+                    message = new { content = reviewContent ?? "{\"decision\":\"accept\",\"blockers\":[]}" }
                 });
             }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -391,6 +487,8 @@ public class GenerationTests
             Path.Combine(AppContext.BaseDirectory, "pipeline-config.schema.json"), Path.Combine(directory, "generated"),
             "http://127.0.0.1:11435", "fixture:1", new string('a', 64),
             new ReviewBudget("projectbuddy/ollama-budget@1", "utf8-byte-plus-approved-media@1", new string('a', 64),
-                16384, 512, 1024, 0, 65536, 0, 0));
+                16384, 512, 1024, 0, 65536, 0, 0),
+            new ReviewPrivacy("projectbuddy/ollama-privacy@1", "none", JsonSerializer.SerializeToElement(Array.Empty<object>()),
+                false, DateTimeOffset.Parse("2099-01-01T00:00:00Z")));
     }
 }

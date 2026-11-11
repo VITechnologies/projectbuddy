@@ -7,6 +7,36 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.SourceConfig;
 
+public sealed record ReviewPrivacy(string Schema, string ImageMode, JsonElement Frames,
+    bool RetainModelText, DateTimeOffset ExpiresAt)
+{
+    public void Validate()
+    {
+        Configuration.Require(Schema == "projectbuddy/ollama-privacy@1" && ImageMode == "none"
+            && Frames.ValueKind == JsonValueKind.Array && Frames.GetArrayLength() == 0 && !RetainModelText,
+            "Source-config requires a text-only minimized review privacy policy.");
+        Configuration.Require(ExpiresAt > DateTimeOffset.UtcNow,
+            "Review privacy policy expired; reuse refused, cleanup requires authorization.");
+    }
+
+    public static ReviewPrivacy Read(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        OllamaReview.ValidateJsonFields(document.RootElement);
+        Configuration.Require(document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Count() == 5, "Review privacy requires exactly five policy fields.");
+        Configuration.Require(document.RootElement.TryGetProperty("expiresAt", out var expiry)
+            && expiry.ValueKind == JsonValueKind.String
+            && Regex.IsMatch(expiry.GetString()!, "(?:Z|[+-][0-9]{2}:[0-9]{2})\\z"),
+            "Review privacy expiry requires an explicit timezone.");
+        return document.RootElement.Deserialize<ReviewPrivacy>(new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+        }) ?? throw new InvalidDataException("Invalid review privacy policy.");
+    }
+}
+
 public sealed record ReviewBudget(string Schema, string Accounting, string ModelDigest, int ContextTokens,
     int OutputTokens, int TemplateReserveTokens, int ImageTokensPerImage, int MaxTextBytes,
     int MaxImageBytes, int MaxImagesPerRequest)
@@ -111,6 +141,8 @@ public static class OllamaReview
             && Regex.IsMatch(settings.ModelDigest, "\\A[a-f0-9]{64}\\z"), "Select a caller-approved full lowercase SHA-256 model digest.");
         Configuration.Require(settings.Budget is not null, "An explicit approved review budget is required.");
         settings.Budget!.Validate(settings.ModelDigest!);
+        Configuration.Require(settings.Privacy is not null, "An explicit review privacy policy is required.");
+        settings.Privacy!.Validate();
     }
 
     public static Task<Review> RunAsync(Settings settings, Draft draft)
@@ -185,6 +217,7 @@ public static class OllamaReview
             }
         };
         var requestBudget = settings.Budget.Check(JsonSerializer.SerializeToElement(payload));
+        settings.Privacy.Validate();
         using var response = await client.PostAsJsonAsync("api/chat", payload);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -198,6 +231,7 @@ public static class OllamaReview
             "Ollama completion counts are missing or exceed the approved budget.");
         var review = Parse(document.RootElement, settings.Model, digest);
         Configuration.Require(await Digest() == settings.ModelDigest, "Model identity changed during review.");
+        settings.Privacy.Validate();
         return review with { RequestBudget = requestBudget, ModelBudget = modelBudget };
     }
 
@@ -218,6 +252,9 @@ public static class OllamaReview
         Configuration.Require(decision is "accept" or "reject" or "inconclusive", "Unknown review decision.");
         var blockers = verdict.GetProperty("blockers").EnumerateArray().Select(item => item.GetString() ?? throw new InvalidDataException("Invalid review blocker.")).ToArray();
         Configuration.Require(decision != "accept" || blockers.Length == 0, "An accept review cannot contain blockers.");
-        return new Review(decision!, blockers, model, digest);
+        return new Review(decision!, blockers.Select(_ => "Model reported a blocking or unresolved condition.").ToArray(), model, digest)
+        {
+            ModelOutputSha256 = Configuration.Hash(verdict.GetRawText())
+        };
     }
 }

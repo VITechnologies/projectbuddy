@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Tomlyn;
@@ -7,11 +9,13 @@ using Tomlyn;
 namespace ProjectBuddy.SourceConfig;
 
 public sealed record Settings(string Root, string Manifest, string Build, string Repository,
-    string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest, ReviewBudget Budget);
+    string Revision, string Schema, string Output, string OllamaUrl, string Model, string ModelDigest,
+    ReviewBudget Budget, ReviewPrivacy Privacy);
 public sealed record Review(string Decision, string[] Blockers, string Model, string Digest)
 {
     public ReviewRequestBudget? RequestBudget { get; init; }
     public ReviewModelBudget? ModelBudget { get; init; }
+    public string? ModelOutputSha256 { get; init; }
     public bool Accepted => Decision == "accept" && Blockers.Length == 0;
 }
 public sealed record InputFile(string Text, string Sha256);
@@ -66,10 +70,11 @@ public static class Generation
             },
             approvedOllama = new { model = settings.Model, digest = settings.ModelDigest },
             reviewBudget = settings.Budget,
+            reviewPrivacy = settings.Privacy,
             ollama = verdict
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Configuration.Require(!Directory.Exists(output) && !File.Exists(output), "Output appeared during review; refusing to write.");
-        Directory.CreateDirectory(output);
+        CreatePrivateDirectory(output);
         CheckLinks(output);
         foreach (var file in new Dictionary<string, string>
         {
@@ -79,9 +84,73 @@ public static class Generation
         })
         {
             await using var stream = new FileStream(Path.Combine(output, file.Key), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            ProtectPrivateFile(Path.Combine(output, file.Key));
             await stream.WriteAsync(Encoding.UTF8.GetBytes(file.Value));
         }
         return valid;
+    }
+
+    private static void CreatePrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var user = identity.User ?? throw new InvalidDataException("Current-user SID is unavailable.");
+            var security = new DirectorySecurity();
+            security.SetOwner(user);
+            security.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { user, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null) })
+                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(path).Create(security);
+        }
+        else
+            Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        CheckLinks(path);
+        VerifyPrivate(path, true);
+    }
+
+    private static void ProtectPrivateFile(string path)
+    {
+        CheckLinks(path);
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var security = new FileInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+            security.SetOwner(identity.User ?? throw new InvalidDataException("Current-user SID is unavailable."));
+            new FileInfo(path).SetAccessControl(security);
+        }
+        else
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        VerifyPrivate(path, false);
+    }
+
+    internal static void VerifyPrivate(string path, bool directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var user = identity.User ?? throw new InvalidDataException("Current-user SID is unavailable.");
+            FileSystemSecurity security = directory
+                ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner)
+                : new FileInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+            var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+            var allowed = new[] { user.Value, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value }.Distinct().ToArray();
+            var identities = new HashSet<string>();
+            var valid = security.GetOwner(typeof(SecurityIdentifier))!.Equals(user) && rules.Length == allowed.Length;
+            foreach (var rule in rules)
+            {
+                identities.Add(rule.IdentityReference.Value);
+                valid &= allowed.Contains(rule.IdentityReference.Value) && rule.AccessControlType == AccessControlType.Allow
+                    && (rule.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl;
+            }
+            Configuration.Require(valid && identities.Count == allowed.Length, "Generated evidence requires exact current-user-plus-SYSTEM access.");
+        }
+        else
+        {
+            var expected = UnixFileMode.UserRead | UnixFileMode.UserWrite | (directory ? UnixFileMode.UserExecute : 0);
+            Configuration.Require(File.GetUnixFileMode(path) == expected, "Generated evidence requires private custody.");
+        }
     }
 
     public static async Task<InputFile> ReadPinned(string root, string relative)

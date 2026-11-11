@@ -42,7 +42,8 @@ dotnet run --no-restore --project ProjectBuddy.SourceConfig -- \
   --ollama-url http://127.0.0.1:11435 \
   --model MODEL:TAG \
   --model-digest APPROVED_MODEL_SHA256 \
-  --review-budget /path/to/APPROVED_BUDGET.json
+  --review-budget /path/to/APPROVED_BUDGET.json \
+  --review-privacy /path/to/APPROVED_PRIVACY.json
 ```
 
 The same options work with native Windows paths in PowerShell; supply the
@@ -93,6 +94,29 @@ images. These example limits are not benchmark or GPU-capacity proof.
 
 ## Outputs And Gates
 
+`--review-privacy` is required and uses this text-only policy (set an explicit,
+future timezone-bearing expiry for the authorized run):
+
+```json
+{
+  "schema": "projectbuddy/ollama-privacy@1",
+  "imageMode": "none",
+  "frames": [],
+  "retainModelText": false,
+  "expiresAt": "<future ISO-8601 timestamp with timezone>"
+}
+```
+
+The engine never saves arbitrary model prose. Retained blockers are fixed
+host-authored summaries; a hash binds the original validated model result.
+Expired policies block inference/reuse, including postflight, without deleting
+operator-owned files. Entry-point errors identify their class without echoing
+private paths or untrusted model text. Generated outputs use a 0700 directory
+and 0600 files on Linux, or exact current-user-plus-SYSTEM access on Windows
+(the SID union is one identity when the current user is SYSTEM). Unsupported
+or unsafe custody fails closed. These controls are minimization, not a claim
+that a classifier or regex recognizes every possible secret.
+
 - `pipeline.json`: schema-validated native Windows route, pinned source commit,
   and source-derived artifact metadata, with automatic cleanup disabled. For a
   PPL, `artifactPath` is the file named by matching
@@ -141,3 +165,5 @@ Caller-approved model identity is specified in `REQ-109` and `TEST-111`
 (ProjectBuddy issue #230).
 Budget/completeness behavior is specified in `REQ-111` and `TEST-113`
 (ProjectBuddy issue #232).
+Disclosure/retention behavior is specified in `REQ-113` and `TEST-115`
+(ProjectBuddy issue #234).
