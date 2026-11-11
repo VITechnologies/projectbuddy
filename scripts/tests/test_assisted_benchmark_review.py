@@ -167,6 +167,258 @@ def test_cancelled_review_never_starts_a_request():
     assert transport.payloads == []
 
 
+def test_interrupted_assessment_resumes_without_repeating_completed_inference(tmp_path):
+    review_module = load_module("assisted_review_resume_fixture", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_resume_fixture", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(directory)
+    original = capture["frames"][0]
+    filename = "frame-00002.png"
+    (directory / filename).write_bytes((directory / original["frameFile"]).read_bytes())
+    capture["frames"].append({**original, "index": 1, "tMs": 1000, "frameFile": filename})
+    capture.update({"frameCount": 2, "durationMs": 1000})
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    checkpoint = private / "review.json"
+    auth = authorization(("frameImages",))
+
+    class Interrupted(FakeTransport):
+        def chat(self, payload):
+            if self.payloads:
+                raise review_module.ReviewTransportError("fixture interrupted")
+            return super().chat(payload)
+
+    first = Interrupted()
+    with pytest.raises(review_module.ReviewError):
+        review_module.review_evidence(capture, auth, contract(), first, directory, checkpoint_path=checkpoint)
+    assert len(first.payloads) == 1
+    partial = json.loads(checkpoint.read_text())
+    assert partial["complete"] is False
+    assert len(partial["records"]) == 1
+    resumed_transport = FakeTransport()
+    resumed = review_module.review_evidence(capture, auth, contract(), resumed_transport, directory,
+                                           checkpoint_path=checkpoint, resume=True)
+    assert len(resumed_transport.payloads) == 1
+    uninterrupted = review_module.review_evidence(capture, auth, contract(), FakeTransport(), directory)
+    assert resumed["assessment"] == uninterrupted["assessment"]
+    assert json.loads(checkpoint.read_text())["complete"] is False
+
+
+def checkpoint_fixture(tmp_path, name, response=None):
+    review_module = load_module(name, REVIEW_MODULE)
+    run_fixture = load_module(name + "_capture", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(directory)
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    checkpoint = private / "review.json"
+    auth = authorization(("frameImages",))
+    review_module.review_evidence(capture, auth, contract(), FakeTransport(response=response), directory, checkpoint_path=checkpoint)
+    return review_module, capture, auth, directory, checkpoint
+
+
+@pytest.mark.parametrize("changed", ["approval", "evidence", "model", "prompt", "schema", "budget", "privacy", "lifecycle", "frame"])
+def test_changed_checkpoint_identity_is_rejected_without_overwrite(tmp_path, monkeypatch, changed):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_identity")
+    before = checkpoint.read_bytes()
+    if changed == "approval":
+        auth["approvedBy"] = "different-operator"
+    elif changed == "evidence":
+        capture["deterministicIdentitySha256"] = "0" * 64
+    elif changed == "model":
+        auth["ollamaModel"]["digest"] = "0" * 64
+        auth["reviewBudget"]["modelDigest"] = "0" * 64
+    elif changed == "prompt":
+        monkeypatch.setattr(module, "PROMPT_VERSION", "changed")
+    elif changed == "schema":
+        monkeypatch.setattr(module, "ASSESSMENT_SCHEMA", "changed")
+    elif changed == "budget":
+        auth["reviewBudget"]["contextTokens"] += 1
+    elif changed == "privacy":
+        auth["reviewPrivacy"]["expiresAt"] = "2098-01-01T00:00:00Z"
+    elif changed == "lifecycle":
+        auth["reviewLifecycle"]["residencySeconds"] += 1
+    else:
+        capture["frames"][0]["tMs"] = 1
+    transport = FakeTransport()
+    with pytest.raises((module.ReviewError, module.CheckpointError), match="identity|integrity"):
+        module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert checkpoint.read_bytes() == before
+    assert transport.tag_calls == 0
+    assert transport.payloads == []
+
+
+@pytest.mark.parametrize("problem", ["json", "integrity", "mode", "hardlink", "symlink", "prose"])
+def test_corrupt_or_unsafe_checkpoint_is_refused(tmp_path, problem):
+    import os
+
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_corrupt")
+    if problem == "json":
+        checkpoint.write_text("{invalid-json")
+    elif problem == "integrity":
+        state = json.loads(checkpoint.read_text())
+        state["checkpointSha256"] = "0" * 64
+        checkpoint.write_text(json.dumps(state))
+    elif problem == "mode":
+        checkpoint.chmod(0o644)
+    elif problem == "hardlink":
+        os.link(checkpoint, checkpoint.with_name("other-link"))
+    elif problem == "symlink":
+        alias = checkpoint.with_name("alias.json")
+        alias.symlink_to(checkpoint)
+        checkpoint = alias
+    else:
+        state = json.loads(checkpoint.read_text())
+        state["records"][0]["assessment"]["recommendation"] = "PRIVATE_CANARY_8471"
+        state.pop("checkpointSha256")
+        state["checkpointSha256"] = hashlib.sha256(module._json_bytes(state)).hexdigest()
+        checkpoint.write_text(json.dumps(state))
+    before = checkpoint.read_bytes()
+    transport = FakeTransport()
+    with pytest.raises((module.ReviewError, module.CheckpointError, OSError)):
+        module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert checkpoint.read_bytes() == before
+    assert transport.payloads == []
+
+
+def test_checkpoint_exclusive_lock_refuses_a_concurrent_writer(tmp_path):
+    module, _capture, _auth, _directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_lock")
+    state = json.loads(checkpoint.read_text())
+    with module.CheckpointStore(checkpoint, state["bindingSha256"], True):
+        with pytest.raises(OSError):
+            with module.CheckpointStore(checkpoint, state["bindingSha256"], True):
+                pytest.fail("must not acquire an occupied checkpoint")
+
+
+def test_checkpoint_atomic_replace_failure_preserves_last_valid_state(tmp_path, monkeypatch):
+    import assisted_benchmark_checkpoint as checkpoint_module
+
+    module, _capture, _auth, _directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_atomic")
+    before = checkpoint.read_bytes()
+    state = json.loads(before)
+    with module.CheckpointStore(checkpoint, state["bindingSha256"], True) as store:
+        def fail_replace(source, target):
+            raise OSError("fixture atomic replacement failure")
+
+        monkeypatch.setattr(checkpoint_module.os, "replace", fail_replace)
+        with pytest.raises(OSError):
+            store.save(state["records"], state["lifecycle"], state["modelBudget"])
+    assert checkpoint.read_bytes() == before
+    assert list(checkpoint.parent.glob(".review-checkpoint-*")) == []
+
+
+def test_checkpoint_preserves_budget_and_minimized_output_without_raw_canaries(tmp_path):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_budget")
+    before = json.loads(checkpoint.read_text())
+    transport = FakeTransport()
+    result = module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert transport.payloads == []
+    assert transport.tag_calls == 2
+    assert result["checkpoint"]["reusedInputCount"] == 1
+    assert result["lifecycle"]["requestCount"] == before["lifecycle"]["requestCount"] + 3
+    assert result["lifecycle"]["consumedSeconds"] >= before["lifecycle"]["consumedSeconds"]
+    assert checkpoint.stat().st_mode & 0o777 == 0o600
+    assert checkpoint.parent.stat().st_mode & 0o777 == 0o700
+    state = json.loads(checkpoint.read_text())
+    assert state["complete"] is False
+    assert "_imagesBase64" not in checkpoint.read_text()
+    assert "messages" not in checkpoint.read_text()
+
+
+def test_checkpoint_retains_only_minimized_canary_results_and_preserves_a_failure(tmp_path):
+    canary = "PRIVATE_CANARY_8471"
+    content = assessment("fail", [{"severity": "blocking", "claim": canary, "evidenceFields": ["frameImages"]}])
+    content.update({"uncertainties": [canary], "recommendation": canary})
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_canary",
+                                                                   assessment_response(content=content))
+    assert canary not in checkpoint.read_text()
+    transport = FakeTransport()
+    result = module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert result["assessment"]["decision"] == "fail"
+    assert transport.payloads == []
+    assert canary not in json.dumps(result)
+
+
+@pytest.mark.parametrize("phase", ["preflight", "postflight", "template"])
+def test_resume_requires_fresh_model_identity_without_overwriting_old_state(tmp_path, phase):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_model_change")
+    before = checkpoint.read_bytes()
+
+    class ChangedTemplate(FakeTransport):
+        def show(self, model):
+            return {**super().show(model), "template": "changed-template"}
+
+    transport = ChangedTemplate() if phase == "template" else FakeTransport(
+        digests=["0" * 64] if phase == "preflight" else [MODEL["digest"], "0" * 64])
+    with pytest.raises(module.ReviewError):
+        module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert checkpoint.read_bytes() == before
+    assert transport.payloads == []
+
+
+def test_uncertain_inflight_checkpoint_reserves_budget_instead_of_resetting_it(tmp_path):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_inflight")
+    state = json.loads(checkpoint.read_text())
+    with module.CheckpointStore(checkpoint, state["bindingSha256"], True) as store:
+        store.save(state["records"], state["lifecycle"], state["modelBudget"], True)
+    result = module.review_evidence(capture, auth, contract(), FakeTransport(), directory, checkpoint_path=checkpoint, resume=True)
+    assert result["lifecycle"]["reservedUnknownRequestCount"] == 1
+    assert result["lifecycle"]["priorServerCompletionUnknown"] is True
+    assert result["lifecycle"]["consumedSeconds"] >= state["lifecycle"]["consumedSeconds"] + auth["reviewLifecycle"]["requestSeconds"]
+
+
+def test_expired_checkpoint_privacy_is_not_reused_or_deleted(tmp_path):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_expiry")
+    before = checkpoint.read_bytes()
+    auth["reviewPrivacy"]["expiresAt"] = "2000-01-01T00:00:00Z"
+    transport = FakeTransport()
+    with pytest.raises(module.ContractError, match="expired"):
+        module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert checkpoint.read_bytes() == before
+    assert transport.tag_calls == 0
+
+
+@pytest.mark.parametrize("problem", ["requests", "time"])
+def test_exhausted_checkpoint_lifecycle_is_not_reset(tmp_path, problem):
+    module, capture, auth, directory, checkpoint = checkpoint_fixture(tmp_path, "assisted_review_checkpoint_exhausted")
+    state = json.loads(checkpoint.read_text())
+    progress = dict(state["lifecycle"])
+    if problem == "requests":
+        progress["requestCount"] = auth["reviewLifecycle"]["maxRequests"]
+    else:
+        progress["consumedSeconds"] = auth["reviewLifecycle"]["totalSeconds"]
+    with module.CheckpointStore(checkpoint, state["bindingSha256"], True) as store:
+        store.save(state["records"], progress, state["modelBudget"])
+    before = checkpoint.read_bytes()
+    transport = FakeTransport()
+    with pytest.raises(module.ReviewError):
+        module.review_evidence(capture, auth, contract(), transport, directory, checkpoint_path=checkpoint, resume=True)
+    assert transport.tag_calls == 0
+    assert checkpoint.read_bytes() == before
+
+
+def test_checkpoint_unsupported_platform_fails_closed(tmp_path, monkeypatch):
+    import assisted_benchmark_checkpoint as checkpoint_module
+    from types import SimpleNamespace
+
+    with monkeypatch.context() as changes:
+        changes.setattr(checkpoint_module, "os", SimpleNamespace(name="nt"))
+        with pytest.raises(checkpoint_module.CheckpointError, match="unsupported"):
+            checkpoint_module.CheckpointStore(tmp_path / "private" / "state.json", "a" * 64, False)
+
+
+def test_duplicate_verdict_fields_are_rejected_without_retry():
+    module = load_module("assisted_review_duplicate_verdict", REVIEW_MODULE)
+    response = assessment_response()
+    response["message"]["content"] = '{"decision":"fail","decision":"pass","findings":[],"uncertainties":[],"recommendation":"ok"}'
+    transport = FakeTransport(response=response)
+    auth = authorization()
+    auth["reviewLifecycle"]["maxRetries"] = 3
+    with pytest.raises(module.ReviewError, match="duplicate JSON fields"):
+        module.review_evidence(evidence(), auth, contract(), transport)
+    assert len(transport.payloads) == 1
+
+
 @pytest.mark.parametrize("overall, request_seconds", [(1, 1), (10, 1)])
 def test_monotonic_deadline_stops_after_slow_preflight(overall, request_seconds):
     review_module = load_module("assisted_review_monotonic_deadline", REVIEW_MODULE)

@@ -296,3 +296,25 @@ def test_receipt_writer_refuses_a_public_directory(tmp_path: Path):
     public.chmod(0o755)
     with pytest.raises(module.RunError, match="must be private"):
         module.write_private_receipt(public / "receipt.json", {"runId": "run-0001"})
+
+
+@pytest.mark.parametrize("schema", ["projectbuddy/assisted-review-checkpoint@1", "projectbuddy/assisted-benchmark-run@1"])
+def test_partial_checkpoint_cannot_masquerade_as_final_receipt(tmp_path, schema):
+    module = load_module("assisted_run_checkpoint_is_not_success", SCRIPTS / "assisted_benchmark_run.py")
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "receipt.json"
+    with pytest.raises(module.RunError, match="partial checkpoint"):
+        module.write_private_receipt(output, {"schema": schema, "complete": False, "records": []})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("problem", ["missing-checkpoint", "same-output"])
+def test_invalid_checkpoint_cli_options_fail_before_external_work(tmp_path, capsys, problem):
+    module = load_module("assisted_run_invalid_resume_options", SCRIPTS / "assisted_benchmark_run.py")
+    missing = str(tmp_path / "not-read.json")
+    args = ["--authorization", missing, "--capture-directory", missing, "--ppl-proof", missing,
+            "--contract", missing, "--ollama-url", "http://127.0.0.1:11434", "--output", missing]
+    args += ["--resume"] if problem == "missing-checkpoint" else ["--checkpoint", missing]
+    assert module.main(args + ["--mcp-command", "must-not-run"]) == 2
+    assert "RunError" in capsys.readouterr().err

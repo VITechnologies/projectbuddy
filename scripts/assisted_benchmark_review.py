@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+from contextlib import nullcontext
 import base64
 import ipaddress
 import io
@@ -18,6 +19,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from assisted_benchmark_checkpoint import CheckpointError, CheckpointStore
 from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy, validate_review_lifecycle
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
@@ -57,10 +59,36 @@ class ReviewLifecycle:
         self.started = clock()
         self.requests = 0
         self.retries = 0
+        self.prior_seconds = 0.0
+        self.reserved_requests = 0
         self.check()
 
     def remaining(self) -> float:
-        return self.policy["totalSeconds"] - (self.clock() - self.started)
+        return self.policy["totalSeconds"] - self.prior_seconds - (self.clock() - self.started)
+
+    def restore(self, progress: object, uncertain: bool = False) -> None:
+        if not isinstance(progress, dict) or set(progress) != {"requestCount", "retryCount", "consumedSeconds", "reservedUnknownRequestCount"}:
+            raise ReviewError("checkpoint lifecycle progress is invalid")
+        if (type(progress["requestCount"]) is not int or not 0 <= progress["requestCount"] <= self.policy["maxRequests"]
+                or type(progress["retryCount"]) is not int or not 0 <= progress["retryCount"] <= progress["requestCount"]
+                or type(progress["reservedUnknownRequestCount"]) is not int
+                or not 0 <= progress["reservedUnknownRequestCount"] <= progress["requestCount"]
+                or type(progress["consumedSeconds"]) not in {int, float} or not math.isfinite(progress["consumedSeconds"])
+                or not 0 <= progress["consumedSeconds"] < self.policy["totalSeconds"]):
+            raise ReviewError("checkpoint lifecycle progress is outside approval")
+        reserve = self.policy["maxRetries"] + 1 if uncertain else 0
+        self.requests += progress["requestCount"] + reserve
+        self.reserved_requests += progress["reservedUnknownRequestCount"] + reserve
+        self.retries += progress["retryCount"]
+        self.prior_seconds += progress["consumedSeconds"] + reserve * self.policy["requestSeconds"]
+        if self.requests >= self.policy["maxRequests"]:
+            raise ReviewError("checkpoint has exhausted the approved request budget")
+        self.check()
+
+    def progress(self) -> dict:
+        return {"requestCount": self.requests, "retryCount": self.retries,
+            "reservedUnknownRequestCount": self.reserved_requests,
+                "consumedSeconds": round(max(0.0, self.prior_seconds + self.clock() - self.started), 6)}
 
     def check(self) -> None:
         if self.cancel_event.is_set():
@@ -96,8 +124,8 @@ class ReviewLifecycle:
 
     def summary(self) -> dict:
         self.check()
-        return {"policy": self.policy, "requestCount": self.requests, "retryCount": self.retries,
-                "consumedSeconds": round(max(0.0, self.clock() - self.started), 6), "outcome": "completed",
+        return {"policy": self.policy, **self.progress(), "outcome": "completed",
+            "priorServerCompletionUnknown": self.reserved_requests > 0,
                 "serverCompletion": "responses received; no forced unload or daemon mutation"}
 
 
@@ -119,6 +147,15 @@ class LifecycleTransport:
 
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _unique_json_fields(pairs):
+    fields = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ReviewError("local Ollama response has duplicate JSON fields")
+        fields[key] = value
+    return fields
 
 
 def _capture_projection(evidence: dict) -> dict:
@@ -519,14 +556,6 @@ class LocalOllama:
         return LocalOllama(self.endpoint, self.timeout, self.http_transport, lifecycle)
 
     def _request(self, path: str, payload: dict | None = None) -> dict:
-        def unique_fields(pairs):
-            fields = {}
-            for key, value in pairs:
-                if key in fields:
-                    raise ReviewError("local Ollama response has duplicate JSON fields")
-                fields[key] = value
-            return fields
-
         data = _json_bytes(payload) if payload is not None else None
         timeout = min(self.timeout, self.lifecycle.policy["requestSeconds"], self.lifecycle.remaining()) if self.lifecycle else self.timeout
 
@@ -584,7 +613,7 @@ class LocalOllama:
         else:
             raise ReviewError("synchronous model review requires a non-async caller")
         try:
-            result = json.loads(raw, object_pairs_hook=unique_fields)
+            result = json.loads(raw, object_pairs_hook=_unique_json_fields)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ReviewError("local Ollama response is not valid JSON") from error
         if not isinstance(result, dict):
@@ -666,8 +695,108 @@ def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], r
     return result, summary
 
 
+def minimize_input(assessment: dict) -> dict:
+    finding_hashes = [hashlib.sha256(_json_bytes(finding)).hexdigest() for finding in assessment["findings"]]
+    safe = {"decision": assessment["decision"],
+            "findings": [{**finding, "claim": f"Model finding ({digest})."}
+                         for finding, digest in zip(assessment["findings"], finding_hashes, strict=True)],
+            "uncertainties": [f"Model uncertainty ({hashlib.sha256(item.encode()).hexdigest()})." for item in assessment["uncertainties"]],
+            "recommendation": f"Model recommendation ({hashlib.sha256(assessment['recommendation'].encode()).hexdigest()})."
+                              if assessment["recommendation"] else ""}
+    return {"assessment": safe, "assessmentSha256": hashlib.sha256(_json_bytes(assessment)).hexdigest(),
+            "findingSha256": finding_hashes}
+
+
+def validate_retained_input(record: object, fields: set[str], frame_ids: set[str]) -> dict:
+    if (not isinstance(record, dict) or set(record) != {"assessment", "assessmentSha256", "findingSha256"}
+            or not isinstance(record["assessmentSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", record["assessmentSha256"])
+            or not isinstance(record["findingSha256"], list)):
+        raise ReviewError("checkpoint assessment identity is invalid")
+    assessment = validate_assessment(record["assessment"], fields, frame_ids)
+    if len(assessment["findings"]) != len(record["findingSha256"]):
+        raise ReviewError("checkpoint finding identity count is invalid")
+    for finding, digest in zip(assessment["findings"], record["findingSha256"], strict=True):
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest) or finding["claim"] != f"Model finding ({digest}).":
+            raise ReviewError("checkpoint model prose is not permitted")
+    if (any(not re.fullmatch(r"Model uncertainty \([a-f0-9]{64}\)\.", item) for item in assessment["uncertainties"])
+            or assessment["recommendation"] and not re.fullmatch(r"Model recommendation \([a-f0-9]{64}\)\.", assessment["recommendation"])):
+        raise ReviewError("checkpoint model prose is not permitted")
+    return {**record, "assessment": assessment}
+
+
+def collect_review_inputs(evidence, approved, selected, requests, budgets, positions, reviewed, transport, lifecycle,
+                          checkpoint_path, resume):
+    if resume and checkpoint_path is None:
+        raise ReviewError("resume requires an explicit private checkpoint path")
+    binding = hashlib.sha256(_json_bytes({"authorization": approved, "evidence": evidence, "selected": selected,
+        "requests": [item["requestSha256"] for item in budgets], "promptVersion": PROMPT_VERSION,
+        "assessmentSchema": ASSESSMENT_SCHEMA, "samplingPolicy": "projectbuddy/first-middle-last@1"})).hexdigest()
+    context = CheckpointStore(checkpoint_path, binding, resume) if checkpoint_path is not None else nullcontext(None)
+    with context as checkpoint:
+        records = []
+        if checkpoint is not None and checkpoint.state is not None:
+            if len(checkpoint.state["records"]) > len(requests):
+                raise ReviewError("checkpoint has more completed inputs than the approved review")
+            for index, record in enumerate(checkpoint.state["records"]):
+                frame_ids = {reviewed[positions[index]]["frameId"]} if positions[index] is not None else set()
+                records.append(validate_retained_input(record, set(selected), frame_ids))
+            lifecycle.restore(checkpoint.state["lifecycle"], checkpoint.state["inFlight"])
+        reused = len(records)
+        model = approved["ollamaModel"]
+        _verify_model(transport, model)
+        metadata = transport.show(model["tag"])
+        if "frameImages" in selected and (not isinstance(metadata, dict) or "vision" not in metadata.get("capabilities", [])):
+            raise ReviewError("approved frameImages require a locally installed vision-capable Ollama model")
+        limits = model_budget(metadata, approved["reviewBudget"])
+        if checkpoint is not None and checkpoint.state is not None and checkpoint.state["modelBudget"] != limits:
+            raise ReviewError("checkpoint model/template identity changed")
+        persist_failure_progress = False
+        try:
+            for index in range(len(records), len(requests)):
+                validate_review_privacy(approved["reviewPrivacy"])
+                if checkpoint is not None:
+                    checkpoint.save(records, lifecycle.progress(), limits, True)
+                persist_failure_progress = True
+                response = transport.chat(requests[index])
+                if (response.get("model") != model["tag"] or response.get("done") is not True
+                        or response.get("done_reason") != "stop" or "error" in response):
+                    raise ReviewError("local Ollama review was incomplete or used a different model")
+                if (type(response.get("prompt_eval_count")) is not int or not 0 < response["prompt_eval_count"] <= budgets[index]["inputTokenUpperBound"]
+                        or type(response.get("eval_count")) is not int or not 0 < response["eval_count"] <= approved["reviewBudget"]["outputTokens"]):
+                    raise ReviewError("local Ollama completion counts are missing or exceed the approved budget")
+                message = response.get("message")
+                if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                    raise ReviewError("local Ollama review content is invalid")
+                try:
+                    assessment = json.loads(message["content"], object_pairs_hook=_unique_json_fields)
+                except json.JSONDecodeError:
+                    raise ReviewError("local Ollama assessment is not valid JSON") from None
+                frame_ids = {reviewed[positions[index]]["frameId"]} if positions[index] is not None else set()
+                validated = validate_assessment(assessment, set(selected), frame_ids)
+                persist_failure_progress = False
+                if checkpoint is not None:
+                    _verify_model(transport, model)
+                records.append(minimize_input(validated))
+                if checkpoint is not None:
+                    checkpoint.save(records, lifecycle.progress(), limits)
+            _verify_model(transport, model)
+            validate_review_privacy(approved["reviewPrivacy"])
+            if checkpoint is not None:
+                checkpoint.save(records, lifecycle.progress(), limits)
+        except BaseException:
+            if checkpoint is not None and persist_failure_progress:
+                try:
+                    checkpoint.save(records, lifecycle.progress(), limits)
+                except Exception:
+                    pass
+            raise
+        summary = {"enabled": checkpoint is not None, "reusedInputCount": reused,
+                   "checkpointSha256": checkpoint.digest if checkpoint is not None else None, "partialIsNotSuccess": True}
+        return records, limits, summary
+
+
 def review_evidence(evidence: object, authorization: object, contract: dict, transport, capture_directory: Path | None = None,
-                    cancel_event=None, clock=time.monotonic, wait=None) -> dict:
+                    cancel_event=None, clock=time.monotonic, wait=None, checkpoint_path: Path | None = None, resume: bool = False) -> dict:
     approved = validate_authorization(authorization, contract)
     if "reviewLifecycle" not in approved:
         raise ReviewError("an explicit review lifecycle policy is required")
@@ -681,45 +810,22 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
     if image_count > lifecycle.policy["maxImageCount"]:
         raise ReviewError("review lifecycle image-count bound exceeded")
     model = approved["ollamaModel"]
-    _verify_model(transport, model)
-    show = getattr(transport, "show", None)
-    metadata = show(model["tag"]) if callable(show) else None
-    if "frameImages" in selected:
-        if not isinstance(metadata, dict) or "vision" not in metadata.get("capabilities", []):
-            raise ReviewError("approved frameImages require a locally installed vision-capable Ollama model")
-    model_limits = model_budget(metadata, budget)
     positions = range(image_count) if image_count > 1 else [0] if image_count == 1 else [None]
-    assessments = []
     positions = list(positions)
     requests = [build_review_request(model["tag"], selected, position, lifecycle.policy["residencySeconds"], budget)
                 for position in positions]
     budgets = [request_budget(payload, budget) for payload in requests]
     reviewed = selected.get("frameImages", {}).get("frames", [])
     frame_ids = {frame["frameId"] for frame in reviewed}
-    for call_index, image_position in enumerate(positions):
-        validate_review_privacy(approved["reviewPrivacy"])
-        response = transport.chat(requests[call_index])
-        if (response.get("model") != model["tag"] or response.get("done") is not True
-                or response.get("done_reason") != "stop" or "error" in response):
-            raise ReviewError("local Ollama review was incomplete or used a different model")
-        if (type(response.get("prompt_eval_count")) is not int or not 0 < response["prompt_eval_count"] <= budgets[call_index]["inputTokenUpperBound"]
-                or type(response.get("eval_count")) is not int or not 0 < response["eval_count"] <= budget["outputTokens"]):
-            raise ReviewError("local Ollama completion counts are missing or exceed the approved budget")
-        message = response.get("message")
-        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-            raise ReviewError("local Ollama review content is invalid")
-        try:
-            assessment_data = json.loads(message["content"])
-        except json.JSONDecodeError as error:
-            raise ReviewError("local Ollama assessment is not valid JSON") from error
-        request_frames = {reviewed[image_position]["frameId"]} if image_position is not None else set()
-        assessments.append(validate_assessment(assessment_data, set(selected), request_frames))
-
+    records, model_limits, checkpoint_summary = collect_review_inputs(evidence, approved, selected, requests, budgets,
+        positions, reviewed, transport, lifecycle, checkpoint_path, resume)
+    assessments = [record["assessment"] for record in records]
     assessment, aggregation = _aggregate_assessments(assessments, set(selected), len(positions), frame_ids)
-    _verify_model(transport, model)
     privacy = validate_review_privacy(approved["reviewPrivacy"])
-    model_assessment_hash = hashlib.sha256(_json_bytes(assessment)).hexdigest()
-    finding_hashes = [hashlib.sha256(_json_bytes(finding)).hexdigest() for finding in assessment["findings"]]
+    model_assessment_hash = hashlib.sha256(_json_bytes([record["assessmentSha256"] for record in records])).hexdigest()
+    finding_identities = {_json_bytes(finding): digest for record in records
+                         for finding, digest in zip(record["assessment"]["findings"], record["findingSha256"], strict=True)}
+    finding_hashes = [finding_identities[_json_bytes(finding)] for finding in assessment["findings"]]
     assessment = {
         "decision": assessment["decision"],
         "findings": [{**finding, "claim": f"Model reported a {finding['severity']} finding; inspect approved evidence."}
@@ -751,9 +857,11 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "modelBudget": model_limits,
         "reviewPrivacy": privacy,
         "modelAssessmentSha256": model_assessment_hash,
+        "modelAssessmentHashPolicy": "ordered-input-digests@1",
         "findingSha256": finding_hashes,
         "sampling": sampling,
         "lifecycle": lifecycle.summary(),
+        "checkpoint": checkpoint_summary,
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

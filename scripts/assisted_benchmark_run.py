@@ -25,6 +25,7 @@ from assisted_benchmark_contract import (
     validate_snapshot,
 )
 from assisted_benchmark_review import LocalOllama, ReviewError, review_evidence
+from assisted_benchmark_checkpoint import CheckpointError
 
 RUN_SCHEMA = "projectbuddy/assisted-benchmark-run@1"
 MAX_MCP_LINE_BYTES = 4 * 1024 * 1024
@@ -264,6 +265,9 @@ def write_private_receipt(path: Path, receipt: dict) -> None:
         raise RunError("receipt directory must not contain symlinked path components")
     if stat.S_IMODE(parent.stat().st_mode) & 0o077:
         raise RunError("receipt directory must be private (mode 0700 or stricter)")
+    if (not isinstance(receipt, dict) or receipt.get("schema") != RUN_SCHEMA
+            or "records" in receipt or "complete" in receipt):
+        raise RunError("partial checkpoint data cannot be written as a final run receipt")
     payload = canonical_json(receipt) + b"\n"
     descriptor, temporary_name = tempfile.mkstemp(prefix=".assisted-benchmark-", dir=parent)
     temporary_path = Path(temporary_name)
@@ -291,6 +295,8 @@ def orchestrate(
     mcp_client,
     ollama_transport,
     capture_directory: Path | None = None,
+    checkpoint_path: Path | None = None,
+    resume: bool = False,
 ) -> dict:
     print("[assisted-benchmark] validating run authorization", file=sys.stderr, flush=True)
     approved = validate_authorization(authorization, contract)
@@ -322,7 +328,8 @@ def orchestrate(
     print("[assisted-benchmark] validating stopped capture evidence", file=sys.stderr, flush=True)
     review_input = {**capture, "benchmarkResult": proof}
     print("[assisted-benchmark] requesting local Ollama assessment", file=sys.stderr, flush=True)
-    assessment = review_evidence(review_input, approved, contract, ollama_transport, capture_directory)
+    assessment = review_evidence(review_input, approved, contract, ollama_transport, capture_directory,
+                                 checkpoint_path=checkpoint_path, resume=resume)
     print("[assisted-benchmark] local assessment complete", file=sys.stderr, flush=True)
     core = {
         "schema": RUN_SCHEMA,
@@ -350,9 +357,11 @@ def orchestrate(
         "reviewModelBudget": assessment["modelBudget"],
         "reviewPrivacy": assessment["reviewPrivacy"],
         "modelAssessmentSha256": assessment["modelAssessmentSha256"],
+        "modelAssessmentHashPolicy": assessment["modelAssessmentHashPolicy"],
         "findingSha256": assessment["findingSha256"],
         "reviewSampling": assessment["sampling"],
         "reviewLifecycle": assessment["lifecycle"],
+        "reviewCheckpoint": assessment["checkpoint"],
         "reviewPromptVersion": assessment["promptVersion"],
         "reviewedFrameCount": assessment["reviewedFrameCount"],
         "advisoryOnly": assessment["advisoryOnly"],
@@ -369,16 +378,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--ollama-url", required=True)
     parser.add_argument("--output", type=Path, required=True, help="new absolute receipt path in a private directory")
+    parser.add_argument("--checkpoint", type=Path, help="private POSIX partial-review state, never a success receipt")
+    parser.add_argument("--resume", action="store_true", help="reuse only an exactly matching private checkpoint")
     parser.add_argument("--mcp-command", nargs="+", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.resume and args.checkpoint is None:
+            raise RunError("resume requires an explicit private checkpoint path")
+        if args.checkpoint is not None and args.checkpoint.absolute() == args.output.absolute():
+            raise RunError("checkpoint and final receipt paths must be different")
         contract = load_contract(args.contract)
         authorization = json.loads(args.authorization.read_text(encoding="utf-8"))
         capture = validate_capture(args.capture_directory, contract["source"]["serverVersion"], contract["source"]["revision"])
         proof = json.loads(args.ppl_proof.read_text(encoding="utf-8"))
         with McpStdioClient(args.mcp_command) as mcp:
             receipt = orchestrate(
-                authorization, contract, capture, proof, mcp, LocalOllama(args.ollama_url), args.capture_directory
+                authorization, contract, capture, proof, mcp, LocalOllama(args.ollama_url), args.capture_directory,
+                args.checkpoint, args.resume
             )
         write_private_receipt(args.output, receipt)
         print(json.dumps({"status": "complete", "runId": receipt["runId"], "receiptSha256": receipt["receiptSha256"]}, sort_keys=True))
@@ -386,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("assisted-benchmark-run: cancelled; server completion may be unknown", file=sys.stderr)
         return 130
-    except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError) as error:
+    except (OSError, json.JSONDecodeError, ContractError, CaptureError, ReviewError, RunError, CheckpointError) as error:
         print(f"assisted-benchmark-run: refused ({type(error).__name__}); no success; server completion may be unknown", file=sys.stderr)
         return 2
 
