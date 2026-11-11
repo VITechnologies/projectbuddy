@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from assisted_benchmark_contract import ContractError, validate_authorization, validate_review_budget, validate_review_privacy
 
 ASSESSMENT_SCHEMA = "projectbuddy/assisted-benchmark-assessment@1"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 MAX_REVIEW_INPUT_BYTES = 512 * 1024
 MAX_REVIEW_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_CAPTURE_FRAME_BYTES = 8 * 1024 * 1024
@@ -190,8 +190,18 @@ def select_evidence(evidence: object, authorization: object, contract: dict, cap
                 total_image_bytes += image_bytes
                 if total_image_bytes > MAX_REVIEW_IMAGE_BYTES:
                     raise ReviewError("approved frameImages exceed the aggregate image-size bound")
+                timestamp = frame.get("tMs")
+                if timestamp is not None and (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float))
+                                              or not math.isfinite(timestamp) or timestamp < 0):
+                    raise ReviewError("selected frame timestamp is invalid")
+                frame_identity = {
+                    "runId": approved["runId"], "index": frame["index"], "tMs": timestamp,
+                    "sourceSha256": digest, "submittedSha256": hashlib.sha256(submitted).hexdigest(),
+                    "privacyPolicySha256": hashlib.sha256(_json_bytes(privacy)).hexdigest(),
+                }
                 frame_summaries.append({
                     "index": frame["index"], "sha256": digest,
+                    "tMs": timestamp, "frameId": hashlib.sha256(_json_bytes(frame_identity)).hexdigest(),
                     "width": width, "height": height,
                     "submittedSha256": hashlib.sha256(submitted).hexdigest(),
                     "privacyPolicySha256": hashlib.sha256(_json_bytes(privacy)).hexdigest(),
@@ -218,8 +228,8 @@ def select_evidence(evidence: object, authorization: object, contract: dict, cap
     return selected
 
 
-def assessment_schema(approved_fields: list[str]) -> dict:
-    return {
+def assessment_schema(approved_fields: list[str], frame_ids: list[str] | None = None) -> dict:
+    schema = {
         "type": "object",
         "properties": {
             "decision": {"type": "string", "enum": ["pass", "fail", "inconclusive"]},
@@ -242,6 +252,11 @@ def assessment_schema(approved_fields: list[str]) -> dict:
         "required": ["decision", "findings", "uncertainties", "recommendation"],
         "additionalProperties": False,
     }
+    if "frameImages" in approved_fields:
+        finding = schema["properties"]["findings"]["items"]
+        finding["properties"]["frameRefs"] = {"type": "array", "items": {"type": "string", "enum": frame_ids or []}}
+        finding["required"].append("frameRefs")
+    return schema
 
 
 def model_budget(metadata: object, budget: dict) -> dict:
@@ -313,7 +328,7 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
         "model": model_tag,
         "stream": False,
         "keep_alive": keep_alive,
-        "format": assessment_schema(approved_fields),
+        "format": assessment_schema(approved_fields, [frame["frameId"] for frame in prompt_fields.get("frameImages", {}).get("frames", [])]),
         "options": {"num_ctx": budget["contextTokens"], "num_predict": budget["outputTokens"], "temperature": 0, "seed": 42},
         "messages": [
             {
@@ -323,6 +338,8 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
                     "Use only the supplied evidence; cite finding support by evidenceFields. Do not invent measurements, "
                     "commands, file paths, or source details. If evidence is insufficient, choose inconclusive. "
                     "Never request credentials or propose unapproved VM/tool actions. Return only the required JSON object."
+                    " Image findings must cite supplied frameId values in frameRefs. Only the submitted sample was reviewed; "
+                    "never claim an unreviewed interval or event is absent from the capture."
                 ),
             },
             user_message,
@@ -332,7 +349,7 @@ def build_review_request(model_tag: str, selected_evidence: dict, image_position
     return payload
 
 
-def validate_assessment(value: object, approved_fields: set[str]) -> dict:
+def validate_assessment(value: object, approved_fields: set[str], reviewed_frames: set[str] | None = None) -> dict:
     if not isinstance(value, dict) or set(value) != {"decision", "findings", "uncertainties", "recommendation"}:
         raise ReviewError("assessment must contain exactly decision, findings, uncertainties, and recommendation")
     if not isinstance(value["decision"], str) or value["decision"] not in ALLOWED_DECISIONS:
@@ -342,7 +359,8 @@ def validate_assessment(value: object, approved_fields: set[str]) -> dict:
     has_blocker = False
     findings = []
     for finding in value["findings"]:
-        if not isinstance(finding, dict) or set(finding) != {"severity", "claim", "evidenceFields"}:
+        if (not isinstance(finding, dict) or not {"severity", "claim", "evidenceFields"}.issubset(finding)
+            or set(finding) - {"severity", "claim", "evidenceFields", "frameRefs"}):
             raise ReviewError("assessment finding schema is invalid")
         if not isinstance(finding["severity"], str) or finding["severity"] not in ALLOWED_SEVERITIES:
             raise ReviewError("assessment finding severity is invalid")
@@ -353,8 +371,20 @@ def validate_assessment(value: object, approved_fields: set[str]) -> dict:
             raise ReviewError("assessment finding cites unapproved evidence")
         if len(set(refs)) != len(refs):
             raise ReviewError("assessment finding has duplicate evidence references")
+        frame_refs = finding.get("frameRefs", [])
+        if (not isinstance(frame_refs, list) or any(not isinstance(ref, str) for ref in frame_refs)
+                or len(set(frame_refs)) != len(frame_refs)
+                or ("frameRefs" in finding and "frameImages" not in approved_fields)
+                or ("frameImages" in approved_fields and "frameRefs" not in finding)
+                or ("frameImages" in refs and not frame_refs)
+                or (frame_refs and ("frameImages" not in refs or reviewed_frames is None
+                                   or any(ref not in reviewed_frames for ref in frame_refs)))):
+            raise ReviewError("image finding must cite only submitted frame identities")
         has_blocker |= finding["severity"] == "blocking"
-        findings.append({"severity": finding["severity"], "claim": finding["claim"], "evidenceFields": refs})
+        normalized = {"severity": finding["severity"], "claim": finding["claim"], "evidenceFields": refs}
+        if "frameRefs" in finding:
+            normalized["frameRefs"] = sorted(frame_refs)
+        findings.append(normalized)
     if (not isinstance(value["uncertainties"], list)
             or any(not isinstance(item, str) or len(item) > 2000 for item in value["uncertainties"])
             or len(value["uncertainties"]) > 32):
@@ -457,11 +487,12 @@ def _verify_model(transport, model: dict) -> None:
         raise ReviewError("approved Ollama model tag/digest is not installed locally")
 
 
-def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], required_count: int) -> tuple[dict, dict]:
+def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], required_count: int,
+                           reviewed_frames: set[str] | None = None) -> tuple[dict, dict]:
     if (not isinstance(required_count, int) or isinstance(required_count, bool) or required_count < 1
             or not isinstance(assessments, list) or len(assessments) != required_count):
         raise ReviewError("assessment aggregation requires all expected inputs")
-    validated = [validate_assessment(item, approved_fields) for item in assessments]
+    validated = [validate_assessment(item, approved_fields, reviewed_frames) for item in assessments]
     findings = []
     finding_keys = set()
     uncertainties = []
@@ -490,7 +521,7 @@ def _aggregate_assessments(assessments: list[dict], approved_fields: set[str], r
         "uncertainties": uncertainties[:32],
         "recommendation": recommendations[0] if len(recommendations) == 1 else "Review the combined per-frame findings and uncertainties.",
     }
-    result = validate_assessment(combined, approved_fields)
+    result = validate_assessment(combined, approved_fields, reviewed_frames)
     summary = {
         "policyVersion": "projectbuddy/assessment-aggregation@1",
         "requiredInputCount": required_count,
@@ -523,6 +554,8 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
     requests = [build_review_request(model["tag"], selected, position,
                 "5m" if index < len(positions) - 1 else 0, budget) for index, position in enumerate(positions)]
     budgets = [request_budget(payload, budget) for payload in requests]
+    reviewed = selected.get("frameImages", {}).get("frames", [])
+    frame_ids = {frame["frameId"] for frame in reviewed}
     for call_index, image_position in enumerate(positions):
         validate_review_privacy(approved["reviewPrivacy"])
         response = transport.chat(requests[call_index])
@@ -539,9 +572,10 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
             assessment_data = json.loads(message["content"])
         except json.JSONDecodeError as error:
             raise ReviewError("local Ollama assessment is not valid JSON") from error
-        assessments.append(validate_assessment(assessment_data, set(selected)))
+        request_frames = {reviewed[image_position]["frameId"]} if image_position is not None else set()
+        assessments.append(validate_assessment(assessment_data, set(selected), request_frames))
 
-    assessment, aggregation = _aggregate_assessments(assessments, set(selected), len(positions))
+    assessment, aggregation = _aggregate_assessments(assessments, set(selected), len(positions), frame_ids)
     _verify_model(transport, model)
     privacy = validate_review_privacy(approved["reviewPrivacy"])
     model_assessment_hash = hashlib.sha256(_json_bytes(assessment)).hexdigest()
@@ -553,6 +587,15 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "uncertainties": ["Model reported unresolved evidence; operator review required." for _ in assessment["uncertainties"]],
         "recommendation": "Retain verified evidence." if assessment["decision"] == "pass" else "Operator review required.",
     }
+    known_times = [frame["tMs"] for frame in reviewed if frame["tMs"] is not None]
+    available_frames = len(evidence.get("frames", []))
+    sampling = {"policyVersion": "projectbuddy/first-middle-last@1", "maxFrames": 3,
+                "coverageScope": "submitted-frames-only" if reviewed else "metadata-only",
+                "availableFrameCount": available_frames, "reviewedFrameCount": len(reviewed),
+                "unreviewedFrameCount": max(0, available_frames - len(reviewed)),
+                "allManifestFramesReviewed": bool(reviewed) and len(reviewed) == available_frames,
+                "unknownTimestampCount": sum(frame["tMs"] is None for frame in reviewed),
+                "knownTimeRangeMs": [min(known_times), max(known_times)] if known_times else None, "frames": reviewed}
     evidence_hash = hashlib.sha256(_json_bytes(selected)).hexdigest()
     return {
         "schema": ASSESSMENT_SCHEMA,
@@ -569,6 +612,7 @@ def review_evidence(evidence: object, authorization: object, contract: dict, tra
         "reviewPrivacy": privacy,
         "modelAssessmentSha256": model_assessment_hash,
         "findingSha256": finding_hashes,
+        "sampling": sampling,
         "reviewedFrameCount": image_count,
         "advisoryOnly": True,
     }

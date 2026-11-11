@@ -110,7 +110,15 @@ class FakeTransport:
     def chat(self, payload):
         self.payload = payload
         self.payloads.append(payload)
-        return copy.deepcopy(self.response)
+        response = copy.deepcopy(self.response)
+        data = json.loads(payload["messages"][1]["content"])
+        if "frameImages" in data:
+            content = json.loads(response["message"]["content"])
+            for finding in content.get("findings", []):
+                finding.setdefault("frameRefs", [data["frameImages"]["frames"][0]["frameId"]]
+                                   if "frameImages" in finding["evidenceFields"] else [])
+            response["message"]["content"] = json.dumps(content)
+        return response
 
 
 def assessment_response(model=None, content=None, done=True, reason="stop"):
@@ -215,7 +223,7 @@ def test_incomplete_or_over_budget_completion_is_not_an_assessment(field, value)
 def test_image_payload_must_fit_the_explicit_media_budget():
     review_module = load_module("assisted_review_media_budget", REVIEW_MODULE)
     budget = {**authorization()["reviewBudget"], "maxImageBytes": 1}
-    selected = {"frameImages": {"frames": [{"index": 0, "sha256": "a" * 64}], "_imagesBase64": ["YWJj"]}}
+    selected = {"frameImages": {"frames": [{"index": 0, "sha256": "a" * 64, "frameId": "f" * 64}], "_imagesBase64": ["YWJj"]}}
     with pytest.raises(review_module.ReviewError, match="image budget"):
         review_module.build_review_request(MODEL["tag"], selected, review_budget=budget)
 
@@ -370,6 +378,84 @@ def test_model_output_must_be_complete_and_use_the_approved_model():
         review_module.review_evidence(evidence(), authorization(), contract(), wrong_model)
 
 
+def test_image_findings_require_submitted_frame_references():
+    review_module = load_module("assisted_review_frame_refs_required", REVIEW_MODULE)
+    finding = {"severity": "blocking", "claim": "visible condition", "evidenceFields": ["frameImages"]}
+    with pytest.raises(review_module.ReviewError, match="frame"):
+        review_module.validate_assessment(assessment("fail", [finding]), {"frameImages"})
+
+
+@pytest.mark.parametrize("references", [[], ["0" * 64], ["a" * 64, "a" * 64]])
+def test_image_findings_reject_unreviewed_or_duplicate_references(references):
+    review_module = load_module("assisted_review_invalid_frame_refs", REVIEW_MODULE)
+    finding = {"severity": "blocking", "claim": "visible condition", "evidenceFields": ["frameImages"], "frameRefs": references}
+    with pytest.raises(review_module.ReviewError, match="frame"):
+        review_module.validate_assessment(assessment("fail", [finding]), {"frameImages"}, {"a" * 64})
+
+
+def test_frame_identity_is_bound_to_run_and_submitted_image(tmp_path):
+    review_module = load_module("assisted_review_frame_run_binding", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_frame_run_binding", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(directory)
+    auth = authorization(("frameImages",))
+    selected = review_module.select_evidence(capture, auth, contract(), directory)
+    first = selected["frameImages"]["frames"][0]
+    other_capture = {**capture, "runId": "run-other"}
+    other_auth = {**auth, "runId": "run-other"}
+    second = review_module.select_evidence(other_capture, other_auth, contract(), directory)["frameImages"]["frames"][0]
+    assert first["frameId"] != second["frameId"]
+    assert first["submittedSha256"] == second["submittedSha256"]
+    finding = {"severity": "blocking", "claim": "foreign run", "evidenceFields": ["frameImages"], "frameRefs": [first["frameId"]]}
+    with pytest.raises(review_module.ReviewError, match="frame"):
+        review_module.validate_assessment(assessment("fail", [finding]), {"frameImages"}, {second["frameId"]})
+    capture["frames"][0]["sha256"] = "0" * 64
+    transport = FakeTransport()
+    with pytest.raises(review_module.ReviewError, match="verified hash"):
+        review_module.review_evidence(capture, auth, contract(), transport, directory)
+    assert transport.payloads == []
+
+
+def test_sampling_reports_unreviewed_transient_and_unknown_time(tmp_path):
+    from PIL import Image
+
+    review_module = load_module("assisted_review_transient_coverage", REVIEW_MODULE)
+    run_fixture = load_module("assisted_run_transient_coverage", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
+    directory = tmp_path / "run-0001"
+    capture = run_fixture.make_capture(directory)
+    source_frame = capture["frames"][0]
+    default_bytes = (directory / source_frame["frameFile"]).read_bytes()
+    event = io.BytesIO()
+    Image.new("RGB", (1, 1), "red").save(event, format="PNG")
+    frames = []
+    for index in range(5):
+        data = event.getvalue() if index == 1 else default_bytes
+        filename = f"frame-{index + 1:05d}.png"
+        (directory / filename).write_bytes(data)
+        frames.append({**source_frame, "index": index, "tMs": None if index == 2 else index * 1000,
+                       "sha256": hashlib.sha256(data).hexdigest(), "frameFile": filename})
+    capture.update({"frames": frames, "frameCount": 5, "durationMs": 4000})
+    finding = {"severity": "info", "claim": "event absent across entire capture", "evidenceFields": ["frameImages"]}
+    transport = FakeTransport(response=assessment_response(content=assessment(findings=[finding])))
+    result = review_module.review_evidence(capture, authorization(("frameImages",)), contract(), transport, directory)
+    sampling = result["sampling"]
+    assert sampling["coverageScope"] == "submitted-frames-only"
+    assert sampling["availableFrameCount"] == 5
+    assert sampling["unreviewedFrameCount"] == 2
+    assert sampling["allManifestFramesReviewed"] is False
+    assert sampling["unknownTimestampCount"] == 1
+    assert sampling["knownTimeRangeMs"] == [0, 4000]
+    assert [frame["index"] for frame in sampling["frames"]] == [0, 2, 4]
+    assert sampling["frames"][1]["tMs"] is None
+    assert "entire capture" not in json.dumps(result)
+    ids = {frame["frameId"] for frame in sampling["frames"]}
+    assert len(result["assessment"]["findings"]) == 3
+    assert {finding["frameRefs"][0] for finding in result["assessment"]["findings"]} == ids
+    for payload in transport.payloads:
+        frame_id = json.loads(payload["messages"][1]["content"])["frameImages"]["frames"][0]["frameId"]
+        assert payload["format"]["properties"]["findings"]["items"]["properties"]["frameRefs"]["items"]["enum"] == [frame_id]
+
+
 def test_aggregation_preserves_a_blocker_after_more_than_32_earlier_findings(tmp_path):
     review_module = load_module("assisted_review_late_blocker", REVIEW_MODULE)
     run_fixture = load_module("assisted_run_late_blocker", REPOSITORY / "scripts" / "tests" / "test_assisted_benchmark_run.py")
@@ -393,7 +479,10 @@ def test_aggregation_preserves_a_blocker_after_more_than_32_earlier_findings(tmp
 
     class SequentialTransport(FakeTransport):
         def chat(self, payload):
-            response = responses[len(self.payloads)]
+            response = copy.deepcopy(responses[len(self.payloads)])
+            frame_id = json.loads(payload["messages"][1]["content"])["frameImages"]["frames"][0]["frameId"]
+            for finding in response["findings"]:
+                finding["frameRefs"] = [frame_id]
             self.payloads.append(payload)
             return assessment_response(content=response)
 
@@ -402,8 +491,9 @@ def test_aggregation_preserves_a_blocker_after_more_than_32_earlier_findings(tmp
     )
     assert result["assessment"]["decision"] == "fail"
     assert any(finding["severity"] == "blocking" for finding in result["assessment"]["findings"])
-    assert hashlib.sha256(review_module._json_bytes(blocker)).hexdigest() in result["findingSha256"]
-    review_module.validate_assessment(result["assessment"], {"frameImages"})
+    blocker_identity = {**blocker, "frameRefs": result["assessment"]["findings"][0]["frameRefs"]}
+    assert hashlib.sha256(review_module._json_bytes(blocker_identity)).hexdigest() in result["findingSha256"]
+    review_module.validate_assessment(result["assessment"], {"frameImages"}, {frame["frameId"] for frame in result["sampling"]["frames"]})
     assert result["aggregation"]["omittedNonBlockingFindingCount"] == 2
     assert result["aggregation"]["completedInputCount"] == 3
 
@@ -503,9 +593,9 @@ def test_aggregation_revalidates_its_final_schema_and_decision(monkeypatch):
     original = review_module.validate_assessment
     calls = []
 
-    def record_validation(value, approved_fields):
+    def record_validation(value, approved_fields, reviewed_frames=None):
         calls.append(copy.deepcopy(value))
-        return original(value, approved_fields)
+        return original(value, approved_fields, reviewed_frames)
 
     monkeypatch.setattr(review_module, "validate_assessment", record_validation)
     result, _summary = review_module._aggregate_assessments([assessment(), assessment()], {"captureMetadata"}, 2)
