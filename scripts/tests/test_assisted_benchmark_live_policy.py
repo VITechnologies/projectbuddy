@@ -152,6 +152,15 @@ def test_policy_compiles_stable_one_vm_provision_permit_and_sealed_grant():
     assert checked["authorization"]["teardownOnNativePplFailure"] is False
 
 
+def test_policy_canonicalizes_valid_uppercase_model_digest():
+    value = policy()
+    value["authorizationTemplate"]["ollamaModel"]["digest"] = MODEL_DIGEST.upper()
+    trusted = trusted_digest(value)
+    grant = grant_for(value=value)
+    checked = live_policy.validate_run_grant(grant, value, contract(), trusted, NOW)
+    assert checked["authorization"]["ollamaModel"]["digest"] == MODEL_DIGEST
+
+
 def test_provision_permit_claim_is_private_and_non_replayable(tmp_path):
     with live_policy.ProvisioningLock() as host_lock:
         permit = live_policy.compile_provision_permit(policy(), contract(), RUN_ID, [EXISTING_VM],
