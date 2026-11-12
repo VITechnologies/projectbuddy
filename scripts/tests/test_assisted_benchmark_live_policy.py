@@ -825,6 +825,138 @@ def choice_policy(contract_value=None):
     return value, selected_contract
 
 
+@pytest.fixture
+def live_choice_dispatcher():
+    from types import SimpleNamespace
+    from assisted_benchmark_active_capture import RESOURCE_CONTRACT
+    from assisted_benchmark_mcp_router import LiveChoiceDispatcher, PinnedMcpRouter
+    from assisted_benchmark_synthetic_ui import SyntheticUiWorkload
+    from test_assisted_benchmark_contract import snapshot
+
+    value, contract_value = choice_policy()
+    template = value["authorizationTemplate"]
+    template["evidenceFields"] = ["captureMetadata", "frameHashes", "frameImages", "resourceSamples"]
+    template["ollamaModel"]["tag"] = "projectbuddy:0.1-qwen2.5-7b"
+    template["reviewPrivacy"]["imageMode"] = "full-frame"
+    template["reviewLifecycle"]["maxImageCount"] = 1
+    template["reviewBudget"].update(contextTokens=16384, imageTokensPerImage=2048,
+                                  maxImageBytes=8 * 1024 * 1024, maxImagesPerRequest=1)
+    contract_value["servers"]["lba"]["captureResources"] = copy.deepcopy(RESOURCE_CONTRACT)
+    grant = grant_for(value, contract_value)
+    broker = live_policy.LiveRunBroker(grant, value, contract_value, trusted_digest(value), clock=lambda: NOW)
+    workload = SyntheticUiWorkload(99)
+    calls = []
+    fail_ack = [False]
+
+    class Client:
+        async def call_tool(self, tool, arguments):
+            calls.append((tool, arguments))
+            acknowledgement = workload.submit_action(arguments["targetId"]) if tool == "click_target" else None
+            if fail_ack[0] == "error" and tool == "click_target":
+                return {"isError": True, "structuredContent": acknowledgement}
+            if fail_ack[0] is True and tool == "click_target":
+                acknowledgement = None
+            return SimpleNamespace(is_error=False, structured_content=acknowledgement)
+    router = PinnedMcpRouter(contract_value, broker.authorization,
+                             {server_id: snapshot(server) for server_id, server in contract_value["servers"].items()},
+                             {server_id: Client() for server_id in contract_value["servers"]}, clock=lambda: NOW)
+
+    async def prefix():
+        call = broker.calls[0]
+        decision = broker.begin_call(call["tool"], call["arguments"], CREATED_VM, call["serverId"])
+        await router.dispatch(decision)
+        broker.complete_call(True)
+    asyncio.run(prefix())
+    actor = contract_value["servers"]["lba"]
+    binding = {"schema": "projectbuddy/active-capture-binding@1", "grantRunId": grant["runId"], "vmUuid": CREATED_VM,
+               "captureRunId": "a0f4e148-02c2-46ac-a36d-dbdcb897187d", "actorSource": actor["source"], "contractSha256": live_policy.sha256(actor)}
+    dispatcher = LiveChoiceDispatcher(broker, router, binding, "lba", "synthetic-ui")
+    context = {"binding": binding, "captureState": "capturing", "frameSequence": 1, "modelDigest": MODEL_DIGEST}
+    choice = {"action": "approve", "captureRunId": binding["captureRunId"], "frameId": f"{binding['captureRunId']}:1"}
+    return dispatcher, broker, workload, calls, fail_ack, choice, context
+
+
+@pytest.mark.parametrize("action", ["approve", "hold"])
+def test_live_capture_choice_consumes_the_existing_sealed_grant_exactly_once(live_choice_dispatcher, action):
+    dispatcher, broker, workload, calls, _, choice, context = live_choice_dispatcher
+    choice["action"] = action
+
+    async def run():
+        assert await dispatcher.dispatch_selection(choice, context) is True
+        assert await dispatcher.dispatch_selection({**choice, "action": "hold"}, context) is False
+    asyncio.run(run())
+    assert dispatcher.applied and workload.state == "decision_recorded"
+    assert calls[-1][1]["targetId"] == action
+    assert [tool for tool, _arguments in calls] == ["get_host_capabilities", "click_target"]
+    with pytest.raises(live_policy.LivePolicyError):
+        broker.begin_call("click_target", {"taskId": workload.task_id, "targetId": "hold"}, CREATED_VM, "synthetic-ui")
+
+
+@pytest.mark.parametrize("problem", ["stopped", "frame", "vm", "model", "action"])
+def test_invalid_live_choice_aborts_without_action_or_retry(live_choice_dispatcher, problem):
+    from assisted_benchmark_mcp_router import McpRouterError
+    dispatcher, _, workload, calls, _, choice, context = live_choice_dispatcher
+    if problem == "stopped":
+        context["captureState"] = "stopped"
+    elif problem == "frame":
+        choice["frameId"] = "other"
+    elif problem == "vm":
+        context["binding"] = {**context["binding"], "vmUuid": EXISTING_VM}
+    elif problem == "model":
+        context["modelDigest"] = "0" * 64
+    else:
+        choice["action"] = "unapproved"
+
+    async def run():
+        with pytest.raises(McpRouterError):
+            await dispatcher.dispatch_selection(choice, context)
+        with pytest.raises(McpRouterError):
+            await dispatcher.dispatch_selection(choice, context)
+    asyncio.run(run())
+    assert workload.state == "awaiting_decision" and len(calls) == 1
+
+
+def test_uncertain_live_choice_acknowledgement_never_retries(live_choice_dispatcher):
+    from assisted_benchmark_mcp_router import McpRouterError
+    dispatcher, _, workload, calls, fail_ack, choice, context = live_choice_dispatcher
+    fail_ack[0] = True
+
+    async def run():
+        with pytest.raises(McpRouterError):
+            await dispatcher.dispatch_selection(choice, context)
+        with pytest.raises(McpRouterError):
+            await dispatcher.dispatch_selection(choice, context)
+    asyncio.run(run())
+    assert workload.state == "decision_recorded" and len(calls) == 2 and not dispatcher.applied
+
+
+def test_error_flag_cannot_be_overridden_by_success_shaped_acknowledgement(live_choice_dispatcher):
+    from assisted_benchmark_mcp_router import McpRouterError
+    dispatcher, _, _, calls, fail_ack, choice, context = live_choice_dispatcher
+    fail_ack[0] = "error"
+    with pytest.raises(McpRouterError):
+        asyncio.run(dispatcher.dispatch_selection(choice, context))
+    assert dispatcher.outcome_unknown and not dispatcher.applied and len(calls) == 2
+
+
+def test_live_dispatcher_requires_canonical_capture_uuid(live_choice_dispatcher):
+    from assisted_benchmark_mcp_router import LiveChoiceDispatcher, McpRouterError
+    dispatcher, broker, _, calls, _, _, _ = live_choice_dispatcher
+    binding = {**dispatcher.binding, "captureRunId": "../untrusted"}
+    with pytest.raises(McpRouterError):
+        LiveChoiceDispatcher(broker, dispatcher._router, binding, "lba", "synthetic-ui")
+    assert len(calls) == 1
+
+
+def test_live_dispatcher_refuses_contract_mutation_after_sealing(live_choice_dispatcher):
+    from assisted_benchmark_mcp_router import McpRouterError
+    dispatcher, broker, workload, calls, _, choice, context = live_choice_dispatcher
+    broker.contract["servers"]["synthetic-ui"]["source"]["revision"] = "0" * 40
+    with pytest.raises(McpRouterError):
+        asyncio.run(dispatcher.dispatch_selection(choice, context))
+    assert workload.state == "awaiting_decision" and len(calls) == 1
+
+
 @pytest.mark.parametrize("problem", ["candidate-count", "duplicate", "server", "tool", "different-tool"])
 def test_call_choice_group_is_narrow_and_server_bound(problem):
     value, contract_value = choice_policy()

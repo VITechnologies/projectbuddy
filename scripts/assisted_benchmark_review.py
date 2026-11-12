@@ -719,17 +719,113 @@ class LocalOllama:
     def chat(self, payload: dict) -> dict:
         if type(payload.get("keep_alive")) is not int or not 1 <= payload["keep_alive"] <= 300:
             raise ReviewError("requested model residency must be a bounded TTL, not an unload")
-            options = payload.get("options")
-            if (not isinstance(options, dict) or type(options.get("num_gpu")) is not int or options["num_gpu"] != 0
-                or type(options.get("num_thread")) is not int or not 1 <= options["num_thread"] <= 8):
-                raise ReviewError("local review transport requires explicit supported CPU execution options")
+        options = payload.get("options")
+        if (not isinstance(options, dict) or type(options.get("num_gpu")) is not int or options["num_gpu"] != 0
+            or type(options.get("num_thread")) is not int or not 1 <= options["num_thread"] <= 8):
+            raise ReviewError("local review transport requires explicit supported CPU execution options")
         return self._request("/api/chat", payload)
+
+    async def _metadata_async(self, path: str, payload: dict | None = None) -> dict:
+        try:
+            async with asyncio.timeout(self.timeout):
+                async with httpx.AsyncClient(transport=self.http_transport, trust_env=False, follow_redirects=False, timeout=self.timeout) as client:
+                    async with client.stream("POST" if payload is not None else "GET", f"{self.endpoint}{path}",
+                                             content=_json_bytes(payload) if payload is not None else None,
+                                             headers={"Accept-Encoding": "identity", "Content-Type": "application/json"}) as response:
+                        if not response.is_success or response.headers.get("Content-Encoding", "identity").lower() != "identity":
+                            raise ReviewError("local model metadata request was refused")
+                        raw = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
+                                raise ReviewError("local model metadata exceeds the response bound")
+                            raw.extend(chunk)
+            value = json.loads(raw, object_pairs_hook=_unique_json_fields)
+            if not isinstance(value, dict):
+                raise ReviewError("local model metadata must be an object")
+            return value
+        except (TimeoutError, httpx.TimeoutException):
+            raise ReviewDeadlineError("local metadata deadline exceeded") from None
+        except httpx.TransportError:
+            raise ReviewTransportError("local metadata transport failed", False) from None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ReviewError("local metadata is malformed") from None
+
+    async def tags_async(self) -> dict:
+        return await self._metadata_async("/api/tags")
+
+    async def show_async(self, model: str) -> dict:
+        return await self._metadata_async("/api/show", {"model": model})
+
+    async def stream_chat(self, payload: dict):
+        if (not isinstance(payload, dict) or payload.get("stream") is not True
+                or type(payload.get("keep_alive")) is not int or not 1 <= payload["keep_alive"] <= 300):
+            raise ReviewError("streaming requires an explicit bounded residency and stream flag")
+        options = payload.get("options")
+        if (not isinstance(options, dict) or type(options.get("num_gpu")) is not int or options["num_gpu"] != 0
+                or type(options.get("num_thread")) is not int or not 1 <= options["num_thread"] <= 8):
+            raise ReviewError("streaming requires approved CPU execution options")
+        timeout = min(self.timeout, self.lifecycle.policy["requestSeconds"], self.lifecycle.remaining()) if self.lifecycle else self.timeout
+        data = _json_bytes(payload)
+        finished = False
+        received = 0
+        buffer = b""
+
+        def decode(line):
+            nonlocal finished
+            if finished:
+                raise ReviewError("local stream contains trailing output")
+            try:
+                item = json.loads(line, object_pairs_hook=_unique_json_fields)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise ReviewError("local stream contains malformed JSON") from None
+            if (not isinstance(item, dict) or "error" in item or type(item.get("done")) is not bool
+                    or item.get("model") != payload.get("model")):
+                raise ReviewError("local stream identity or terminal marker is invalid")
+            message = item.get("message", {})
+            if (not isinstance(message, dict) or set(message) - {"role", "content", "thinking"}
+                    or message.get("role", "assistant") != "assistant"
+                    or not isinstance(message.get("content", ""), str)
+                    or not isinstance(message.get("thinking", ""), str)):
+                raise ReviewError("local stream message is invalid")
+            finished = item["done"]
+            return {"content": message.get("content", ""), "done": finished, "evalCount": item.get("eval_count")}
+
+        try:
+            async with asyncio.timeout(timeout):
+                async with httpx.AsyncClient(transport=self.http_transport, trust_env=False, follow_redirects=False, timeout=timeout) as client:
+                    async with client.stream("POST", f"{self.endpoint}/api/chat", content=data,
+                                             headers={"Accept-Encoding": "identity", "Content-Type": "application/json"}) as response:
+                        if not response.is_success or response.headers.get("Content-Encoding", "identity").lower() != "identity":
+                            raise ReviewError("local streaming response is rejected or compressed")
+                        async for chunk in response.aiter_bytes():
+                            if self.lifecycle:
+                                self.lifecycle.check()
+                            received += len(chunk)
+                            if received > MAX_RESPONSE_BYTES:
+                                raise ReviewError("local stream exceeds the response bound")
+                            buffer += chunk
+                            while b"\n" in buffer:
+                                line, buffer = buffer.split(b"\n", 1)
+                                if line.strip():
+                                    yield decode(line)
+                        if buffer.strip():
+                            yield decode(buffer)
+                        if not finished:
+                            raise ReviewError("local stream ended without a terminal record")
+        except (TimeoutError, httpx.TimeoutException):
+            raise ReviewDeadlineError("local streaming deadline exceeded; server completion is unknown") from None
+        except httpx.TransportError:
+            raise ReviewTransportError("local streaming transport failed; server completion is unknown", False) from None
 
 
 def _verify_model(transport, model: dict, phase: str = "identity-preflight") -> None:
     if isinstance(transport, LifecycleTransport):
         transport.phase = phase
     response = transport.tags()
+    _validate_model_inventory(response, model)
+
+
+def _validate_model_inventory(response: object, model: dict) -> None:
     models = response.get("models") if isinstance(response, dict) else None
     if not isinstance(models, list):
         raise ReviewError("local Ollama model inventory is invalid")
