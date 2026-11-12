@@ -28,6 +28,9 @@ release's notes for the exact pinned commit.
 - Pin the authorized local Actor producer commit in a separate local-only
   manifest with strict base-contract/source/resource validation. The default
   production contract and live activation remain unchanged.
+- Advance the opt-in pin to the published 1.5.0 standalone Windows desktop
+  candidate and require explicit desktop workload admission. Native VM/live
+  qualification remains blocked on the tracked Vagrant/VirtualBox import error.
 - Restore the synchronous Ollama chat CPU-option guard, which was unreachable
   beneath the residency error branch; invalid execution options now fail before
   HTTP dispatch, matching the streaming transport's fail-closed policy.

@@ -176,10 +176,20 @@ def test_current_production_contract_cannot_enable_active_reads(setup):
     assert not client.calls
 
 
+def test_desktop_capture_requires_explicit_workload_binding(setup):
+    module, _, _, _, client, create = setup
+    client.session["workload"] = "desktop-capture"
+    with pytest.raises(module.ActiveCaptureError):
+        asyncio.run(create().poll())
+    result = asyncio.run(create(capture_workload="desktop-capture").poll())
+    assert result["state"] == "stopped" and not result["incomplete"]
+
+
 def test_local_capture_pin_is_immutable_and_does_not_enable_default_contract(setup):
     module, _, _, _, _, _ = setup
     candidate = module.load_active_capture_contract()
-    assert candidate["source"]["revision"] == "06630fa47ad53d5a21ce490532811e1894b005fa"
+    assert candidate["source"]["revision"] == "b408dd706fc8f85b478e4a49f9156e47ec65b6cd"
+    assert candidate["source"]["serverVersion"] == "1.5.0"
     assert candidate["captureResources"] == module.RESOURCE_CONTRACT
     assert "captureResources" not in load_contract()
 
@@ -374,8 +384,10 @@ def test_observed_watermarks_cannot_shrink_to_hide_missing_evidence(setup):
 
 @pytest.mark.skipif(not os.environ.get("PROJECTBUDDY_ACTOR_FIXTURE_SERVER"), reason="requires an explicit compiled Actor candidate for local fixture-only interop")
 @pytest.mark.parametrize("adapter", ["raw", "sdk"])
-def test_compiled_actor_stdio_fixture_interoperability(setup, tmp_path, adapter):
+@pytest.mark.parametrize("capture_workload", ["labview-launch", "desktop-capture"])
+def test_compiled_actor_stdio_fixture_interoperability(setup, tmp_path, adapter, capture_workload):
     module, contract, grant, binding, fake, create = setup
+    fake.session["workload"] = capture_workload
     if adapter == "sdk":
         contract = module.load_active_capture_contract()
         grant["sourceRevision"] = contract["source"]["revision"]
@@ -408,7 +420,7 @@ def test_compiled_actor_stdio_fixture_interoperability(setup, tmp_path, adapter)
             assert response["id"] == request_id and "error" not in response
             return response["result"]
         fake.read_resource = read
-        consumer = create()
+        consumer = create(capture_workload=capture_workload)
         try:
             result = await consumer.poll()
             assert result["state"] == "stopped" and not result["final"]
@@ -435,7 +447,8 @@ def test_compiled_actor_stdio_fixture_interoperability(setup, tmp_path, adapter)
                     capabilities = {"protocolVersion": initialization["protocolVersion"],
                                     "serverInfo": initialization["serverInfo"],
                                     "tools": [tool.model_dump(mode="json", by_alias=True, exclude_none=True) for tool in listed.tools]}
-                    consumer = module.ActiveCaptureConsumer(contract, capabilities, grant, binding, module.McpResourceClient(client))
+                    consumer = module.ActiveCaptureConsumer(contract, capabilities, grant, binding, module.McpResourceClient(client),
+                                                            capture_workload=capture_workload)
                     result = await consumer.poll()
                     assert not result["final"] and result["state"] == "stopped"
                     assert await consumer.read_frame(1) == fake.image

@@ -24,9 +24,9 @@ def rig(monkeypatch):
     monkeypatch.syspath_prepend(str(REPOSITORY / "scripts"))
     module = importlib.import_module("assisted_benchmark_session")
     capture_module = importlib.import_module("assisted_benchmark_active_capture")
-    pinned = contract()
-    pinned["captureResources"] = copy.deepcopy(capture_module.RESOURCE_CONTRACT)
+    pinned = capture_module.load_active_capture_contract()
     grant = authorization(fields=("captureMetadata", "resourceSamples", "frameImages", "frameHashes"), targetVmUuids=[VM_UUID])
+    grant["sourceRevision"] = pinned["source"]["revision"]
 
     class Capture:
         def __init__(self, count=2):
