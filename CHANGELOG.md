@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## Unreleased
+
+- Add a locally tested, read-only active-capture MCP evidence consumer for
+  issue #255. It validates sealed server/run/VM identity, ordered bounded
+  batches, lifecycle, and explicit frame integrity without capture mutation
+  or retries. Production Actor revision pinning and live qualification remain
+  pending; this does not qualify a live benchmark.
+- Add a local three-mode capture-time scheduling candidate with on-demand,
+  periodic, and continuous modes, bounded queues and deadlines, loopback-only
+  Ollama token streaming, model-digest checks, privacy transformations, and
+  settled cancellation. SDK/Actor/mock-HTTP fixture composition is covered;
+  model choices remain data and never authorize or execute UI actions.
+- Wire an optional capture-bound one-shot dispatcher through the existing sealed
+  broker and pinned MCP router. All three scheduling modes can consume one
+  explicitly approved synthetic action while fixture capture remains active;
+  invalid bindings, changed contracts, partial responses, and uncertain or
+  contradictory acknowledgements abort without retries. Advisory mode remains
+  the default, and production activation is still gated on an immutable Actor pin.
+- Retain bounded numerical reading/limit observations for independent grounding
+  scores, separate from action correctness and task success. Observation claims
+  are not forwarded as authority or tool arguments to the sealed UI broker.
+- Pin the authorized local Actor producer commit in a separate local-only
+  manifest with strict base-contract/source/resource validation. The default
+  production contract and live activation remain unchanged.
+- Restore the synchronous Ollama chat CPU-option guard, which was unreachable
+  beneath the residency error branch; invalid execution options now fail before
+  HTTP dispatch, matching the streaming transport's fail-closed policy.
+
 ## v0.3.31
 
 Operator-authorized resolution of all 9 issues in the "Semantic Audit

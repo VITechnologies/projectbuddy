@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import hashlib
 import importlib.util
 import io
@@ -92,6 +93,103 @@ def assessment(decision="pass", findings=None):
         "uncertainties": [],
         "recommendation": "retain the verified receipt",
     }
+
+
+@pytest.mark.parametrize("chunks,valid", [
+    ([{"model": MODEL["tag"], "done": False, "message": {"role": "assistant", "content": "part"}},
+      {"model": MODEL["tag"], "done": True, "message": {"role": "assistant", "content": "end"}}], True),
+    ([{"model": MODEL["tag"], "done": False, "message": {"content": "partial"}}], False),
+    ([{"model": "other:tag", "done": True}], False),
+    ([{"model": MODEL["tag"], "done": True}, {"model": MODEL["tag"], "done": False}], False),
+    ([{"model": MODEL["tag"], "done": True, "message": {"tool_calls": []}}], False),
+])
+def test_async_stream_requires_complete_identity_bound_terminal_response(chunks, valid):
+    import httpx
+    module = load_module("assisted_review_stream", REVIEW_MODULE)
+    observed = []
+
+    def handler(request):
+        observed.append(request)
+        return httpx.Response(200, content=b"\n".join(json.dumps(item).encode() for item in chunks))
+    transport = module.LocalOllama("http://127.0.0.1:11435", http_transport=httpx.MockTransport(handler))
+    payload = {"model": MODEL["tag"], "stream": True, "keep_alive": 30, "options": {"num_gpu": 0, "num_thread": 1}}
+
+    async def consume():
+        return [item async for item in transport.stream_chat(payload)]
+    if valid:
+        assert asyncio.run(consume())[-1]["done"] is True
+    else:
+        with pytest.raises(module.ReviewError):
+            asyncio.run(consume())
+    assert len(observed) == 1
+
+
+def test_async_stream_cancellation_closes_response():
+    import httpx
+    module = load_module("assisted_review_stream_cancel", REVIEW_MODULE)
+    started = asyncio.Event()
+    closed = []
+
+    class Pending(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            started.set()
+            await asyncio.Event().wait()
+            yield b""
+
+        async def aclose(self):
+            closed.append(True)
+    transport = module.LocalOllama("http://127.0.0.1:11435", http_transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Pending())))
+    payload = {"model": MODEL["tag"], "stream": True, "keep_alive": 30, "options": {"num_gpu": 0, "num_thread": 1}}
+
+    async def consume():
+        return [item async for item in transport.stream_chat(payload)]
+
+    async def run():
+        operation = asyncio.create_task(consume())
+        await started.wait()
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    asyncio.run(run())
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("status,headers,content", [
+    (503, {}, b"{}"),
+    (302, {"Location": "https://example.invalid"}, b"{}"),
+    (200, {"Content-Encoding": "gzip"}, b"{}"),
+    (200, {}, b"not-json"),
+    (200, {}, b"[]"),
+    (200, {}, b"x" * (1024 * 1024 + 1)),
+])
+def test_async_metadata_rejects_untrusted_responses_without_retry(status, headers, content):
+    import httpx
+    module = load_module("assisted_review_metadata", REVIEW_MODULE)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        return httpx.Response(status, headers=headers, stream=httpx.ByteStream(content))
+    transport = module.LocalOllama("http://127.0.0.1:11435", http_transport=httpx.MockTransport(handler))
+    with pytest.raises(module.ReviewError):
+        asyncio.run(transport.tags_async())
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("options", [None, {"num_gpu": 1, "num_thread": 1},
+                                      {"num_gpu": 0, "num_thread": 0}, {"num_gpu": False, "num_thread": 1}])
+def test_synchronous_chat_rejects_unapproved_execution_before_dispatch(options):
+    import httpx
+    module = load_module("assisted_review_cpu_guard", REVIEW_MODULE)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        return httpx.Response(200, json={"done": True})
+    transport = module.LocalOllama("http://127.0.0.1:11435", http_transport=httpx.MockTransport(handler))
+    with pytest.raises(module.ReviewError):
+        transport.chat({"keep_alive": 30, "options": options})
+    assert calls == []
 
 
 class FakeTransport:
