@@ -4,9 +4,9 @@
   "baseContractSha256": "d4a2a267d83161658d04aca79cf1a9a13120713412c47083c801ccec7be9540b",
   "source": {
     "repository": "svelderrainruiz/labview-benchmark-actor",
-    "revision": "06630fa47ad53d5a21ce490532811e1894b005fa",
+    "revision": "b408dd706fc8f85b478e4a49f9156e47ec65b6cd",
     "serverName": "labview-benchmark-actor",
-    "serverVersion": "1.4.14",
+    "serverVersion": "1.5.0",
     "protocolVersion": "2025-06-18"
   },
   "captureResources": {

@@ -828,7 +828,7 @@ def choice_policy(contract_value=None):
 @pytest.fixture
 def live_choice_dispatcher():
     from types import SimpleNamespace
-    from assisted_benchmark_active_capture import RESOURCE_CONTRACT
+    from assisted_benchmark_active_capture import load_active_capture_contract
     from assisted_benchmark_mcp_router import LiveChoiceDispatcher, PinnedMcpRouter
     from assisted_benchmark_synthetic_ui import SyntheticUiWorkload
     from test_assisted_benchmark_contract import snapshot
@@ -841,7 +841,9 @@ def live_choice_dispatcher():
     template["reviewLifecycle"]["maxImageCount"] = 1
     template["reviewBudget"].update(contextTokens=16384, imageTokensPerImage=2048,
                                   maxImageBytes=8 * 1024 * 1024, maxImagesPerRequest=1)
-    contract_value["servers"]["lba"]["captureResources"] = copy.deepcopy(RESOURCE_CONTRACT)
+    contract_value["servers"]["lba"] = load_active_capture_contract()
+    contract_value["sourceRevision"] = contract_value["servers"]["lba"]["source"]["revision"]
+    value["sourceRevision"] = contract_value["sourceRevision"]
     grant = grant_for(value, contract_value)
     broker = live_policy.LiveRunBroker(grant, value, contract_value, trusted_digest(value), clock=lambda: NOW)
     workload = SyntheticUiWorkload(99)

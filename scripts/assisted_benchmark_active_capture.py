@@ -18,6 +18,7 @@ from PIL import Image
 
 from assisted_benchmark_contract import SERVER_SET_SCHEMA, load_contract, tool_contract_for_call, validate_authorization, validate_contract, validate_snapshot
 from assisted_benchmark_live_policy import sha256
+from assisted_benchmark_capture import ACTOR_VERSION
 
 SESSION_SCHEMA = "labview-benchmark-actor/active-capture-session@1"
 BATCH_SCHEMA = "active-capture-evidence-batch@1"
@@ -86,8 +87,9 @@ def load_active_capture_contract(pin_path: Path = DEFAULT_ACTIVE_PIN) -> dict:
     _require(pin["baseContractSha256"] == sha256(base) and pin["captureResources"] == RESOURCE_CONTRACT)
     source = pin["source"]
     _require(isinstance(source, dict) and set(source) == set(base["source"]))
-    _require(all(source[key] == base["source"][key] for key in source if key != "revision"))
+    _require(all(source[key] == base["source"][key] for key in source if key not in {"revision", "serverVersion"}))
     _require(isinstance(source["revision"], str) and re.fullmatch(r"[0-9a-f]{40}", source["revision"]) is not None)
+    _require(isinstance(source["serverVersion"], str) and ACTOR_VERSION.fullmatch(source["serverVersion"]) is not None)
     candidate = {**base, "source": copy.deepcopy(source), "captureResources": copy.deepcopy(pin["captureResources"])}
     validate_contract(candidate)
     return candidate
@@ -96,13 +98,16 @@ def load_active_capture_contract(pin_path: Path = DEFAULT_ACTIVE_PIN) -> dict:
 class ActiveCaptureConsumer:
     def __init__(self, contract: dict, snapshot: dict, authorization: dict, binding: dict, client,
                  *, max_reads: int = 128, max_frames: int = 128, total_seconds: float = 120,
-                 request_seconds: float = 10, clock=time.monotonic, actor_server_id: str | None = None):
+                 request_seconds: float = 10, clock=time.monotonic, actor_server_id: str | None = None,
+                 capture_workload: str = "labview-launch"):
         grant = validate_authorization(authorization, contract)
         actor, _tool = tool_contract_for_call(contract, "get_host_capabilities", actor_server_id)
         validate_snapshot(snapshot, actor)
         revision = contract["sourceRevision"] if contract["schema"] == SERVER_SET_SCHEMA else actor["source"]["revision"]
         _require(grant["sourceRevision"] == revision)
         _require(actor.get("captureResources") == RESOURCE_CONTRACT)
+        _require(capture_workload in {"labview-launch", "desktop-capture"})
+        self._capture_workload = capture_workload
         _require(isinstance(binding, dict) and set(binding) == {
             "schema", "grantRunId", "vmUuid", "captureRunId", "actorSource", "contractSha256",
         })
@@ -193,7 +198,7 @@ class ActiveCaptureConsumer:
         _require(set(session) == {"schema", "runId", "workload", "state", "plane", "source", "startedAt",
                                   "stoppedAt", "availableEvidence", "updatedAt", "watermarks", "incomplete"})
         _require(session["schema"] == SESSION_SCHEMA and session["runId"] == self._binding["captureRunId"])
-        _require(session["workload"] == "labview-launch" and session["plane"] in {"WIN", "LINUX"})
+        _require(session["workload"] == self._capture_workload and session["plane"] in {"WIN", "LINUX"})
         _require(isinstance(session["source"], str) and re.fullmatch(r"[A-Za-z0-9._-]{1,80}", session["source"]) is not None)
         self._lifecycle(session["state"])
         started = _timestamp(session["startedAt"])
