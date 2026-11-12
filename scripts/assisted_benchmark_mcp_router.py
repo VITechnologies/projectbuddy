@@ -5,6 +5,7 @@ import inspect
 import json
 from datetime import datetime, timezone
 from types import MappingProxyType
+from uuid import UUID
 
 from assisted_benchmark_contract import (
     SERVER_SET_SCHEMA,
@@ -14,7 +15,7 @@ from assisted_benchmark_contract import (
     validate_authorization,
     validate_server_snapshot,
 )
-from assisted_benchmark_live_policy import canonical_json, sha256
+from assisted_benchmark_live_policy import LiveRunBroker, canonical_json, sha256
 
 
 class McpRouterError(ValueError):
@@ -42,7 +43,7 @@ class PinnedMcpRouter:
                 raise McpRouterError("MCP server capability snapshot differs from its pinned identity") from error
             if not callable(getattr(clients[server_id], "call_tool", None)):
                 raise McpRouterError("MCP server client lacks the required call adapter")
-        self._server_set = server_set
+        self._server_set = json.loads(canonical_json(server_set))
         self._contract_sha256 = sha256(server_set)
         self._authorization_bytes = canonical_json(validated_authorization["approvedCalls"])
         self._choice_bytes = canonical_json(validated_authorization.get("approvedCallChoices", []))
@@ -118,6 +119,109 @@ class PinnedMcpRouter:
         result = client.call_tool(tool_name, arguments)
         if inspect.isawaitable(result):
             result = await result
-        if getattr(result, "is_error", getattr(result, "isError", False)) is True:
+        if ((isinstance(result, dict) and result.get("isError", result.get("is_error", False)) is True)
+            or getattr(result, "is_error", getattr(result, "isError", False)) is True):
             raise McpRouterError("pinned MCP client rejected the authorized call")
         return result
+
+
+class LiveChoiceDispatcher:
+    """Consume one sealed UI choice after a verified capture-time selection."""
+
+    def __init__(self, broker: LiveRunBroker, router: PinnedMcpRouter, binding: dict,
+                 actor_server_id: str, ui_server_id: str):
+        from assisted_benchmark_active_capture import RESOURCE_CONTRACT
+
+        if not isinstance(broker, LiveRunBroker) or not isinstance(router, PinnedMcpRouter):
+            raise McpRouterError("live choice requires the sealed broker and pinned router")
+        grant = broker.grant
+        contract = broker.contract
+        if (contract.get("schema") != SERVER_SET_SCHEMA or actor_server_id not in contract["servers"]
+                or ui_server_id not in contract["servers"] or actor_server_id == ui_server_id
+                or router._contract_sha256 != grant["contractSha256"]
+                or router._run_id != grant["runId"]
+                or router._authorization_bytes != canonical_json(broker.authorization["approvedCalls"])
+                or router._choice_bytes != canonical_json(broker.authorization.get("approvedCallChoices", []))):
+            raise McpRouterError("live choice server set differs from the sealed grant")
+        actor = contract["servers"][actor_server_id]
+        if (not isinstance(binding, dict) or set(binding) != {"schema", "grantRunId", "vmUuid", "captureRunId", "actorSource", "contractSha256"}
+                or binding["schema"] != "projectbuddy/active-capture-binding@1"
+                or binding["grantRunId"] != grant["runId"] or binding["vmUuid"] != grant["vmUuid"]
+                or binding["actorSource"] != actor["source"] or binding["contractSha256"] != sha256(actor)
+                or actor.get("captureResources") != RESOURCE_CONTRACT):
+            raise McpRouterError("live choice capture binding differs from the sealed actor and VM")
+        try:
+            if str(UUID(binding["captureRunId"])) != binding["captureRunId"]:
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            raise McpRouterError("live choice capture ID is not an opaque canonical UUID") from None
+        groups = broker.authorization.get("approvedCallChoices", [])
+        if len(groups) != 1 or groups[0].get("selection") != "exactly-one":
+            raise McpRouterError("live choice requires one exact sealed choice group")
+        candidates = groups[0]["candidates"]
+        if (len(candidates) != 2 or any(candidate["serverId"] != ui_server_id or candidate["tool"] != "click_target"
+                                      or set(candidate["arguments"]) != {"taskId", "targetId"} for candidate in candidates)
+                or {candidate["arguments"]["targetId"] for candidate in candidates} != {"approve", "hold"}
+                or len({candidate["arguments"]["taskId"] for candidate in candidates}) != 1):
+            raise McpRouterError("live choice must name exactly the two approved synthetic UI actions")
+        self._binding_bytes = canonical_json(binding)
+        self._candidate_bytes = canonical_json(candidates)
+        self._broker = broker
+        self._router = router
+        self._applied = False
+        self._failed = False
+        self._attempted = False
+
+    @property
+    def binding(self) -> dict:
+        return json.loads(self._binding_bytes)
+
+    @property
+    def applied(self) -> bool:
+        return self._applied
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self._attempted and not self._applied
+
+    def abort(self) -> None:
+        self._failed = True
+        self._broker.abort()
+
+    async def dispatch_selection(self, choice: dict, context: dict) -> bool:
+        if self._failed:
+            raise McpRouterError("live choice dispatcher is terminal")
+        if self._applied:
+            return False
+        try:
+            binding = self.binding
+            if sha256(self._broker.contract) != self._broker.grant["contractSha256"]:
+                raise McpRouterError("live choice contract changed after grant sealing")
+            if (not isinstance(context, dict) or set(context) != {"binding", "captureState", "frameSequence", "modelDigest"}
+                    or canonical_json(context["binding"]) != self._binding_bytes or context["captureState"] != "capturing"
+                    or type(context["frameSequence"]) is not int or context["frameSequence"] < 1
+                    or context["modelDigest"] != self._broker.authorization["ollamaModel"]["digest"]
+                    or not isinstance(choice, dict) or set(choice) != {"action", "captureRunId", "frameId"}
+                    or choice["captureRunId"] != binding["captureRunId"]
+                    or choice["frameId"] != f"{binding['captureRunId']}:{context['frameSequence']}"):
+                raise McpRouterError("live choice is not bound to current verified capture evidence")
+            candidate = next((item for item in json.loads(self._candidate_bytes)
+                              if item["arguments"]["targetId"] == choice["action"]), None)
+            if candidate is None:
+                raise McpRouterError("live choice is outside the sealed action candidates")
+            decision = self._broker.begin_call(candidate["tool"], candidate["arguments"], binding["vmUuid"], candidate["serverId"])
+            self._attempted = True
+            result = await self._router.dispatch(decision)
+            acknowledgement = (result.get("structuredContent") if isinstance(result, dict)
+                               else getattr(result, "structured_content", getattr(result, "structuredContent", None)))
+            task_id = candidate["arguments"]["taskId"]
+            if (not isinstance(acknowledgement, dict) or set(acknowledgement) != {"accepted", "taskId", "state", "eventId"}
+                    or acknowledgement["accepted"] is not True or acknowledgement["taskId"] != task_id
+                    or acknowledgement["state"] != "decision_recorded" or acknowledgement["eventId"] != f"{task_id}-event-0001"):
+                raise McpRouterError("live choice acknowledgement is incomplete or belongs to another task")
+            self._broker.complete_call(True)
+            self._applied = True
+            return True
+        except BaseException:
+            self.abort()
+            raise

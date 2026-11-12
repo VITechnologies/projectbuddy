@@ -1,0 +1,20 @@
+{
+  "schema": "projectbuddy/active-capture-pin@1",
+  "activation": "local-candidate-only",
+  "baseContractSha256": "d4a2a267d83161658d04aca79cf1a9a13120713412c47083c801ccec7be9540b",
+  "source": {
+    "repository": "svelderrainruiz/labview-benchmark-actor",
+    "revision": "06630fa47ad53d5a21ce490532811e1894b005fa",
+    "serverName": "labview-benchmark-actor",
+    "serverVersion": "1.4.14",
+    "protocolVersion": "2025-06-18"
+  },
+  "captureResources": {
+    "schema": "projectbuddy/active-capture-mcp-resources@1",
+    "sessionSchema": "labview-benchmark-actor/active-capture-session@1",
+    "batchSchema": "active-capture-evidence-batch@1",
+    "sessionUriTemplate": "lba-capture://session/{runId}",
+    "maxBatchSize": 12,
+    "maxFrameBytes": 8388608
+  }
+}
