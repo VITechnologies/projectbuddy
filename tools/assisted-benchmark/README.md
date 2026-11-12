@@ -111,6 +111,40 @@ bootstrap uncertainty, grounding, and task-success rates. It never sets or
 infers numeric qualification thresholds. No live calibration data or frozen
 thresholds exist yet.
 
+## Active Capture P2 Candidate
+
+`active-capture-pin.json` separately pins the published Actor desktop-capture
+candidate `b408dd706fc8f85b478e4a49f9156e47ec65b6cd` (package 1.5.0). Actor PRs
+#46 and #47 passed Linux/Windows CI in the personal repository. The manifest
+remains `local-candidate-only`: it does not change the default legacy contract
+or declare Windows/live qualification.
+
+`load_active_capture_contract` validates the base-contract digest and the
+explicit candidate source/resource identity. `McpResourceClient` adapts an
+official SDK session; `ActiveCaptureConsumer` admits only exact run/VM-bound,
+ordered, bounded resources. A server-set caller supplies an explicit Actor
+server ID. Desktop callers explicitly select `capture_workload="desktop-capture"`;
+the legacy default remains `labview-launch`. The Actor desktop command skips
+LabVIEW discovery/launch and uses a bounded 1..120-second interval (default 60).
+
+`LiveCaptureSession` supports on-demand, periodic, and continuous streaming
+with one deadline, bounded queues and requests, CPU/model/privacy checks, and
+no retries. Its default is advisory. An explicit `LiveChoiceDispatcher` can
+consume one existing sealed broker grant while capture is active; model output
+never creates authority. Unknown or contradictory acknowledgements terminate
+the grant without retry. Results retain action-applied/unknown status without
+pretending an attempted action was undone. Numerical reading/limit claims go
+to the independent oracle separately from action/task success.
+
+SDK/Actor/mock-model and sealed-action fixtures are available with
+`PROJECTBUDDY_ACTOR_FIXTURE_SERVER` set to the explicitly selected compiled
+Actor stdio entry. They are not real VM or inference proof. Native Windows
+provisioning currently fails in Vagrant's post-import VirtualBox shared-lock
+inspection (`E_ACCESSDENIED`), tracked in VITechnologies/projectbuddy#257.
+Spent dispatches are not replayed; no live calibration or frozen thresholds
+are claimed. The stopped-capture/PPL coordinator below is a separate legacy
+flow, not the live coordinator for epic #250.
+
 ## Capture and review
 
 The capture reader accepts only a finalized `stopped` run with a ready
@@ -232,10 +266,9 @@ model tag/digest):
 ```
 
 `approvedCalls` is an exact tool-plus-arguments allow-list, not a set of tool
-names. The current actor MCP does not expose capture discovery/read tools, so
-the run directory remains an explicit local input until the actor-side MCP
-capture contract tracked by `svelderrainruiz/labview-benchmark-actor#44` is
-implemented.
+names. This legacy pinned tool contract does not expose active-capture
+resources, so its stopped-run directory remains an explicit local input. The
+separate Actor #45/P2 resource contract above does not silently alter that flow.
 
 When `frameImages` is approved, the reviewer samples at most the first, middle,
 and last frame, verifies each against the recorded SHA-256, and sends one image
