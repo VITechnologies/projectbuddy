@@ -1,3 +1,5 @@
+using ProjectBuddy.PeerOllama;
+
 namespace ProjectBuddy.PeerBench;
 
 public static class Program
@@ -7,11 +9,8 @@ public static class Program
 
     public const string DefaultOllama = "http://127.0.0.1:11434";
 
-    // No proxy and no redirects: either could carry a loopback request to another host (D2).
     public static int Main(string[] args) =>
-        Run(args, File.ReadAllBytes, LoopbackHandler(), Console.Out, Console.Error);
-
-    internal static SocketsHttpHandler LoopbackHandler() => new() { UseProxy = false, AllowAutoRedirect = false };
+        Run(args, File.ReadAllBytes, OllamaClient.LoopbackHandler(), Console.Out, Console.Error);
 
     public static int Run(string[] args, Func<string, byte[]> readFile, HttpMessageHandler handler, TextWriter stdout, TextWriter stderr)
     {
@@ -37,7 +36,7 @@ public static class Program
             stdout.WriteLine(result.ToJsonString());
             return 0;
         }
-        catch (BenchException error)
+        catch (PeerException error)
         {
             stderr.WriteLine($"projectbuddy-bench: {error.Message}");
             return error.ExitCode;
@@ -76,7 +75,7 @@ public static class Program
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            throw new BenchException(ExitCodes.Refused, $"cannot read {Path.GetFileName(path)}");
+            throw new PeerException(ExitCodes.Refused, $"cannot read {Path.GetFileName(path)}");
         }
     }
 }
@@ -85,17 +84,4 @@ public static class Versions
 {
     public const string Tool = "0.1.0";
     public const string ResultSchema = "projectbuddy/peer-bench-result@1";
-}
-
-public static class ExitCodes
-{
-    public const int Usage = 2;
-    public const int Refused = 3;
-    public const int GuardBroken = 4;
-    public const int Unreachable = 5;
-}
-
-public sealed class BenchException(int exitCode, string message) : Exception(message)
-{
-    public int ExitCode { get; } = exitCode;
 }

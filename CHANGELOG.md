@@ -6,6 +6,28 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `projectbuddy-advise triage` (`tools/peer/advise`, #284, P2 of #210). It
+  turns a CI log into a few hundred bytes of local, advisory triage: the
+  failing step, one error line quoted verbatim, and a class from a closed
+  list.
+  - Evidence shaping: timestamps and ANSI codes removed, one header per
+    GitHub job/step, error-looking lines from the whole log first, then the
+    newest lines within a byte budget.
+  - The model (base `qwen2.5:7b`, the #217 winner) is digest-pinned in a
+    committed policy.
+  - Replies are accepted only after the truncation probe and the half-context
+    rule. An answer that is not grounded in the evidence yields no advice
+    (exit 6), never a guess.
+  - On real failed runs, reports were 51–94× smaller than the raw logs.
+- Extract the shared Ollama guard library `tools/peer/ollama`
+  (`ProjectBuddy.PeerOllama`): the loopback-only client (no proxy, no
+  redirects), the truncation probe and accept rule, model digest pins, and
+  strict JSON. `projectbuddy-bench` now uses it unchanged in behavior. CI runs
+  the library, bench and advise as a `Peer Tool Tests` matrix, each gated at
+  100% line and branch coverage of its own assembly.
+- Bench selection rule (D10): pool scores across machines and treat security
+  F1 differences under 0.05 as ties, the lessons from #217.
+
 - Add `projectbuddy-bench` (`tools/peer/bench`, #217), a .NET 10 single-file
   benchmark that scores digest-pinned Ollama candidates against #210 D10 on
   both the workstation and the peer. It covers triage extraction and

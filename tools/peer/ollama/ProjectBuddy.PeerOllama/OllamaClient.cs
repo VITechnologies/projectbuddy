@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace ProjectBuddy.PeerBench;
+namespace ProjectBuddy.PeerOllama;
 
 public sealed record ToolCall(string Name, JsonObject? Arguments);
 
@@ -25,10 +25,45 @@ public sealed class OllamaClient(HttpMessageHandler handler, Uri baseUri, TimeSp
             || uri.Query.Length > 0
             || uri.UserInfo.Length > 0)
         {
-            throw new BenchException(ExitCodes.Refused, "--ollama must be http://<loopback IP>:<port> with no path");
+            throw new PeerException(ExitCodes.Refused, "--ollama must be http://<loopback IP>:<port> with no path");
         }
 
         return uri;
+    }
+
+    // No proxy and no redirects: either could carry a loopback request to another host (D2).
+    public static SocketsHttpHandler LoopbackHandler() => new() { UseProxy = false, AllowAutoRedirect = false };
+
+    // Temperature is always 0; the caller fixes the context, output budget and seed.
+    public static JsonObject ChatRequest(string model, string system, string input, int numCtx, int numPredict, int seed, JsonObject? format = null, JsonArray? tools = null)
+    {
+        var request = new JsonObject
+        {
+            ["model"] = model,
+            ["stream"] = false,
+            ["keep_alive"] = "5m",
+            ["options"] = new JsonObject
+            {
+                ["num_ctx"] = numCtx,
+                ["num_predict"] = numPredict,
+                ["temperature"] = 0,
+                ["seed"] = seed,
+            },
+            ["messages"] = new JsonArray(
+                new JsonObject { ["role"] = "system", ["content"] = system },
+                new JsonObject { ["role"] = "user", ["content"] = input }),
+        };
+        if (format is not null)
+        {
+            request["format"] = format;
+        }
+
+        if (tools is not null)
+        {
+            request["tools"] = tools;
+        }
+
+        return request;
     }
 
     public async Task<string> VersionAsync() =>
@@ -108,14 +143,14 @@ public sealed class OllamaClient(HttpMessageHandler handler, Uri baseUri, TimeSp
             using var response = await http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
-                throw new BenchException(ExitCodes.Unreachable, $"Ollama {path} returned HTTP {(int)response.StatusCode}");
+                throw new PeerException(ExitCodes.Unreachable, $"Ollama {path} returned HTTP {(int)response.StatusCode}");
             }
 
             return Json.Object(Json.Parse(await response.Content.ReadAsByteArrayAsync(), $"Ollama {path} response", ExitCodes.Unreachable), $"Ollama {path} response", ExitCodes.Unreachable);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
         {
-            throw new BenchException(ExitCodes.Unreachable, $"Ollama {path} is unreachable");
+            throw new PeerException(ExitCodes.Unreachable, $"Ollama {path} is unreachable");
         }
     }
 }
