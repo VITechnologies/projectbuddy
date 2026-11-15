@@ -6,11 +6,14 @@ namespace ProjectBuddy.PeerBench;
 // Strict accessors: every input document is refused unless it has exactly the expected shape.
 internal static class Json
 {
+    // Duplicate keys would otherwise parse and then throw ArgumentException on first access.
+    private static readonly JsonDocumentOptions Strict = new() { AllowDuplicateProperties = false };
+
     public static JsonNode Parse(byte[] bytes, string what, int exitCode)
     {
         try
         {
-            return JsonNode.Parse(bytes) ?? throw new BenchException(exitCode, $"{what} is not a JSON object");
+            return JsonNode.Parse(bytes, documentOptions: Strict) ?? throw new BenchException(exitCode, $"{what} is not a JSON object");
         }
         catch (JsonException)
         {
@@ -50,7 +53,7 @@ internal static class Json
     {
         try
         {
-            return JsonNode.Parse(text) as JsonObject;
+            return JsonNode.Parse(text, documentOptions: Strict) as JsonObject;
         }
         catch (JsonException)
         {

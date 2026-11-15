@@ -31,6 +31,14 @@ public class ProgramTests
     [Fact]
     public void MainAnswersVersion() => Assert.Equal(0, Program.Main(["--version"]));
 
+    [Fact]
+    public void LoopbackHandlerIgnoresProxiesAndRedirects()
+    {
+        using var handler = Program.LoopbackHandler();
+        Assert.False(handler.UseProxy);
+        Assert.False(handler.AllowAutoRedirect);
+    }
+
     [Theory]
     [InlineData]
     [InlineData("serve")]
@@ -149,6 +157,7 @@ public class CorpusTests
     [InlineData("not json")]
     [InlineData("null")]
     [InlineData("[]")]
+    [InlineData("""{"schema":"a","schema":"b"}""")]
     public void NonObjectCorpusIsRefused(string text) =>
         Assert.Equal(ExitCodes.Refused, Assert.Throws<BenchException>(() => Corpus.Parse(System.Text.Encoding.UTF8.GetBytes(text))).ExitCode);
 
@@ -192,6 +201,7 @@ public class JsonTests
     [Theory]
     [InlineData("not json", false)]
     [InlineData("[1]", false)]
+    [InlineData("""{"step":"a","step":"b"}""", false)]
     [InlineData("{}", true)]
     public void TryObjectNeverThrows(string text, bool isObject) => Assert.Equal(isObject, Json.TryObject(text) is not null);
 

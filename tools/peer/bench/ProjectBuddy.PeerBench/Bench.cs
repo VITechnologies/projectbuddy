@@ -211,10 +211,12 @@ public static class Bench
             return Malformed(tally);
         }
 
-        // Extraction: the right step, and an error line quoted verbatim from the evidence.
+        // Extraction: the right step, and one error line quoted verbatim from the evidence.
+        var quoted = line.Trim();
         var extraction = step.Contains(item.Step, StringComparison.OrdinalIgnoreCase)
-            && line.Contains(item.ErrorLine, StringComparison.Ordinal)
-            && item.Input.Contains(line.Trim(), StringComparison.Ordinal);
+            && quoted.Contains(item.ErrorLine, StringComparison.Ordinal)
+            && quoted.IndexOfAny(['\n', '\r']) < 0
+            && item.Input.Contains(quoted, StringComparison.Ordinal);
         var diagnosis = triageClass == item.Class;
         tally.Extraction += extraction ? 1 : 0;
         tally.Diagnosis += diagnosis ? 1 : 0;

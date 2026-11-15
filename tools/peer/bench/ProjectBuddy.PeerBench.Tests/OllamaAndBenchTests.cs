@@ -62,6 +62,8 @@ public class OllamaTests
     public static TheoryData<string, Func<string, JsonObject?, HttpResponseMessage>> Faults => new()
     {
         { "http 500", (_, _) => new HttpResponseMessage(HttpStatusCode.InternalServerError) },
+        { "redirect", (_, _) => new HttpResponseMessage(HttpStatusCode.TemporaryRedirect) { Headers = { Location = new Uri("http://10.0.0.9:11434/api/chat") } } },
+        { "duplicate keys", (_, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"message":{},"message":{}}""") } },
         { "not json", (_, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>") } },
         { "not object", (_, _) => FakeOllama.Ok(new JsonArray()) },
         { "transport", (_, _) => throw new HttpRequestException("refused") },
@@ -151,6 +153,18 @@ public class BenchTests
         var model = (await Run(fake))["models"]![0]!;
         Assert.Equal(4, model["malformed"]!.GetValue<int>());
         Assert.Equal(1, model["security"]!["expected"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task MultiLineQuotesAndDuplicateKeysEarnNoCredit()
+    {
+        var fake = AllCorrect();
+        fake.Chats["step one\nFAIL gate-x -- broken thing\nexit 1"] = FakeOllama.Reply("""{"step":"gate-x","errorLine":"step one\nFAIL gate-x -- broken thing","class":"gate-failure"}""");
+        fake.Chats["echo $TOKEN"] = FakeOllama.Reply("""{"findings":[{"class":"secret-in-log","class":"command-injection","line":1}]}""");
+        var model = (await Run(fake))["models"]![0]!;
+        Assert.Equal("""{"items":1,"extraction":0,"diagnosis":1}""", model["triage"]!.ToJsonString());
+        Assert.Equal(1, model["malformed"]!.GetValue<int>());
+        Assert.Equal("malformed", model["items"]![1]!["outcome"]!.GetValue<string>());
     }
 
     [Fact]

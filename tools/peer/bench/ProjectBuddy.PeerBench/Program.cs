@@ -7,8 +7,11 @@ public static class Program
 
     public const string DefaultOllama = "http://127.0.0.1:11434";
 
+    // No proxy and no redirects: either could carry a loopback request to another host (D2).
     public static int Main(string[] args) =>
-        Run(args, File.ReadAllBytes, new SocketsHttpHandler(), Console.Out, Console.Error);
+        Run(args, File.ReadAllBytes, LoopbackHandler(), Console.Out, Console.Error);
+
+    internal static SocketsHttpHandler LoopbackHandler() => new() { UseProxy = false, AllowAutoRedirect = false };
 
     public static int Run(string[] args, Func<string, byte[]> readFile, HttpMessageHandler handler, TextWriter stdout, TextWriter stderr)
     {
