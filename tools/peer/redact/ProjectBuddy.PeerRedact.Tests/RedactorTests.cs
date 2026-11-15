@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
 
@@ -69,6 +70,39 @@ public class CorpusTests
         }
 
         Assert.Equal(output, redactor.Redact(output).Text);
+    }
+
+    // The same evidence inside JSON, as the agent and Windows tools emit it: System.Text.Json at one and two levels, and
+    // PowerShell 5.1 ConvertTo-Json style (\" escapes). Nothing listed may survive in the decoded value, the output must
+    // still parse at every level, and redaction stays idempotent. Placeholder entries ("no <host> here") are checks
+    // against over-redaction of raw text and are skipped.
+    [Theory]
+    [MemberData(nameof(Ids))]
+    public void WrappedInJsonNothingListedSurvivesAndJsonStaysValid(string id)
+    {
+        var corpus = Corpus();
+        var redactor = new Redactor(corpus["denyTerms"]!.AsArray().Select(term => term!.GetValue<string>()),
+            wholeWordTerms: corpus["wholeWordTerms"]!.AsArray().Select(term => term!.GetValue<string>()));
+        var item = corpus["items"]!.AsArray().Single(candidate => candidate!["id"]!.GetValue<string>() == id)!;
+        var input = Expand(item["input"]!.GetValue<string>());
+        var once = JsonSerializer.Serialize(new { v = input });
+        var powerShell = "{\"v\":\"" + input.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t") + "\"}";
+        foreach (var (json, depth) in new[] { (once, 1), (JsonSerializer.Serialize(new { v = once }), 2), (powerShell, 1) })
+        {
+            var output = redactor.Redact(json).Text;
+            Assert.Equal(output, redactor.Redact(output).Text);
+            var value = output;
+            for (var level = 0; level < depth; level++)
+            {
+                using var document = JsonDocument.Parse(value);
+                value = document.RootElement.GetProperty("v").GetString()!;
+            }
+
+            foreach (var gone in item["mustNotContain"]!.AsArray().Select(entry => Expand(entry!.GetValue<string>())).Where(entry => !Redactor.Placeholders.Contains(entry)))
+            {
+                Assert.DoesNotContain(gone, value, StringComparison.OrdinalIgnoreCase);
+            }
+        }
     }
 }
 
@@ -290,6 +324,8 @@ public class RedactorTests
     [InlineData("\"", "\\\"")]
     [InlineData("", "\\\\u0022a")]
     [InlineData("/user:\\\"", "a")]
+    [InlineData("[", "\"a\\nb\",")]
+    [InlineData("", "{\"v\":\"a\\nb\"},")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -384,7 +420,7 @@ public class RedactorTests
     [Theory]
     [InlineData("\"at \\u0027D:/Clients/x\\u0027\"", "\"at '<path>'\"")]
     [InlineData("\"\\u0022q\\u0022 \\u005C\"", "\"\\\"q\\\" \\\\\"")]
-    [InlineData("\"\\uD83D\\uDE00 \\uD800 \\u0001 \\u007F\"", "\"\U0001F600 \\uD800 \\u0001 \\u007F\"")]
+    [InlineData("\"\\uD83D\\uDE00 \\uD800 \\u0001 \\u007F\"", "\"\U0001F600 \uFFFD \\u0001 \u007F\"")]
     [InlineData("\"x\\\\u0027 stays\"", "\"x\\\\u0027 stays\"")]
     [InlineData("\"a\\\\u200Bb\"", "\"ab\"")]
     [InlineData("at x\\\\u0027D:/Clients/x", "at x\\\\u0027<path>")]
@@ -408,4 +444,18 @@ public class RedactorTests
     [InlineData("C:\\Windows\\ \\Temp\\x", "<path>")]
     [InlineData("ProductVersion     : 1.2.3.4", "ProductVersion     : 1.2.3.4")]
     public void BlankNamesCannotDodgeALimit(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    // JSON string literals between JSON punctuation are redacted as the text they stand for and written back well formed.
+    [Theory]
+    [InlineData(@"{""v"":""a\b\f\n\r\t\""\\\/\u0001z""}", @"{""v"":""a\b\f\n\r\t\""\\/\u0001z""}")]
+    [InlineData(@"[""x\nC:\\Users\\Jane\\x""]", @"[""x\nC:\\Users\\<user>\\<path>""]")]
+    [InlineData(@"{""k\nC:\\Users\\Jane"": 1}", @"{""k\nC:\\Users\\<user>"": 1}")]
+    [InlineData(@"""x\tC:\\Users\\Jane""", @"""x\tC:\\Users\\<user>""")]
+    [InlineData(@"{""v"": [""a\nb"", ""c\nd""]}", @"{""v"": [""a\nb"", ""c\nd""]}")]
+    [InlineData(@"say ""C:\temp\new"" now", @"say ""<path>"" now")]
+    [InlineData(@"{""v"":""a\nC:\\Users\\Jane"" x}", @"{""v"":""a\nC:\\Users\\<user>"" x}")]
+    [InlineData(@"log: {\""line\"":\""    DefaultPassword    REG_SZ    Sup3r\""}", @"log: {\""line\"":\""    DefaultPassword    REG_SZ    <secret>\""}")]
+    [InlineData(@"key=""Server"" value=""db01""", @"key=""Server"" value=""db01""")]
+    [InlineData("a\uFDD0b", "ab")]
+    public void JsonStringsAreRedactedAsTheTextTheyStandFor(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 }

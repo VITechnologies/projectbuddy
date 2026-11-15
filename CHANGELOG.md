@@ -23,8 +23,10 @@ release's notes for the exact pinned commit.
     certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts.
   - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
     first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
-    text such as a Windows path is never decoded. Quoted secrets are taken
-    whole at any JSON nesting, and a placeholder never splits a JSON string.
+    text such as a Windows path is never decoded. JSON string literals with
+    escapes are redacted as the text they stand for (decoded, settled and
+    encoded again, at any nesting), so line-based rules work inside JSON and
+    the output stays well formed; the corpus is also checked wrapped in JSON.
   - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
     encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
     runs through spaces and stops at a colon, a switch, or the next path.

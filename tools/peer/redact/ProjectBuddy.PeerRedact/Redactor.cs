@@ -116,13 +116,18 @@ public sealed partial class Redactor
         }
 
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        return new Redaction(Settle(text, counts, settledOnly), counts);
+    }
+
+    private string Settle(string text, Dictionary<string, int> counts, bool settledOnly)
+    {
         var result = text;
         for (var pass = 0; pass < Passes; pass++)
         {
             var next = Pass(Clean(result), counts);
             if (next == result)
             {
-                return new Redaction(result, counts);
+                return result;
             }
 
             if (settledOnly || next.Length > OutputLimit)
@@ -138,6 +143,25 @@ public sealed partial class Redactor
 
     private string Pass(string text, Dictionary<string, int> counts)
     {
+        // A JSON string literal with escapes, between JSON punctuation ({"k":"v"}), is redacted as the text it stands for:
+        // decoded (so "\n" is a line break and "\"" a quote), settled with every rule, nested JSON included, and
+        // encoded again, so the output stays well formed. While the rules below run over the rest of the text, it is
+        // held behind a quoted mask of noncharacters: a value rule ("password":"...") still takes it whole, and nothing
+        // reads its escapes as path separators. A quoted raw path ("C:\temp\new") is not between JSON punctuation and
+        // stays with the rules.
+        var literals = new List<string>();
+        var input = text;
+        text = JsonString().Replace(text, literal =>
+        {
+            if (!literal.Value.Contains('\\') || !InJson(input, literal))
+            {
+                return literal.Value;
+            }
+
+            literals.Add(Quote(Settle(Unescape(literal.Value), counts, false)));
+            return "\"\uFDD0" + string.Concat((literals.Count - 1).ToString(CultureInfo.InvariantCulture).Select(digit => (char)('\uFDD2' + digit - '0'))) + "\uFDD1\"";
+        });
+
         string Apply(string input, string rule, Regex pattern, MatchEvaluator evaluator) => pattern.Replace(input, match =>
         {
             var replaced = evaluator(match);
@@ -153,13 +177,13 @@ public sealed partial class Redactor
         result = Apply(result, "secret", Token(), _ => "<secret>");
         result = Apply(result, "secret", Authorization(), match => match.Groups["key"].Value + match.Groups["quote"].Value + match.Groups["scheme"].Value + "<secret>");
         result = Apply(result, "secret", Bearer(), match => match.Groups["scheme"].Value + "<secret>");
-        result = Apply(result, "secret", XmlSecret(), match => match.Groups["key"].Value + (match.Groups["value"].Value.StartsWith('\\') ? "\\\"<secret>\\\"" : "\"<secret>\""));
+        result = Apply(result, "secret", XmlSecret(), match => SecretWord().IsMatch(match.Groups["name"].Value) ? match.Groups["key"].Value + Requote(match.Groups["value"].Value) : match.Value);
         result = Apply(result, "secret", Command(), RedactCommand);
         result = Apply(result, "secret", SecureString(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Credential(), match => match.Groups["head"].Value
             + (match.Groups["user"].Value.StartsWith('$') ? match.Groups["user"].Value : "<user>") + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
-        result = Apply(result, "secret", Registry(), match => match.Groups["key"].Value + "<secret>");
+        result = Apply(result, "secret", Registry(), match => SecretToClose(match.Groups["key"].Value, match.Groups["value"].Value));
         result = Apply(result, "secret", Assignment(), match => match.Groups["key"].Value + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
         result = Apply(result, "user", UserFlag(), match => match.Groups["key"].Value + "<user>");
@@ -188,7 +212,26 @@ public sealed partial class Redactor
             }
         }
 
-        return result;
+        return literals.Count == 0 ? result : Mask().Replace(result, mask =>
+            literals[int.Parse(string.Concat(mask.Groups["index"].Value.Select(digit => (char)(digit - '\uFDD2' + '0'))), CultureInfo.InvariantCulture)]);
+    }
+
+    // Between JSON punctuation: after "{", "[", ":" or "," (or the start) and before ":", ",", "]" or "}" (or the end).
+    private static bool InJson(string text, Match literal)
+    {
+        var before = literal.Index - 1;
+        while (before >= 0 && char.IsWhiteSpace(text[before]))
+        {
+            before--;
+        }
+
+        var after = literal.Index + literal.Length;
+        while (after < text.Length && char.IsWhiteSpace(text[after]))
+        {
+            after++;
+        }
+
+        return (before < 0 || text[before] is '{' or '[' or ':' or ',') && (after == text.Length || text[after] is ':' or ',' or ']' or '}');
     }
 
     private static Regex? TermPattern(IEnumerable<string> source, bool wholeWord)
@@ -258,7 +301,7 @@ public sealed partial class Redactor
             {
                 clean.Append('\uFFFD');
             }
-            else if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.Format)
+            else if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.Format && character is < '\uFDD0' or > '\uFDEF')
             {
                 clean.Append(character);
             }
@@ -324,27 +367,32 @@ public sealed partial class Redactor
 
                 var glued = switches.Attached ? switches.Secret.Concat(switches.User)
                     .FirstOrDefault(flag => value.Length > flag.Length && value.StartsWith(flag, switches.Case) && !value[flag.Length..].StartsWith('<')) : null;
-                return glued is null ? value : glued + (switches.Secret.Contains(glued) ? "<secret>" : "<user>");
+                return glued is null ? value : glued + Unclosed(value[glued.Length..]) + (switches.Secret.Contains(glued) ? "<secret>" : "<user>");
             }
 
             if (next is not null)
             {
-                var replacement = next;
+                var replacement = Unclosed(value) + next;
                 next = null;
                 return replacement;
             }
 
             var bare = value.TrimStart('"');
-            if (switches is not null || bare.StartsWith(@"\\", StringComparison.Ordinal) || bare.StartsWith("<path>", StringComparison.Ordinal) || NetDevice().IsMatch(value))
+            if (switches is not null || UncArgument().IsMatch(bare) || bare.StartsWith("<path>", StringComparison.Ordinal) || NetDevice().IsMatch(value))
             {
                 return value;
             }
 
             // An argument already redacted (<user>, <secret>) keeps its place in the count.
             positional++;
-            return bare.StartsWith('<') ? value : user && positional == 1 ? "<user>" : positional == (user ? 2 : 1) ? "<secret>" : value;
+            return bare.StartsWith('<') ? value : user && positional == 1 ? Unclosed(value) + "<user>" : positional == (user ? 2 : 1) ? Unclosed(value) + "<secret>" : value;
         });
     }
+
+    // A quoted argument whose closing quote lies past the arguments (at a line or JSON string end) keeps its opening
+    // quote, so the quote that follows stays paired: "Qzx secret9" -> "<secret>".
+    private static string Unclosed(string argument) =>
+        argument.StartsWith('"') && (argument.Length == 1 || !argument.EndsWith('"')) ? "\"" : "";
 
     // Segments are split on every separator spelling and run, so mixing or doubling them (C:\Windows\Temp/x,
     // C:/Users//x) cannot dodge a limit, and the kept part is copied from the original text.
@@ -431,6 +479,73 @@ public sealed partial class Redactor
             Key(part) == "C" || Public(part) || (issuer && Key(part) is "L" or "S" or "ST") ? part.Value : part.Groups["key"].Value + "<private>");
     }
 
+    private static readonly string[] QuoteSpellings = [@"\\\""", @"\\u0022", @"\u0022", "\\\"", "\""];
+
+    // A quoted secret keeps the quote spelling it was written with, so JSON at any depth stays well formed.
+    private static string Requote(string quoted)
+    {
+        var quote = QuoteSpellings.First(spelling => quoted.StartsWith(spelling, StringComparison.Ordinal));
+        return quote + "<secret>" + quote;
+    }
+
+    // A value that runs to the line end stops at the close of a JSON string, which stays.
+    private static string SecretToClose(string key, string value)
+    {
+        var close = JsonClose().Match(value);
+        return key + "<secret>" + (close.Success ? value[close.Index..] : "");
+    }
+
+    // The value of a JSON string literal whose escapes are all valid (JsonString).
+    private static string Unescape(string literal)
+    {
+        var value = new StringBuilder(literal.Length);
+        for (var index = 1; index < literal.Length - 1; index++)
+        {
+            var character = literal[index];
+            if (character != '\\')
+            {
+                value.Append(character);
+                continue;
+            }
+
+            var escape = literal[++index];
+            if (escape == 'u')
+            {
+                value.Append((char)Convert.ToInt32(literal.Substring(index + 1, 4), 16));
+                index += 4;
+                continue;
+            }
+
+            value.Append(escape switch { 'b' => '\b', 'f' => '\f', 'n' => '\n', 'r' => '\r', 't' => '\t', _ => escape });
+        }
+
+        return value.ToString();
+    }
+
+    // The shortest JSON string literal for a value: a quote and a backslash escaped, control characters as their short
+    // escape or \u00XX, everything else literal.
+    private static string Quote(string value)
+    {
+        var literal = new StringBuilder(value.Length + 2).Append('"');
+        foreach (var character in value)
+        {
+            literal.Append(character switch
+            {
+                '"' => "\\\"",
+                '\\' => "\\\\",
+                '\b' => "\\b",
+                '\f' => "\\f",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                '\t' => "\\t",
+                < ' ' => $"\\u{(int)character:x4}",
+                _ => character.ToString(),
+            });
+        }
+
+        return literal.Append('"').ToString();
+    }
+
     // A path match runs on through spaces, so the space before the next word is given back.
     private static string Cut(string value) => "<path>" + value[value.TrimEnd().Length..];
 
@@ -486,8 +601,19 @@ public sealed partial class Redactor
     // (JSON inside JSON), and a raw \u0022x\u0022. Each closes only with its own spelling.
     private const string Quoted = @"(?:\\\\\\""(?:(?!\\\\\\"")[^\r\n])*\\\\\\""|\\\\u0022(?:(?!\\\\u0022)[^\r\n])*\\\\u0022|\\u0022(?:(?!\\u0022)[^\r\n])*\\u0022|\\""(?:[^""\\\r\n]|\\[^""\r\n])*\\""|""(?:[^""\\\r\n]|\\.)*"")";
 
-    // A plain token never ends in the "\" of an escaped quote, so a placeholder can never split a JSON string.
-    private const string Bare = @"(?:[^\s""',;\\]|\\(?!""))+";
+    // Not at the close of a JSON string ("..."} or \"...\"}), so a value never takes the quote that closes the string it
+    // sits in, and a placeholder never splits one.
+    private const string NotClosing = @"(?!\\?""[ \t]*(?:[,}\]:]|\r|\n|\z))";
+
+    // The rest of a line, up to the close of a JSON string.
+    private const string LineRest = "(?:" + NotClosing + @"[^\r\n])*";
+
+    // A word start, also right after a JSON \uXXXX escape left at a deeper level (\\u0022net use ...).
+    private const string WordStart = @"(?:\b|" + AfterEscape + ")";
+
+    // A plain token: a backslash always travels with the next character (\" stays whole), and it stops at the close of
+    // a JSON string.
+    private const string Bare = "(?:" + NotClosing + @"(?:\\[^\s]|[^\s""',;\\]))+";
 
     private const string Placeholder = "<(?:private|secret|email|url|host|path|user|ip|mac)>";
 
@@ -507,7 +633,7 @@ public sealed partial class Redactor
 
     private const string DriveHead = DriveBehind + "[A-Za-z]" + Colon + AnySeparator;
 
-    private const string UncHead = @"(?:(?<![A-Za-z0-9\\/]|(?<![A-Za-z0-9])[A-Za-z]:)|" + AfterEscape + "|" + ShortSwitch + @")(?:\\\\\\\\|\\\\)";
+    private const string UncHead = @"(?:(?<![A-Za-z0-9\\/]|" + DriveBehind + "[A-Za-z]" + Colon + @")|" + AfterEscape + "|" + ShortSwitch + @")(?:\\\\){1,8}";
 
     // A path runs on through spaces (so "D:\Acme Projects\x" never leaks its tail) and through apostrophes inside
     // names (O'Brien, Customers' Data; only a path opened by an apostrophe ends at one). It stops at a double quote,
@@ -517,7 +643,7 @@ public sealed partial class Redactor
     // backslash is kept when its letter cannot start a drive (abcD:\x), so no tail leaks.
     private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)\\"")(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|')|:(?=" + BackSeparator + @")))*";
 
-    private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))*";
+    private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?\\]|\\(?!"")|(?(open)" + QuotedApostrophe + "|'))*";
 
     // Inside a path opened by an apostrophe, an apostrophe stays part of a name when doubled (PowerShell's '' escape),
     // before a letter or digit (O'Brien), when more path (a "\" or "/") follows before the next apostrophe
@@ -551,18 +677,18 @@ public sealed partial class Redactor
     // Any scheme, and the whole value: to the closing quote (plain or escaped) when quoted, else to the end of the
     // line, so multi-part values (AWS4-HMAC-SHA256 Credential=..., Signature=...) never leak a part. The separator may
     // be ":", "=" or a table gap of two or more spaces. A well-known scheme name stays.
-    [GeneratedRegex(@"(?<key>\b(?:Proxy-)?Authorization(?:\\?"")?(?:[ \t]*[:=][ \t]*|[ \t]{2,}(?=\S)))(?:(?<quote>\\?"")(?<scheme>(?:" + AuthSchemes + @")[ \t]+)?(?:[^""\\\r\n]|\\(?!""))+|(?<scheme>(?:" + AuthSchemes + @")[ \t]+)?[^""\r\n][^\r\n]*)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>" + WordStart + @"(?:Proxy-)?Authorization(?:\\{0,3}""|\\{1,2}u0022)?(?:[ \t]*[:=][ \t]*|[ \t]{2,}(?=\S)))(?:(?<quote>\\\\\\""|\\\\u0022|\\u0022|\\?"")(?<scheme>(?:" + AuthSchemes + @")[ \t]+)?(?:(?!\k<quote>)[^\r\n])+|(?<scheme>(?:" + AuthSchemes + @")[ \t]+)?" + NotClosing + @"[^""\r\n]" + LineRest + ")", RegexOptions.IgnoreCase)]
     private static partial Regex Authorization();
 
     // A standalone credential only when it looks like one (16+ characters with a digit), so "Basic authentication" stays.
     [GeneratedRegex(@"(?<scheme>\b(?:Bearer|Basic)\s+)(?=[A-Za-z0-9._~+/=-]*[0-9])[A-Za-z0-9._~+/=-]{16,}", RegexOptions.IgnoreCase)]
     private static partial Regex Bearer();
 
-    // Plain or escaped inside a JSON string (key=\"Password\" value=\"x\"); the quoting is kept.
-    [GeneratedRegex(@"(?<key>\bkey\s*=\s*\\?""[^""\r\n]*(?:password|passwd|pwd|secret|token|key)[^""\r\n]*""\s+value\s*=\s*)(?<value>\\""(?:[^""\\\r\n]|\\[^""\r\n])*\\""|""[^""\r\n]*"")", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    // At any JSON depth (key=\"Password\" value=\"x\"); the setting name must hold a secret word, and the quoting is kept.
+    [GeneratedRegex(@"(?<key>" + WordStart + @"key\s*=\s*(?<name>" + Quoted + @")\s+value\s*=\s*)(?<value>" + Quoted + ")", RegexOptions.IgnoreCase)]
     private static partial Regex XmlSecret();
 
-    [GeneratedRegex(@"(?<command>\b(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>[^\r\n]*)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<command>" + WordStart + @"(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>" + LineRest + ")", RegexOptions.IgnoreCase)]
     private static partial Regex Command();
 
     // An argument is a run of plain characters and quoted parts, so -p"two words" and "\\fs01\a b" are one argument;
@@ -570,21 +696,25 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?:[^\s""]|""[^""\r\n]*(?:""|$))+")]
     private static partial Regex Argument();
 
+    // A UNC root at any JSON depth (\\fs01, \\\\fs01), not an escaped quote (\\\"x).
+    [GeneratedRegex(@"^\\\\+[A-Za-z0-9._$?-]")]
+    private static partial Regex UncArgument();
+
     [GeneratedRegex(@"^(?:[A-Za-z]:|\*|(?:LPT|COM)[0-9]:?)$", RegexOptions.IgnoreCase)]
     private static partial Regex NetDevice();
 
     // ConvertTo-SecureString "x" -AsPlainText, ... -String x, and "x" | ConvertTo-SecureString. The piped form has no key
     // to anchor it, so its quoted value never spans an escaped quote and each start scans only to the next quote.
-    [GeneratedRegex(@"(?<key>\bConvertTo-SecureString\b(?:[ \t]+-(?:AsPlainText|Force|String)\b)*[ \t]+)(?:" + Quoted + @"|'[^'\r\n]*'|(?!-)(?:[^\s|;)""\\]|\\(?!""))+)|(?:""[^""\r\n]*""|\\""[^""\r\n]*\\""|'[^'\r\n]*')(?=[ \t]*\|[ \t]*ConvertTo-SecureString\b)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>" + WordStart + @"ConvertTo-SecureString\b(?:[ \t]+-(?:AsPlainText|Force|String)\b)*[ \t]+)(?:" + Quoted + @"|'[^'\r\n]*'|(?!-)(?:[^\s|;)""\\]|\\(?!""))+)|(?:""[^""\r\n]*""|\\""[^""\r\n]*\\""|'[^'\r\n]*')(?=[ \t]*\|[ \t]*ConvertTo-SecureString\b)", RegexOptions.IgnoreCase)]
     private static partial Regex SecureString();
 
     // new NetworkCredential("jane", "x"), New-Object System.Net.NetworkCredential -ArgumentList 'jane', 'x', and
     // [NetworkCredential]::new($env:USERNAME, "x"); a literal account becomes <user>, a variable stays.
-    [GeneratedRegex(@"(?<head>\bNetworkCredential\]?(?:::new)?(?:[ \t]*\(|[ \t]+-ArgumentList)[ \t]*)(?<user>" + Quoted + @"|'[^'\r\n]*'|\$[\w:.]+)(?<separator>[ \t]*,[ \t]*)(?!" + Placeholder + ")(?:" + Quoted + @"|'[^'\r\n]*')")]
+    [GeneratedRegex(@"(?<head>" + WordStart + @"NetworkCredential\]?(?:::new)?(?:[ \t]*\(|[ \t]+-ArgumentList)[ \t]*)(?<user>" + Quoted + @"|'[^'\r\n]*'|\$[\w:.]+)(?<separator>[ \t]*,[ \t]*)(?!" + Placeholder + ")(?:" + Quoted + @"|'[^'\r\n]*')")]
     private static partial Regex Credential();
 
     // Command-line flags: "--token x", "-pw x", "--password=x", "-passout pass:x", and Windows switches "/pass:x".
-    [GeneratedRegex(@"(?<key>(?<![\w/-])(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:" + Quoted + @"|'[^'\r\n]*'|" + Bare + ")", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?:(?<![\w/-])|" + AfterEscape + @")(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:" + Quoted + @"|'[^'\r\n]*'|" + Bare + ")", RegexOptions.IgnoreCase)]
     private static partial Regex FlagSecret();
 
     // Name with any prefix (ACTIONS_RUNNER_INPUT_TOKEN, DB_PASSWORD, "api_key", \"password\"), then ":"/"=" or a
@@ -592,19 +722,19 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:[^;\r\n""\\]|\\(?!"")){1,256}|(?:(?:[^;\r\n\\]|\\(?!"")){1,256}?(?=;)|(?:[^\s,;\\]|\\(?!""))+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + @")(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
     // (REG_DWORD, REG_QWORD) are flags such as DisablePasswordChange and stay.
-    [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)[^\s][^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)(?<value>[^\s][^\r\n]*)", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex Registry();
 
     [GeneratedRegex(@"(?<=[?&;]|\\u00(?:26|3[Ff]|3[Bb]))sig=(?:[^&\s""'<>;\\]|\\(?!""))+", RegexOptions.IgnoreCase)]
     private static partial Regex SasSignature();
 
     // Account names given as switches or connection-string keys: /user:CORP\jane, --username jane, User Id=sa.
-    [GeneratedRegex(@"(?<key>(?<![\w/-])/u(?:ser)?:|(?<![\w-])--user(?:name)?=|(?<![\w-])--username[ \t]+|\bUser[ \t_]?(?:Id|Name)[ \t]*=[ \t]*)(?!" + Placeholder + @")(?:" + Quoted + @"|(?:[^\s;,""\\]|\\(?!""))+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?:(?<![\w/-])|" + AfterEscape + @")(?:/u(?:ser)?:|--user(?:name)?=|--username[ \t]+)|" + WordStart + @"User[ \t_]?(?:Id|Name)[ \t]*=[ \t]*)(?!" + Placeholder + @")(?:" + Quoted + @"|(?:" + NotClosing + @"(?:\\[^\s]|[^\s;,""\\]))+)", RegexOptions.IgnoreCase)]
     private static partial Regex UserFlag();
 
     // Plain and JSON-escaped (https:\/\/) URLs.
@@ -613,7 +743,7 @@ public sealed partial class Redactor
 
     // Any user@host:path remote, including SSH host aliases with no TLD (git@github.com-customer:org/repo.git), and a
     // user-less host:path remote when it names a repository (build01:acme/repo.git).
-    [GeneratedRegex(@"\b[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s""'<>]+|\b[A-Za-z0-9][A-Za-z0-9._-]+:[A-Za-z0-9_~.-][^\s""'<>\\]*\.git\b", RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"\b[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:(?:[^\s""'<>\\]|\\[^\s""'<>])+|\b[A-Za-z0-9][A-Za-z0-9._-]+:[A-Za-z0-9_~.-][^\s""'<>\\]*\.git\b", RegexOptions.NonBacktracking)]
     private static partial Regex ScpUrl();
 
     // An image digest (alpine@sha256:...) is a hash, not a remote.
@@ -638,7 +768,7 @@ public sealed partial class Redactor
     [GeneratedRegex(Open + @"(?:(?<![\w.~-])|" + AfterEscape + "|" + ShortSwitch + @")(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
     private static partial Regex PosixDrive();
 
-    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + "|" + ShortSwitch + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + "|" + ShortSwitch + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?\\]|\\(?!"")|(?(open)" + QuotedApostrophe + "|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
     private static partial Regex PosixHome();
 
     [GeneratedRegex(@"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")]
@@ -682,7 +812,7 @@ public sealed partial class Redactor
     // Bare host names with a known top-level domain (fs01.corp.example.com, _ldap._tcp.example.com, x.co.jp/path).
     // File names (main.vi, ollama.exe), .NET namespaces (System.IO, Microsoft.NETCore.App, ASP.NET) and Windows .com
     // programs (System32\chcp.com) are not hosts.
-    [GeneratedRegex(@"(?:(?<![\w.@/-])|" + AfterEscape + @")(?<!(?:System32|SysWOW64)[\\/]{1,4})(?!(?-i:System|Microsoft|ASP|Windows|Newtonsoft|NuGet)\.)(?<host>(?:" + Label + ")+(?:" + SafeDomains + ")|(?:" + Label + "){2,}(?:" + RiskyDomains + @")|(?<=\b(?:Suffix|Domain|ComputerName|Resolve-DnsName|nslookup|ping|tracert|Test-NetConnection|Test-Connection)[ \t.:=]{1,40})(?:" + Label + ")(?:" + RiskyDomains + @"))(?<rest>/[^\s""'<>]*)?(?![\w-]|\.[\w-])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:(?<![\w.@/-])|" + AfterEscape + @")(?<!(?:System32|SysWOW64)[\\/]{1,4})(?!(?-i:System|Microsoft|ASP|Windows|Newtonsoft|NuGet)\.)(?<host>(?:" + Label + ")+(?:" + SafeDomains + ")|(?:" + Label + "){2,}(?:" + RiskyDomains + @")|(?<=\b(?:Suffix|Domain|ComputerName|Resolve-DnsName|nslookup|ping|tracert|Test-NetConnection|Test-Connection)[ \t.:=]{1,40})(?:" + Label + ")(?:" + RiskyDomains + @"))(?<rest>/(?:[^\s""'<>\\]|\\[^\s""'<>])*)?(?![\w-]|\.[\w-])", RegexOptions.IgnoreCase)]
     private static partial Regex Host();
 
     // The account in user@address once the address is redacted (ssh jane@10.0.0.5).
@@ -698,6 +828,15 @@ public sealed partial class Redactor
 
     [GeneratedRegex(@"(?<!\\)\\+u(?:00[Aa][Dd]|200[B-Fb-f]|202[A-Ea-e]|206[0-4]|[Ff][Ee][Ff][Ff])")]
     private static partial Regex EscapedInvisible();
+
+    [GeneratedRegex("password|passwd|pwd|secret|token|key", RegexOptions.IgnoreCase)]
+    private static partial Regex SecretWord();
+
+    [GeneratedRegex(@"\\?""[ \t]*(?:[,}\]:]|\r|\n|\z)", RegexOptions.NonBacktracking)]
+    private static partial Regex JsonClose();
+
+    [GeneratedRegex("\"\uFDD0(?<index>[\uFDD2-\uFDDB]+)\uFDD1\"")]
+    private static partial Regex Mask();
 
     [GeneratedRegex("(" + Placeholder + ")")]
     private static partial Regex PlaceholderSplit();

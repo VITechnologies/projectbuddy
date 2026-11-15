@@ -822,7 +822,7 @@
         "fs01"
       ],
       "mustContain": [
-        "net use Z: <path> <secret>"
+        "net use Z: <path> \"<secret>"
       ]
     },
     {
@@ -931,6 +931,24 @@
       ],
       "mustContain": [
         "Subject: O=\"GitHub, Inc.\", CN=github.com, L=San Francisco, S=California, C=US"
+      ]
+    },
+    {
+      "id": "quoted-arguments-at-line-end",
+      "input": "net use Z: \\\\srv\\s \"Sup3r Qone\"\nnet user jane \"Sup3r Qtwo\"\n7z x a.7z -p\"Sup3r Qthree\"\nschtasks /RP \"Sup3r Qfour\"",
+      "mustNotContain": [
+        "Sup3r",
+        "Qone",
+        "Qtwo",
+        "Qthree",
+        "Qfour",
+        "jane"
+      ],
+      "mustContain": [
+        "net use Z: <path> \"<secret>\"",
+        "net user <user> \"<secret>\"",
+        "-p\"<secret>\"",
+        "/RP \"<secret>\""
       ]
     }
   ]

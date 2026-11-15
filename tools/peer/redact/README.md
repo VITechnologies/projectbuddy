@@ -38,6 +38,8 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
   - Text outside a valid literal is never decoded, so a raw Windows path such as
     `C:\Temp\uadd1` keeps its separator.
 - Invisible characters are removed again and the text is normalized to NFC.
+  Unicode noncharacters (`U+FDD0`–`U+FDEF`) are removed too; the masks below use
+  them, so evidence can never forge one.
 - The rules below run in order, and the whole order, cleaning included,
   **repeats until the text stops changing**. A later pass is needed only when one rule's placeholder
   unlocks an earlier rule, so `Redactor.MaxPasses` (32) exceeds the number of
@@ -81,12 +83,34 @@ PowerShell `::` calls.
 A rule never takes a value that is already a placeholder again, so a settled
 `{"password":<secret>}` keeps its closing brace.
 
-Values in JSON-encoded evidence (process command lines exported with
-`ConvertTo-Json`, the agent's own `Utf8JsonWriter` output) are taken whole at
-any nesting. A quoted value closes only with its own quote spelling: `"x"`,
-`\"x\"`, `\\\"x\\\"`, `\\u0022x\\u0022` or `\u0022x\u0022`. An unquoted
-value never ends in the `\` of an escaped quote, so a placeholder can never
-split a JSON string.
+## JSON evidence
+
+Evidence is often JSON: process command lines exported with `ConvertTo-Json`,
+event records, or the agent's own `Utf8JsonWriter` output, sometimes nested
+inside another JSON envelope.
+
+- **A JSON string literal with escapes, between JSON punctuation** (after `{`,
+  `[`, `:` or `,` and before `:`, `,`, `]` or `}`), is redacted as the text it
+  stands for. It is decoded, so `\n` is a real line break and `\"` a quote, then
+  settled with every rule (nested JSON included, at any depth), and encoded
+  again. Line-based rules therefore work inside JSON exactly as in raw text, and
+  the output stays well formed.
+- While the other rules run over the rest of the text, such a literal is held
+  behind a quoted mask, so a value rule (`"password":"…"`) still takes it whole
+  and nothing reads its escapes as path separators.
+- A quoted raw path that is not between JSON punctuation (`copy "C:\temp\new"`)
+  is not decoded and stays with the path rules.
+- Outside such literals (escaped JSON shown in a log line), a quoted value closes
+  only with its own quote spelling: `"x"`, `\"x\"`, `\\\"x\\\"`,
+  `\\u0022x\\u0022` or `\u0022x\u0022`.
+- An unquoted value keeps a backslash with the next character and stops at the
+  close of a JSON string (`"` or `\"` before `,`, `:`, `]`, `}` or the line end),
+  so a placeholder never splits a string or swallows its closing quote. A quoted
+  command argument whose closing quote lies there keeps its opening quote
+  (`"<secret>"`).
+- UNC roots are recognized at any depth (`\\fs01`, `\\\\fs01`, …), and the
+  secret, account and command rules also start right after a `\uXXXX` escape
+  left at a deeper level.
 
 ## Paths
 
@@ -190,6 +214,10 @@ operator keeps them in a file on the peer (`projectbuddy/redaction-denylist@1`:
 `corpus.json` (`projectbuddy/redaction-corpus@1`) is **synthetic**. It names
 operator `denyTerms` and `wholeWordTerms`. Each item lists strings that must not
 survive and strings that must stay, and every item must also be idempotent.
+Every item is also wrapped in JSON three ways (`System.Text.Json` at one and two
+levels, and PowerShell 5.1 style with `\"` escapes). Nothing listed may survive
+in the decoded value, the output must still parse at every level, and
+redaction must stay idempotent.
 Token-shaped values are written as `{{templates}}` and assembled at test time,
 so no token-like literal is ever committed.
 
