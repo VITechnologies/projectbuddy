@@ -27,6 +27,10 @@ public sealed partial class Redactor
     public const int MaxTermLength = 200;
     public const int MaxTerms = 1000;
     public const int MaxInputChars = 4_000_000;
+
+    // A placeholder is at most three times the shortest text it replaces (abc -> <private>), so redacted output fits
+    // here, and redacting it again is accepted when it is already settled.
+    public const int MaxOutputChars = 3 * MaxInputChars;
     // More than the number of rules: a later pass can only be needed when a rule unlocks an earlier one, so a
     // deliberate chain through every rule still settles. Passes after the text settles never run.
     public const int MaxPasses = 32;
@@ -74,6 +78,8 @@ public sealed partial class Redactor
 
     internal int Passes { get; init; } = MaxPasses;
 
+    internal int OutputLimit { get; init; } = MaxOutputChars;
+
     // The peer's own machine and account names are always private, whatever the operator's list says.
     public static Redactor ForHost(IEnumerable<string> denyTerms, string machineName, string userName) =>
         new(denyTerms, wholeWordTerms: new[] { machineName, userName }.Where(name => name.Trim().Length >= MinTermLength));
@@ -102,7 +108,9 @@ public sealed partial class Redactor
 
     public Redaction Redact(string text)
     {
-        if (text.Length > MaxInputChars)
+        // Over the input cap, only text that is already redacted (settled) is accepted, never partly redacted.
+        var settledOnly = text.Length > MaxInputChars;
+        if (text.Length > OutputLimit)
         {
             throw new RedactionException($"evidence over {MaxInputChars} characters is refused, not partly redacted");
         }
@@ -115,6 +123,11 @@ public sealed partial class Redactor
             if (next == result)
             {
                 return new Redaction(result, counts);
+            }
+
+            if (settledOnly || next.Length > OutputLimit)
+            {
+                throw new RedactionException($"evidence over {MaxInputChars} characters is refused, not partly redacted");
             }
 
             result = next;
@@ -402,9 +415,10 @@ public sealed partial class Redactor
     private string RedactDirectoryName(Match match)
     {
         static string Key(Match part) => part.Groups["key"].Value.Split('=')[0].Trim().ToUpperInvariant();
-        var parts = DirectoryPart().Matches(match.Value);
-        var name = match.Groups["label"].Success || parts.Any(part => Key(part) is "CN" or "OU" or "DC") || (parts.Count > 1 && parts.Any(part => Key(part) == "O"));
-        return !name ? match.Value : DirectoryPart().Replace(match.Value, part =>
+        var label = match.Groups["label"].Length;
+        var parts = DirectoryPart().Matches(match.Value[label..]);
+        var name = label > 0 || parts.Any(part => Key(part) is "CN" or "OU" or "DC") || (parts.Count > 1 && parts.Any(part => Key(part) == "O"));
+        return !name ? match.Value : match.Value[..label] + DirectoryPart().Replace(match.Value[label..], part =>
             Key(part) == "C" || IsAllowedHost(part.Groups["value"].Value.Trim().ToLowerInvariant()) || PublicIssuer().IsMatch(part.Groups["value"].Value)
                 ? part.Value : part.Groups["key"].Value + "<private>");
     }
@@ -486,9 +500,14 @@ public sealed partial class Redactor
     // hold (file.cs:line 42, https://), before a switch (" /c"; no Windows name starts with "/" or ends with a space),
     // and before the next drive or UNC path, so a kept path never carries another one along. A colon before a
     // backslash is kept when its letter cannot start a drive (abcD:\x), so no tail leaks.
-    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)\\"")(?:[^""'<>|:\r\n\t*?]|(?(open)'(?=[A-Za-z0-9])|')|:(?=" + BackSeparator + @")))*";
+    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)\\"")(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|')|:(?=" + BackSeparator + @")))*";
 
-    private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?]|(?(open)'(?=[A-Za-z0-9])|'))*";
+    private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))*";
+
+    // Inside a path opened by an apostrophe, an apostrophe stays part of a name when doubled (PowerShell's '' escape),
+    // before a letter or digit (O'Brien), or when more path (a "\" or "/") follows before the next apostrophe
+    // ('D:\Customers' Data\x'); otherwise it closes the path.
+    private const string QuotedApostrophe = @"(?:''|'(?=[A-Za-z0-9])|'(?=[^'\r\n]*[\\/][^'\r\n]*'))";
 
     // Set when a path follows an opening apostrophe ('D:\x'), so only then does an apostrophe end it.
     private const string Open = "(?<open>(?<='))?";
@@ -529,8 +548,9 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<command>\b(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>[^\r\n]*)", RegexOptions.IgnoreCase)]
     private static partial Regex Command();
 
-    // An argument is a run of plain characters and quoted parts, so -p"two words" and "\\fs01\a b" are one argument.
-    [GeneratedRegex(@"(?:[^\s""]|""[^""\r\n]*"")+")]
+    // An argument is a run of plain characters and quoted parts, so -p"two words" and "\\fs01\a b" are one argument;
+    // an unclosed quote runs to the end of the line.
+    [GeneratedRegex(@"(?:[^\s""]|""[^""\r\n]*(?:""|$))+")]
     private static partial Regex Argument();
 
     [GeneratedRegex(@"^(?:[A-Za-z]:|\*|(?:LPT|COM)[0-9]:?)$", RegexOptions.IgnoreCase)]
@@ -557,8 +577,9 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\?"")?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)[^;\r\n""]{1,256}|(?:[^;\r\n]{1,256}?(?=;)|[^\s,;]+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
-    // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line.
-    [GeneratedRegex(@"(?<key>\b[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*[ \t]{2,}REG_[A-Z0-9_]+[ \t]+|\bKey Content[ \t]*:[ \t]*)[^\s][^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
+    // (REG_DWORD, REG_QWORD) are flags such as DisablePasswordChange and stay.
+    [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)[^\s][^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex Registry();
 
     [GeneratedRegex(@"(?<=[?&;])sig=[^&\s""'<>;]+", RegexOptions.IgnoreCase)]
@@ -599,7 +620,7 @@ public sealed partial class Redactor
     [GeneratedRegex(Open + @"(?:(?<![\w.~-])|" + AfterEscape + @")(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
     private static partial Regex PosixDrive();
 
-    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?]|(?(open)'(?=[A-Za-z0-9])|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
     private static partial Regex PosixHome();
 
     [GeneratedRegex(@"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")]
@@ -615,21 +636,29 @@ public sealed partial class Redactor
 
     private const string DirectoryKey = @"\b(?:CN|OU|DC|ST|O|C|L|S|E)[ \t]{0,2}=[ \t]{0,2}";
 
+    // Any attribute may follow a known one (SERIALNUMBER=, OID.2.5.4.5=, SN=, G=), so an unknown one never ends a name.
+    private const string AnyKey = @"\b[A-Za-z][\w.]{0,40}[ \t]{0,2}=[ \t]{0,2}";
+
+    // Attributes are separated by "," ";" or "/", or by a line break: certutil -dump prints one per indented line, and
+    // long subjects wrap after a ",".
+    private const string DirectorySeparator = @"(?:[ \t]*[,;/][ \t]*(?:\r?\n[ \t]*)?|[ \t]*\r?\n[ \t]+)";
+
     // A value starts with a visible character; a "/" ends it only before the next attribute (/C=US/O=x), so
     // OU=Sales/Marketing keeps its slash.
     private const string DirectoryValue = @"(?:[^,;+""\r\n<>=\\/ \t]|\\.)(?:[^,;+""\r\n<>=\\/]|\\.|/(?![A-Za-z]{1,2}[ \t]{0,2}=))*";
 
     // Directory names and certificate subjects as a whole: CN=Jane Doe,OU=Lab,DC=contoso,DC=local; curl's
     // "C=US; O=x; CN=y"; OpenSSL's "C = US, O = x" and "/C=US/O=x"; after an optional Subject:/Issuer: label.
-    [GeneratedRegex(@"(?<label>\b(?:Subject|Issuer)[ \t]{0,32}[:=][ \t]{0,4})?/?" + DirectoryKey + DirectoryValue + @"(?:[ \t]*[,;/][ \t]*" + DirectoryKey + DirectoryValue + ")*", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:(?<label>\b(?:Subject|Issuer)[ \t]{0,32}[:=](?:[ \t]*\r?\n[ \t]+|[ \t]{0,4}))/?" + AnyKey + "|/?" + DirectoryKey + ")" + DirectoryValue + "(?:" + DirectorySeparator + AnyKey + DirectoryValue + ")*", RegexOptions.IgnoreCase)]
     private static partial Regex DirectoryName();
 
-    [GeneratedRegex("(?<key>" + DirectoryKey + ")(?<value>" + DirectoryValue + ")", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("(?<key>" + AnyKey + ")(?<value>" + DirectoryValue + ")", RegexOptions.IgnoreCase)]
     private static partial Regex DirectoryPart();
 
-    // Public certificate authorities and vendors, so TLS and code-signing issuers stay readable. Only a value that starts
-    // with one counts, so "Contoso Microsoft Teams Room" is still private.
-    [GeneratedRegex(@"^\s*(?:DigiCert|GlobalSign|Sectigo|COMODO|USERTrust|ISRG|Let's Encrypt|Entrust|GoDaddy|Starfield|VeriSign|Thawte|GeoTrust|Baltimore|IdenTrust|QuoVadis|Certum|Symantec|Microsoft|Amazon|Google Trust Services|GitHub)\b", RegexOptions.IgnoreCase)]
+    // Public certificate authorities and vendors, so TLS and code-signing issuers stay readable. The whole value must be
+    // the issuer's name followed only by certificate-naming words (Microsoft Code Signing PCA 2011, DigiCert Global
+    // Root G2), so "Contoso Microsoft Teams Room" and "Microsoft Teams Room - Contoso" are still private.
+    [GeneratedRegex(@"^\s*(?:DigiCert|GlobalSign|Sectigo|COMODO|USERTrust|ISRG|Let's Encrypt|Entrust|GoDaddy|Starfield|VeriSign|Thawte|GeoTrust|Baltimore|IdenTrust|QuoVadis|Certum|Symantec|Microsoft|Amazon|Google Trust Services|GitHub|Internet Security Research Group)(?:[\s,.-]+(?:Corporation|Corp|Inc|LLC|Limited|Ltd|Global|Root|CA|CAs|Certificate|Certification|Authority|Code|Signing|Server|Secure|TLS|SSL|RSA|ECC|EV|PCA|Intermediate|Issuing|Public|Primary|Universal|Trust|Trusted|Services?|Assured|ID|High|Assurance|Extended|Validation|Domain|Organization|Time-?Stamp(?:ing)?|Timestamping|Production|Windows|Azure|Update|Hybrid|SHA[0-9]*|[A-Z][0-9]+|[0-9]+|\(c\)|nv-sa))*\s*$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex PublicIssuer();
 
     // Bare host names with a known top-level domain (fs01.corp.example.com, _ldap._tcp.example.com, x.co.jp/path).

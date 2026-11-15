@@ -752,6 +752,78 @@
         "C:\\Windows\\Temp\\<path>",
         "C:\\Users\\<user>\\<path>"
       ]
+    },
+    {
+      "id": "certutil-dump-names",
+      "input": "Issuer:\n    CN=Acme Proxy CA\n    O=Acme Ltd\n    L=Austin\n  Name Hash(sha1): 0123abcd\nSubject: CN=acme.com, SERIALNUMBER=1234567, O=Acme Ltd\nSubject: CN=build01.acme.local, OU=Lab, S=Texas,\n    O=Acme Ltd, C=US",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "1234567",
+        "Texas",
+        "build01"
+      ],
+      "mustContain": [
+        "Issuer:\n    CN=<private>\n    O=<private>\n    L=<private>\n  Name Hash(sha1): 0123abcd",
+        "SERIALNUMBER=<private>, O=<private>",
+        "S=<private>,\n    O=<private>, C=US"
+      ]
+    },
+    {
+      "id": "public-issuers-whole-name",
+      "input": "CN=Microsoft Teams Room - Acme Boardroom, O=Microsoft Corporation\nIssuer: CN=DigiCert SHA2 Assured ID Code Signing CA, O=DigiCert Inc, C=US\nCN=ISRG Root X1, O=Internet Security Research Group",
+      "mustNotContain": [
+        "Acme",
+        "Boardroom",
+        "Teams"
+      ],
+      "mustContain": [
+        "CN=<private>, O=Microsoft Corporation",
+        "Issuer: CN=DigiCert SHA2 Assured ID Code Signing CA, O=DigiCert Inc, C=US",
+        "CN=ISRG Root X1, O=Internet Security Research Group"
+      ]
+    },
+    {
+      "id": "quoted-paths-with-apostrophes",
+      "input": "Cannot find path 'D:\\Projects\\Customers' Data\\Acme Corp\\plan.docx' because it does not exist.\nRemove-Item -LiteralPath 'D:\\Projects\\Customers'' Data\\Acme Corp'\n'D:\\O'Brien\\x' missing\nls: cannot access '/home/jane/Customer' Work/x': No such file",
+      "mustNotContain": [
+        "Data",
+        "Acme",
+        "Brien",
+        "jane",
+        "Work"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "-LiteralPath '<path>'",
+        "'<path>' missing",
+        "cannot access '/home/<user>/<path>': No such file"
+      ]
+    },
+    {
+      "id": "registry-short-names-and-flags",
+      "input": "    db_pass    REG_SZ    Sup3rDb\n    ProxyPass    REG_SZ    Sup3rProxy\n    DisablePasswordChange    REG_DWORD    0x0\n    Bypass    REG_DWORD    0x1",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "db_pass    REG_SZ    <secret>",
+        "ProxyPass    REG_SZ    <secret>",
+        "DisablePasswordChange    REG_DWORD    0x0",
+        "Bypass    REG_DWORD    0x1"
+      ]
+    },
+    {
+      "id": "unclosed-quoted-argument",
+      "input": "net use Z: \\\\fs01\\share \"Sup3r Spaced",
+      "mustNotContain": [
+        "Sup3r",
+        "Spaced",
+        "fs01"
+      ],
+      "mustContain": [
+        "net use Z: <path> <secret>"
+      ]
     }
   ]
 }

@@ -19,7 +19,8 @@ release's notes for the exact pinned commit.
     hosts only, never a path), git remotes, e-mail addresses, directory names
     and certificate subjects, and bare host names under generic and country
     domains.
-  - It also covers `reg query` secret rows and `netsh` key content.
+  - It also covers `reg query` secret rows, `netsh` key content, and
+    certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts.
   - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
     first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
     text such as a Windows path is never decoded.
@@ -35,8 +36,8 @@ release's notes for the exact pinned commit.
     characters.
   - Rules repeat until the text settles (at most 32 passes, more than the
     number of rules), so the output is idempotent by construction. Evidence
-    over 4,000,000 characters is refused whole, and every adversarial shape
-    tested stays linear up to that cap.
+    over 4,000,000 characters is refused whole unless it is already redacted,
+    and every adversarial shape tested stays linear up to that cap.
   - Diagnostics stay: digests, versions, exit codes and times.
   - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
     matrix at 100% coverage.

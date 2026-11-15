@@ -17,7 +17,11 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 ## Input and passes
 
 - Evidence over `Redactor.MaxInputChars` (4,000,000) is **refused whole**
-  (`RedactionException`), never partly redacted.
+  (`RedactionException`), never partly redacted, unless it is already redacted.
+  A placeholder is at most three times the shortest text it replaces
+  (`abc` → `<private>`), so output can grow to `Redactor.MaxOutputChars`
+  (12,000,000). Text up to that size that is already settled is returned
+  unchanged, so redacting redacted text changes nothing at any size.
 - Invisible format characters are removed, including those outside the Basic
   Multilingual Plane (zero-width spaces and joiners, soft hyphens, tag
   characters), and lone surrogates become `U+FFFD`. Nothing a reader cannot see
@@ -50,11 +54,11 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 | `Authorization`/`Proxy-Authorization` values, plain or in escaped JSON (`\"Authorization\":\"…\"`), after `:`, `=` or a table gap of 2+ spaces, to the closing quote or the end of the line | `<secret>` | the header name and a well-known scheme (`Bearer`, `Basic`, `token`, `AWS4-HMAC-SHA256`, …) |
 | Token-like `Bearer`/`Basic` credentials elsewhere (16+ characters with a digit) | `<secret>` | the scheme; prose such as "Basic authentication" stays |
 | XML `key="…Password…" value="…"` | `<secret>` | the key |
-| `reg query` rows whose name holds a secret word (`DefaultPassword    REG_SZ    …`) and `netsh` `Key Content : …`, to the end of the line | `<secret>` | the name and type |
-| Command lines: the password argument of `net use` (first plain argument) and `net user` (second, after the account, which becomes `<user>`); `schtasks /P`, `/RP`; `sqlcmd`, `bcp`, `osql` `-P` (also glued, `-PSecret`); `psexec`, `certutil` `-p` (and `/p`), `docker login` `-p`; `7z -pSecret` and `-p"two words"`. The matching account switches (`/U`, `/RU`, `-U`, `-u`) become `<user>`. Short flags count only after their own command, because a general `-p` is a port. | `<secret>` | the command and its switches |
+| `reg query` string and binary rows whose name holds a secret word or ends in `pass`/`pw` (`DefaultPassword    REG_SZ    …`, `ProxyPass    REG_SZ    …`), and `netsh` `Key Content : …`, to the end of the line | `<secret>` | the name and type; numeric rows (`DisablePasswordChange    REG_DWORD    0x0`) stay |
+| Command lines (an argument may mix plain and quoted parts, and an unclosed quote runs to the line end): the password argument of `net use` (first plain argument) and `net user` (second, after the account, which becomes `<user>`); `schtasks /P`, `/RP`; `sqlcmd`, `bcp`, `osql` `-P` (also glued, `-PSecret`); `psexec`, `certutil` `-p` (and `/p`), `docker login` `-p`; `7z -pSecret` and `-p"two words"`. The matching account switches (`/U`, `/RU`, `-U`, `-u`) become `<user>`. Short flags count only after their own command, because a general `-p` is a port. | `<secret>` | the command and its switches |
 | PowerShell: `ConvertTo-SecureString "…"`, `-String …` and `"…" \| ConvertTo-SecureString`; `NetworkCredential("user", "…")`, `-ArgumentList "user", "…"` and `::new($user, "…")` (a literal user becomes `<user>`, a variable stays) | `<secret>` | the call |
 | Flags: `--token x`, `-pw x`, `--password=x`, `-passin`/`-passout pass:x`, `/pass:x`, `/password:x` | `<secret>` | the flag |
-| Assignments whose key contains a secret word, with any prefix (`DB_PASSWORD`, `ACTIONS_RUNNER_INPUT_TOKEN`, `"api_key"`, `\"password\"`), or whose key is `pw` or `pass` as a whole word part (`$pw`, `db_pass`, but not `bypass`; a number after them is a count, as in `Pass: 9`), after `:`/`=` or a table gap other than a `reg query` type column. A quoted value (plain or escaped) is taken whole. After a `;` (a connection-string item), the value runs to the next `;`, the line end or a quote; elsewhere a `;` ends it. Both are capped at 256 characters. A value that starts with a credential cmdlet (`$pw = Read-Host …`) is code and stays. | `<secret>` | the key and separator |
+| Assignments whose key contains a secret word, with any prefix (`DB_PASSWORD`, `ACTIONS_RUNNER_INPUT_TOKEN`, `"api_key"`, `\"password\"`), or whose key is `pw` or `pass` as a whole word part (`$pw`, `db_pass`, but not `bypass`; a number after them is a count, as in `Pass: 9`, so an unquoted numeric PIN there stays visible), after `:`/`=` or a table gap other than a `reg query` type column. A quoted value (plain or escaped) is taken whole. After a `;` (a connection-string item), the value runs to the next `;`, the line end or a quote; elsewhere a `;` ends it. Both are capped at 256 characters. A value that starts with a credential cmdlet (`$pw = Read-Host …`) is code and stays. | `<secret>` | the key and separator |
 | SAS signatures (`?…&sig=…`) | `sig=<secret>` | the other query fields |
 | Accounts: `/user:x`, `/u:x`, `--user=x`, `--username x`, `User Id=x`, `UserName=x` | `<user>` | the switch or key |
 | URLs, plain or JSON-escaped (`https:\/\/`) | `<url>` | `scheme://host[:port]` for allow-listed hosts, with the path **always** replaced by `/<path>`; user info is dropped |
@@ -63,7 +67,7 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 | UNC and device paths (`\\server\share`, `\\?\UNC\…`, `\\.\pipe\…`, `//server/share`, `file:////server/share`); Git Bash, WSL and Cygwin drive paths (`/c/…`, `/mnt/c/…`, `/cygdrive/c/…`) | `<path>` | — |
 | User profiles (`C:\Users\x`, `/home/x`, `/Users/x`, any case) | `<user>`, and the rest `<path>` | allow-listed profile folders to a fixed depth (below) |
 | MAC addresses; IPv4/IPv6 outside the allowed networks, including one that ends a sentence | `<mac>`, `<ip>` | loopback, the unspecified address and the cable `10.211.0.0/30`; versions such as `Version=13.0.0.0`, `"ProductVersion": "1.0.0.0"` and `v1.2.3.4` |
-| Directory names and certificate subjects, read as a whole sequence in LDAP (`CN=x,OU=y,DC=z`), curl (`C=US; O=x; CN=y`) and OpenSSL (`C = US, O = x`, `/C=US/O=x`) form. A sequence counts with `CN`, `OU` or `DC`, with `O` beside another attribute, or after `Subject:`/`Issuer:`, so `retries=3, s=5` stays. | `<private>` per value | the country (`C=US`), allow-listed hosts (`CN=github.com`) and values that start with a public certificate authority or vendor (`DigiCert`, `GlobalSign`, `Let's Encrypt`, `Microsoft`, …) |
+| Directory names and certificate subjects, read as a whole sequence in LDAP (`CN=x,OU=y,DC=z`), curl (`C=US; O=x; CN=y`), OpenSSL (`C = US, O = x`, `/C=US/O=x`) and `certutil -dump` (one attribute per indented line after `Issuer:`) form. Any attribute may follow a known one (`SERIALNUMBER=`, `OID.2.5.4.5=`), and a line break after `,` continues the sequence. A sequence counts with `CN`, `OU` or `DC`, with `O` beside another attribute, or after `Subject:`/`Issuer:`, so `retries=3, s=5` stays. | `<private>` per value | the country (`C=US`), allow-listed hosts (`CN=github.com`) and public issuers: a known certificate authority or vendor name (`DigiCert`, `GlobalSign`, `Let's Encrypt`, `Microsoft`, …) followed only by certificate-naming words (`Microsoft Code Signing PCA 2011`, `DigiCert Global Root G2`), so `Microsoft Teams Room - Contoso` stays private |
 | Bare host names (below) | `<host>` | allow-listed hosts, again with any path replaced by `/<path>` |
 | The account in `user@<ip>` or `user@<host>` (`ssh jane@10.0.0.5`) | `<user>` | — |
 | Deny-list terms (case-insensitive, longest first, words joined by any whitespace) | `<private>` | placeholders are never rewritten |
@@ -85,7 +89,9 @@ escape, or a short switch (`-oD:\x`, `/ID:\x`). Never inside a word, so
 
 A path match runs on through spaces and apostrophes (`O'Brien`, `Customers' Data`), so
 `D:\Acme Projects\x` never leaks its tail. A path opened by an apostrophe
-(`'D:\x'`, as in PowerShell errors) ends at one. It stops:
+(`'D:\x'`, as in PowerShell errors) ends at one, except a doubled `''`
+(PowerShell's escape), one before a letter or digit, or one followed by more path
+(`\` or `/`) before the next apostrophe (`'D:\Customers' Data\x'`). It stops:
 - at a double quote, `<`, `>`, `|`, a tab, a line end or a wildcard;
 - at a colon, which no Windows name can hold (`file.cs:line 42`,
   `proj.csproj(12,5): error`). A colon before a backslash is kept only when its
@@ -152,8 +158,8 @@ most 256 characters). The tests redact input at the 4,000,000-character cap for
 each adversarial shape and require it to finish well inside interactive time.
 The shapes include repeated `a.`, `C:\` and `password=a `; `key="` followed by
 `pwd`; whitespace runs before digits; `/O=a` and `Subject: s=1, `; `sqlcmd -P a`
-and `7z -p"a`; unclosed JSON literals; `D:\a' `; and backslash runs before
-`u0027`.
+and `7z -p"a`; unclosed JSON literals and argument quotes; `D:\a' ` and
+`'D:\a' b\`; attributes on indented lines; and backslash runs before `u0027`.
 
 ## The deny list is operator-private
 

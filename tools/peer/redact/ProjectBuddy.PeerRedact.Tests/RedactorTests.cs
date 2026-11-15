@@ -224,8 +224,22 @@ public class RedactorTests
     public void RootsAndTrailingSeparatorsNameNothing(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
     [Fact]
-    public void OversizedEvidenceIsRefusedWhole() =>
-        Assert.Throws<RedactionException>(() => Plain().Redact(new string('a', Redactor.MaxInputChars + 1)));
+    public void OversizedEvidenceIsRefusedWhole()
+    {
+        Assert.Throws<RedactionException>(() => Plain().Redact(new string('a', Redactor.MaxOutputChars + 1)));
+        Assert.Throws<RedactionException>(() => Plain().Redact(string.Concat(Enumerable.Repeat("1.2.3.4 ", Redactor.MaxInputChars / 8 + 1))));
+        Assert.Throws<RedactionException>(() => new Redactor(["abc"]) { OutputLimit = 20 }.Redact("abc abc abc"));
+    }
+
+    [Fact]
+    public void RedactedOutputOverTheInputCapIsAcceptedOnlyWhenSettled()
+    {
+        var redactor = new Redactor(["abc"]);
+        var once = redactor.Redact(string.Concat(Enumerable.Repeat("abc ", Redactor.MaxInputChars / 4))).Text;
+        Assert.True(once.Length > Redactor.MaxInputChars);
+        Assert.Equal(once, redactor.Redact(once).Text);
+        Assert.Equal(Redactor.MaxInputChars + 1, Plain().Redact(new string('a', Redactor.MaxInputChars + 1)).Text.Length);
+    }
 
     [Fact]
     public void InvisibleAndBrokenCharactersAreCleaned()
@@ -267,6 +281,10 @@ public class RedactorTests
     [InlineData("", "Subject: s=1, ")]
     [InlineData("", "D:\\a' ")]
     [InlineData("", "DefaultPassword  ")]
+    [InlineData("CN=a", "\n O=a")]
+    [InlineData("CN=a", ", x=a")]
+    [InlineData("", "'D:\\a' b\\")]
+    [InlineData("net use ", "\"a ")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
