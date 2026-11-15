@@ -219,6 +219,19 @@ public class TriageTests
     }
 
     [Fact]
+    public void AnExactQuoteBeatsANewerLineThatOnlyMentionsIt()
+    {
+        var log = "ci\tpush image\t2026-11-15T09:26:25Z error: unauthorized: authentication required\n"
+            + "ci\tpush image\t2026-11-15T09:26:26Z retry 1/3 ignored transient 'error: unauthorized: authentication required' from mirror cache\n"
+            + "ci\tpush image\t2026-11-15T09:26:27Z ##[error]Process completed with exit code 1.";
+        var evidence = LogText.Build(LogText.Normalize(log), 12000);
+        var exact = Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"push image","errorLine":"error: unauthorized: authentication required","class":"gate-failure"}""");
+        Assert.Equal("error: unauthorized: authentication required", exact["errorLine"]!.GetValue<string>());
+        var fragment = Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"push image","errorLine":"ignored transient","class":"gate-failure"}""");
+        Assert.StartsWith("retry 1/3", fragment["errorLine"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void QuotesOfClippedLinesMatchTheirTextButNotTheClipMarker()
     {
         var evidence = LogText.Build(LogText.Normalize("error: " + new string('x', LogText.MaxLineChars)), 12000);

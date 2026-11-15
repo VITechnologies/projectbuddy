@@ -94,9 +94,12 @@ public static class Triage
             throw NoAdvice("the step does not appear in the log");
         }
 
+        // Prefer a line the quote equals: a later line that merely mentions the same text (a retry, an echo)
+        // may say the opposite of the failure the model quoted.
+        var lines = evidence.Lines.Where(line => !LogText.IsHeader(line)).ToList();
         var line = quote.Length < MinQuoteChars || quote.IndexOfAny(['\n', '\r']) >= 0
             ? null
-            : evidence.Lines.LastOrDefault(line => !LogText.IsHeader(line) && Unclipped(line).Contains(quote, StringComparison.Ordinal));
+            : lines.LastOrDefault(line => Unclipped(line).Trim() == quote) ?? lines.LastOrDefault(line => Unclipped(line).Contains(quote, StringComparison.Ordinal));
         if (line is null)
         {
             throw NoAdvice($"the error line is not a quote of at least {MinQuoteChars} characters from one log line");
