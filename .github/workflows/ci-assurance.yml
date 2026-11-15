@@ -116,7 +116,7 @@ jobs:
           PY
 
   peer-tools:
-    # tools/peer/{ollama,bench,advise} (#217, #284): the shared Ollama guard library and the tools built on it.
+    # tools/peer/{ollama,redact,bench,advise} (#217, #284, #290): the shared Ollama guard library and the tools built on it.
     # Each runs its own tests with a 100% line and branch gate on its own assembly; the tools also publish
     # the trimmed single-file win-x64 binary the peer runs.
     name: Peer Tool Tests (${{ matrix.dir }})
@@ -128,6 +128,9 @@ jobs:
         include:
           - dir: ollama
             tests: ProjectBuddy.PeerOllama.Tests
+            publish: ""
+          - dir: redact
+            tests: ProjectBuddy.PeerRedact.Tests
             publish: ""
           - dir: bench
             tests: ProjectBuddy.PeerBench.Tests

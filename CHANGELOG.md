@@ -6,6 +6,17 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
+  deterministic and idempotent redaction that peer evidence passes through
+  before a local model sees it and before it leaves the peer.
+  - It covers secrets, URLs (allow-listed hosts only, never a path), e-mail
+    addresses, paths (system prefixes kept, profiles reduced to `<user>`),
+    MACs and IPs (loopback and the cable kept), and an operator-private
+    deny list plus the host's own machine and account names.
+  - Diagnostics stay: digests, versions, exit codes and times.
+  - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
+    matrix at 100% coverage.
+
 - Add `projectbuddy-advise pre-review` (#284 slice 2). It gives advisory
   findings on a `git diff`.
   - Each finding must name a rule from the policy rubric, which fixes its

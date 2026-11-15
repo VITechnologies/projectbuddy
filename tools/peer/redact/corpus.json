@@ -1,0 +1,215 @@
+{
+  "schema": "projectbuddy/redaction-corpus@1",
+  "denyTerms": [
+    "CORP-VPN-7",
+    "WS-CORP-01",
+    "Example Widgets Ltd"
+  ],
+  "items": [
+    {
+      "id": "link-outage",
+      "input": "Test-NetConnection github.com -Port 443\nRemoteAddress    : 140.82.121.4\nInterfaceAlias   : Wi-Fi\nSourceAddress    : 192.168.2.12\nTcpTestSucceeded : True",
+      "mustNotContain": [
+        "192.168.2.12",
+        "140.82.121.4"
+      ],
+      "mustContain": [
+        "github.com",
+        "Wi-Fi",
+        "TcpTestSucceeded : True"
+      ]
+    },
+    {
+      "id": "profile-path",
+      "input": "ollama path: C:\\Users\\JaneOperator\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+      "mustNotContain": [
+        "JaneOperator"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\AppData\\Local\\Programs\\Ollama\\ollama.exe"
+      ]
+    },
+    {
+      "id": "profile-private-folder",
+      "input": "opened C:\\Users\\JaneOperator\\Documents\\Acme Widgets\\plan.docx",
+      "mustNotContain": [
+        "JaneOperator",
+        "Documents",
+        "Acme",
+        "plan.docx"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\<path>"
+      ]
+    },
+    {
+      "id": "customer-path",
+      "input": "Opening D:\\Customer Work\\secret-proj\\main.vi failed",
+      "mustNotContain": [
+        "Customer Work",
+        "secret-proj",
+        "main.vi"
+      ],
+      "mustContain": [
+        "<path>"
+      ]
+    },
+    {
+      "id": "system-path-then-customer-path",
+      "input": "C:\\Windows\\System32\\cmd.exe /c type D:\\Clients\\plan.txt",
+      "mustNotContain": [
+        "Clients",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "C:\\Windows\\System32\\cmd.exe /c type ",
+        "<path>"
+      ]
+    },
+    {
+      "id": "unc-path",
+      "input": "copy \\\\fileserver01\\projects$\\drop\\x.zip",
+      "mustNotContain": [
+        "fileserver01",
+        "projects$",
+        "x.zip"
+      ],
+      "mustContain": [
+        "copy <path>"
+      ]
+    },
+    {
+      "id": "urls",
+      "input": "git clone https://github.com/example-corp/secret-repo.git\nsvn checkout svn://svn.corp.example/trunk\npush https://user:hunter22@gitlab.com/group/x",
+      "mustNotContain": [
+        "example-corp",
+        "secret-repo",
+        "svn.corp.example",
+        "hunter22",
+        "group/x"
+      ],
+      "mustContain": [
+        "https://github.com/<path>",
+        "<url>",
+        "https://gitlab.com/<path>"
+      ]
+    },
+    {
+      "id": "scp-remote",
+      "input": "remote: git@github.com:example-corp/secret-repo.git",
+      "mustNotContain": [
+        "example-corp",
+        "secret-repo"
+      ],
+      "mustContain": [
+        "remote: <url>"
+      ]
+    },
+    {
+      "id": "email",
+      "input": "reported by jane.doe@corp.example on Monday",
+      "mustNotContain": [
+        "jane.doe",
+        "corp.example"
+      ],
+      "mustContain": [
+        "reported by <email> on Monday"
+      ]
+    },
+    {
+      "id": "tokens",
+      "input": "gh {{gh}} pat {{ghpat}} gl {{glpat}} runner {{glrt}} aws {{aws}} slack {{slack}} jwt {{jwt}} npm {{npm}} gapi {{gapi}}",
+      "mustNotContain": [
+        "{{gh}}",
+        "{{ghpat}}",
+        "{{glpat}}",
+        "{{glrt}}",
+        "{{aws}}",
+        "{{slack}}",
+        "{{jwt}}",
+        "{{npm}}",
+        "{{gapi}}"
+      ],
+      "mustContain": [
+        "<secret>"
+      ]
+    },
+    {
+      "id": "assignments",
+      "input": "password=hunter2xx\n\"api_key\": \"abcd1234efgh\"\nAuthorization: Bearer abcdefghijklmnop\nclient_secret : s3cr3tvalue",
+      "mustNotContain": [
+        "hunter2xx",
+        "abcd1234efgh",
+        "abcdefghijklmnop",
+        "s3cr3tvalue"
+      ],
+      "mustContain": [
+        "password=<secret>",
+        "\"api_key\": <secret>",
+        "Bearer <secret>"
+      ]
+    },
+    {
+      "id": "private-key",
+      "input": "key:\n{{pem}}\nend",
+      "mustNotContain": [
+        "MIIEvQ"
+      ],
+      "mustContain": [
+        "<secret>"
+      ]
+    },
+    {
+      "id": "addresses",
+      "input": "peer 10.211.0.2 loopback 127.0.0.1 ::1 any 0.0.0.0 vpn 192.168.10.13 v6 fe80::fe66:37ff:feb8:a510 mac 4c:c5:d9:04:55:14",
+      "mustNotContain": [
+        "192.168.10.13",
+        "fe80::fe66",
+        "4c:c5:d9"
+      ],
+      "mustContain": [
+        "peer 10.211.0.2",
+        "loopback 127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "mac <mac>"
+      ]
+    },
+    {
+      "id": "deny-list",
+      "input": "InterfaceAlias CORP-VPN-7 on WS-CORP-01 for Example Widgets Ltd",
+      "mustNotContain": [
+        "CORP-VPN-7",
+        "WS-CORP-01",
+        "Example Widgets"
+      ],
+      "mustContain": [
+        "InterfaceAlias <private> on <private>"
+      ]
+    },
+    {
+      "id": "kept-diagnostics",
+      "input": "##[error]Process completed with exit code 1.\nsha256 7FC234C4286DE57A24425823F7FC4769DBEC74EACB8CDACF58ABEB228237D601\nollama version is 0.40.16 on build 10.0.26300.7171\n[Math]::Round at 18:09:12",
+      "mustNotContain": [],
+      "mustContain": [
+        "##[error]Process completed with exit code 1.",
+        "7FC234C4286DE57A24425823F7FC4769DBEC74EACB8CDACF58ABEB228237D601",
+        "0.40.16",
+        "10.0.26300.7171",
+        "[Math]::Round at 18:09:12"
+      ]
+    },
+    {
+      "id": "posix-home",
+      "input": "cache /home/jane/customers/example/x.bin",
+      "mustNotContain": [
+        "jane",
+        "customers",
+        "x.bin"
+      ],
+      "mustContain": [
+        "/home/<user>/<path>"
+      ]
+    }
+  ]
+}
