@@ -6,6 +6,16 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-advise triage` grounding refinements from the corpus
+  accuracy check (#284):
+  - an exact whole log line counts from 3 characters (a bare `Killed`),
+    while fragments still need 8;
+  - a step not found in the log is reported as `null`, and `verified`
+    lists only `errorLine`, instead of discarding a verified error line.
+
+  On the bench corpus, all 8 items were answered with no ungrounded claim:
+  7/8 error lines matched ground truth, the class was correct on 8/8, and
+  1 step was dropped rather than wrong.
 - Add `projectbuddy-advise triage` (`tools/peer/advise`, #284, P2 of #210). It
   turns a CI log into a few hundred bytes of local, advisory triage: the
   failing step, one error line quoted verbatim, and a class from a closed
