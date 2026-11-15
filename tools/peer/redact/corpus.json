@@ -824,6 +824,51 @@
       "mustContain": [
         "net use Z: <path> <secret>"
       ]
+    },
+    {
+      "id": "quoted-certificate-values",
+      "input": "Subject: CN=fs01.acme.local, O=\"Acme, Inc.\", L=Austin, S=Texas, C=US\nIssuer: CN=\"Acme, Inc. Proxy CA\", O=\"Acme, Inc.\", C=US\nsubject=C = US, ST = Texas, L = Austin, O = \"Acme, Inc.\", CN = fs01.acme.local\nCN=\"Doe, John \"\"JD\"\"\", OU=Lab, DC=corp",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "Texas",
+        "Doe",
+        "John",
+        "JD"
+      ],
+      "mustContain": [
+        "Subject: CN=<private>, O=<private>, L=<private>, S=<private>, C=US",
+        "Issuer: CN=<private>, O=<private>, C=US",
+        "ST = <private>, L = <private>, O = <private>, CN = <private>",
+        "CN=<private>, OU=<private>, DC=<private>"
+      ]
+    },
+    {
+      "id": "public-issuer-locality",
+      "input": "Issuer: CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\nIssuer: CN=Acme Room, O=Microsoft Corporation, L=Austin, S=Texas",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "Texas"
+      ],
+      "mustContain": [
+        "CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "CN=<private>, O=Microsoft Corporation, L=<private>, S=<private>"
+      ]
+    },
+    {
+      "id": "apostrophes-in-last-segment",
+      "input": "Cannot find path 'D:\\Clients\\Acme\\Jones' Bakery Invoice.docx' because it does not exist.\nCannot find path 'D:\\Music\\Rock 'n' Roll Ltd' because it does not exist.\nCannot find path 'D:\\Clients\\x' because it doesn't exist.",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "Bakery",
+        "Roll"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "Cannot find path '<path>' because it doesn't exist."
+      ]
     }
   ]
 }

@@ -416,11 +416,19 @@ public sealed partial class Redactor
     {
         static string Key(Match part) => part.Groups["key"].Value.Split('=')[0].Trim().ToUpperInvariant();
         var label = match.Groups["label"].Length;
+        bool Public(Match part)
+        {
+            var value = part.Groups["value"].Value.Trim().Trim('"');
+            return IsAllowedHost(value.ToLowerInvariant()) || PublicIssuer().IsMatch(value);
+        }
+
         var parts = DirectoryPart().Matches(match.Value[label..]);
         var name = label > 0 || parts.Any(part => Key(part) is "CN" or "OU" or "DC") || (parts.Count > 1 && parts.Any(part => Key(part) == "O"));
+
+        // A public issuer's own name (CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation) keeps its locality too.
+        var issuer = parts.Where(part => Key(part) is "CN" or "O").DefaultIfEmpty().All(part => part is not null && Public(part));
         return !name ? match.Value : match.Value[..label] + DirectoryPart().Replace(match.Value[label..], part =>
-            Key(part) == "C" || IsAllowedHost(part.Groups["value"].Value.Trim().ToLowerInvariant()) || PublicIssuer().IsMatch(part.Groups["value"].Value)
-                ? part.Value : part.Groups["key"].Value + "<private>");
+            Key(part) == "C" || Public(part) || (issuer && Key(part) is "L" or "S" or "ST") ? part.Value : part.Groups["key"].Value + "<private>");
     }
 
     // A path match runs on through spaces, so the space before the next word is given back.
@@ -505,9 +513,10 @@ public sealed partial class Redactor
     private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))*";
 
     // Inside a path opened by an apostrophe, an apostrophe stays part of a name when doubled (PowerShell's '' escape),
-    // before a letter or digit (O'Brien), or when more path (a "\" or "/") follows before the next apostrophe
-    // ('D:\Customers' Data\x'); otherwise it closes the path.
-    private const string QuotedApostrophe = @"(?:''|'(?=[A-Za-z0-9])|'(?=[^'\r\n]*[\\/][^'\r\n]*'))";
+    // before a letter or digit (O'Brien), when more path (a "\" or "/") follows before the next apostrophe
+    // ('D:\Customers' Data\x'), or when the next apostrophe is the one that closes the quote, before " because" or the
+    // line end ('D:\Jones' Bakery.docx' because ...); otherwise it closes the path.
+    private const string QuotedApostrophe = @"(?:''|'(?=[A-Za-z0-9])|'(?=[^'\r\n]*[\\/][^'\r\n]*')|'(?=[^'\r\n]*'(?:[ \t]+because\b|[ \t]*[.,;:)]*[ \t]*(?:\r|\n|\z))))";
 
     // Set when a path follows an opening apostrophe ('D:\x'), so only then does an apostrophe end it.
     private const string Open = "(?<open>(?<='))?";
@@ -643,9 +652,9 @@ public sealed partial class Redactor
     // long subjects wrap after a ",".
     private const string DirectorySeparator = @"(?:[ \t]*[,;/][ \t]*(?:\r?\n[ \t]*)?|[ \t]*\r?\n[ \t]+)";
 
-    // A value starts with a visible character; a "/" ends it only before the next attribute (/C=US/O=x), so
-    // OU=Sales/Marketing keeps its slash.
-    private const string DirectoryValue = @"(?:[^,;+""\r\n<>=\\/ \t]|\\.)(?:[^,;+""\r\n<>=\\/]|\\.|/(?![A-Za-z]{1,2}[ \t]{0,2}=))*";
+    // A value is quoted when it holds a comma (O="Contoso, Inc.", Windows and OpenSSL), or starts with a visible
+    // character; a "/" ends it only before the next attribute (/C=US/O=x), so OU=Sales/Marketing keeps its slash.
+    private const string DirectoryValue = @"(?:""(?:[^""\\\r\n]|\\.|"""")*""|(?:[^,;+""\r\n<>=\\/ \t]|\\.)(?:[^,;+""\r\n<>=\\/]|\\.|/(?![A-Za-z]{1,2}[ \t]{0,2}=))*)";
 
     // Directory names and certificate subjects as a whole: CN=Jane Doe,OU=Lab,DC=contoso,DC=local; curl's
     // "C=US; O=x; CN=y"; OpenSSL's "C = US, O = x" and "/C=US/O=x"; after an optional Subject:/Issuer: label.

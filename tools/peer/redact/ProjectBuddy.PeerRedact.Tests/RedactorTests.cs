@@ -285,6 +285,8 @@ public class RedactorTests
     [InlineData("CN=a", ", x=a")]
     [InlineData("", "'D:\\a' b\\")]
     [InlineData("net use ", "\"a ")]
+    [InlineData("CN=a, O=\"", "a")]
+    [InlineData("", "'D:\\a' because ")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -364,6 +366,8 @@ public class RedactorTests
     [InlineData("/C=US/ST=Texas/O=Contoso/CN=fs01", "/C=US/ST=<private>/O=<private>/CN=<private>")]
     [InlineData("CN=DigiCert Global Root G2, O=Microsoft Corporation", "CN=DigiCert Global Root G2, O=Microsoft Corporation")]
     [InlineData("CN=github.com", "CN=github.com")]
+    [InlineData("Issuer: CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, ST=Washington, OU=Contoso Dept",
+        "Issuer: CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, ST=Washington, OU=<private>")]
     [InlineData("so=1 and x,o", "so=1 and x,o")]
     public void CertificateNamesHideTheOwnerButKeepPublicIssuers(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
