@@ -185,20 +185,56 @@ public class TriageTests
         { "missing class", """{"step":"gate-x","errorLine":"FAIL  gate-x  -- broken thing"}""" },
         { "extra key", """{"step":"gate-x","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure","why":"x"}""" },
         { "non-string step", """{"step":1,"errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
-        { "empty step", """{"step":"  ","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
-        { "long step", $$"""{"step":"{{new string('a', Triage.MaxStepChars + 1)}}","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
-        { "invented step", """{"step":"deploy","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
         { "empty line", """{"step":"gate-x","errorLine":" ","class":"gate-failure"}""" },
         { "two lines", """{"step":"gate-x","errorLine":"compiling\nFAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
         { "carriage return", """{"step":"gate-x","errorLine":"FAIL\r gate-x","class":"gate-failure"}""" },
         { "paraphrase", """{"step":"gate-x","errorLine":"FAIL gate-x -- broken thing","class":"gate-failure"}""" },
         { "tool heading as line", """{"step":"verify","errorLine":"# End of the log:","class":"gate-failure"}""" },
-        { "tool heading as step", """{"step":"Lines that look like errors","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
         { "tiny fragment", """{"step":"gate-x","errorLine":"1","class":"gate-failure"}""" },
-        { "tiny step", """{"step":"e","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
         { "section header as line", """{"step":"verify","errorLine":"== build / verify ==","class":"gate-failure"}""" },
         { "unknown class", """{"step":"gate-x","errorLine":"FAIL  gate-x  -- broken thing","class":"weather"}""" },
     };
+
+    public static TheoryData<string, string> UngroundedSteps => new()
+    {
+        { "empty", " " },
+        { "too short", "e" },
+        { "too long", new string('a', Triage.MaxStepChars + 1) },
+        { "invented", "deploy" },
+        { "tool heading", "Lines that look like errors" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UngroundedSteps))]
+    public void UngroundedStepsAreDroppedButTheErrorLineStands(string label, string step)
+    {
+        var evidence = LogText.Build(LogText.Normalize(Fixtures.Log), 12000);
+        var content = new JsonObject { ["step"] = step, ["errorLine"] = "FAIL  gate-x  -- broken thing", ["class"] = "gate-failure" }.ToJsonString();
+        var answer = Triage.Validate(Fixtures.ParsePolicy(), evidence, content);
+        Assert.Null(answer["step"]);
+        Assert.Equal("FAIL  gate-x  -- broken thing", answer["errorLine"]!.GetValue<string>());
+        Assert.False(string.IsNullOrEmpty(label));
+    }
+
+    [Fact]
+    public async Task AReportWithADroppedStepListsOnlyTheErrorLineAsVerified()
+    {
+        var fake = new FakeOllama();
+        fake.Replies.Enqueue(FakeOllama.Answer("git fetch", "FAIL  gate-x  -- broken thing", "gate-failure"));
+        var report = await Run(fake);
+        Assert.Equal("""["errorLine"]""", report["verified"]!.ToJsonString());
+        Assert.Equal("""{"step":null,"errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""", report["answer"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void AShortWholeLineIsEvidenceButAShortFragmentIsNot()
+    {
+        var evidence = LogText.Build(LogText.Normalize("Run dotnet test Engine.Tests\n  Passed 212\nKilled\nok"), 12000);
+        var answer = Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"Engine.Tests","errorLine":"Killed","class":"segfault"}""");
+        Assert.Equal("Killed", answer["errorLine"]!.GetValue<string>());
+        Assert.Throws<PeerException>(() => Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"Engine.Tests","errorLine":"ok","class":"segfault"}"""));
+        Assert.Throws<PeerException>(() => Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"Engine.Tests","errorLine":"Passed","class":"segfault"}"""));
+    }
 
     [Theory]
     [MemberData(nameof(Ungrounded))]

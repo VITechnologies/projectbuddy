@@ -73,22 +73,26 @@ costs about 2800 tokens.
   it is checked against the **log's own lines**: the error-looking lines,
   the tail lines and the `== job / step ==` headers. The tool's own headings
   never count.
-  - `step` must be at least 3 characters and appear in one of those lines.
-  - The model's `errorLine` must be a verbatim quote of at least 8
-    characters from **one** log line, not a header. The report then gives
-    that **whole log line**, so a fragment quote still returns the complete
-    message.
+  - **`errorLine` is required.** It must be a whole log line (at least 3
+    characters, so a bare `Killed` counts) or a verbatim quote of at least
+    8 characters from **one** log line; headers don't count. The report
+    gives that **whole log line**. When a quote matches several lines, a
+    line it equals wins over a newer line that merely mentions it.
+  - **`step` is kept only when it is found.** It must be 3–200 characters
+    and appear in one of those lines. Otherwise it is reported as `null`,
+    and `verified` lists only `errorLine`. A paraphrased step never voids a
+    verified error line, and is never passed on.
   - `class` must be in the policy.
 
-  Anything else exits 6. A paraphrased, invented or trivially short quote is
-  never passed on.
+  Anything else exits 6. A paraphrased, invented or trivially short error
+  line is never passed on.
 
 ## Report (`projectbuddy/advise-triage@1`)
 
 ```json
 {
   "schema": "projectbuddy/advise-triage@1", "tool": "0.1.0", "advisory": true,
-  "verified": ["step", "errorLine"],
+  "verified": ["step", "errorLine"],  // or ["errorLine"] with "step": null
   "answer": { "step": "...", "errorLine": "...", "class": "segfault" },
   "model": { "name": "qwen2.5:7b", "digest": "..." }, "ollamaVersion": "...", "policySha256": "...",
   "input": { "bytes": 49106, "normalizedBytes": 25013, "sentBytes": 11999, "signalLines": 3, "droppedLines": 211, "attempts": 1 },
@@ -96,7 +100,7 @@ costs about 2800 tokens.
 }
 ```
 
-`step` and `errorLine` are **verified extraction**. `class` is the model's
+Fields listed in `verified` are **checked extraction**. `class` is the model's
 **advisory** diagnosis (#210 D11). For example, the spike behind #284 once
 read a SIGSEGV as an out-of-memory kill.
 
@@ -107,5 +111,15 @@ On three real failed runs, using an 8 GB GPU with Ollama 0.32.3:
 
 A PowerShell failure whose message spans several lines produced no advice
 (exit 6) rather than a misquote.
+
+On the 8 triage items of the bench corpus (#217), all 8 were answered with
+**no ungrounded claim**:
+- the error line matched ground truth on 7; the 8th was `Killed`, an equally
+  valid line;
+- the step was correct on 7 and dropped on 1, where the model paraphrased
+  `git fetch`;
+- the class was correct on 8.
+
+The P1 baseline on the same items had 2 wrong extractions.
 
 Pre-review of diffs (`pre-review`) is the second slice of #284.

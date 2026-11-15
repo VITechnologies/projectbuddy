@@ -8,6 +8,7 @@ public static class Triage
 {
     public const int MinStepChars = 3;
     public const int MaxStepChars = 200;
+    public const int MinLineChars = 3;
     public const int MinQuoteChars = 8;
 
     public static async Task<JsonObject> RunAsync(Policy policy, byte[] input, OllamaClient ollama)
@@ -47,8 +48,9 @@ public static class Triage
                 ["schema"] = Versions.TriageSchema,
                 ["tool"] = Versions.Tool,
                 ["advisory"] = true,
-                // step and errorLine were checked against the evidence; class is the model's judgment.
-                ["verified"] = new JsonArray("step", "errorLine"),
+                // Only checked fields are listed: errorLine always, step when it was found in the log (otherwise it
+                // is reported as null); class is the model's judgment.
+                ["verified"] = answer["step"] is null ? new JsonArray("errorLine") : new JsonArray("step", "errorLine"),
                 ["answer"] = answer,
                 ["model"] = new JsonObject { ["name"] = policy.Model.Name, ["digest"] = policy.Model.Digest },
                 ["ollamaVersion"] = version,
@@ -78,6 +80,7 @@ public static class Triage
 
     // Model output is evidence to check, never to trust: every claim must come from a line of the log itself,
     // never from the tool's own headings, and the reported error line is the whole log line the quote came from.
+    // The error line is required; a step the log does not contain is dropped rather than passed on.
     internal static JsonObject Validate(Policy policy, Evidence evidence, string content)
     {
         var answer = Json.TryObject(content);
@@ -89,20 +92,19 @@ public static class Triage
             throw NoAdvice("the answer is not exactly {step, errorLine, class}");
         }
 
-        if (step.Length < MinStepChars || step.Length > MaxStepChars || !evidence.Lines.Any(line => line.Contains(step, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw NoAdvice("the step does not appear in the log");
-        }
+        var stepFound = step.Length >= MinStepChars && step.Length <= MaxStepChars
+            && evidence.Lines.Any(line => line.Contains(step, StringComparison.OrdinalIgnoreCase));
 
         // Prefer a line the quote equals: a later line that merely mentions the same text (a retry, an echo)
         // may say the opposite of the failure the model quoted.
         var lines = evidence.Lines.Where(line => !LogText.IsHeader(line)).ToList();
-        var line = quote.Length < MinQuoteChars || quote.IndexOfAny(['\n', '\r']) >= 0
-            ? null
-            : lines.LastOrDefault(line => Unclipped(line).Trim() == quote) ?? lines.LastOrDefault(line => Unclipped(line).Contains(quote, StringComparison.Ordinal));
+        // A whole line counts from MinLineChars (a bare "Killed" is real evidence); a fragment needs MinQuoteChars.
+        var oneLine = quote.IndexOfAny(['\n', '\r']) < 0;
+        var line = (oneLine && quote.Length >= MinLineChars ? lines.LastOrDefault(line => Unclipped(line).Trim() == quote) : null)
+            ?? (oneLine && quote.Length >= MinQuoteChars ? lines.LastOrDefault(line => Unclipped(line).Contains(quote, StringComparison.Ordinal)) : null);
         if (line is null)
         {
-            throw NoAdvice($"the error line is not a quote of at least {MinQuoteChars} characters from one log line");
+            throw NoAdvice($"the error line is neither a whole log line nor a quote of at least {MinQuoteChars} characters from one");
         }
 
         if (!policy.TriageClasses.Contains(triageClass))
@@ -110,7 +112,7 @@ public static class Triage
             throw NoAdvice("the class is not in the policy");
         }
 
-        return new JsonObject { ["step"] = step, ["errorLine"] = line.Trim(), ["class"] = triageClass };
+        return new JsonObject { ["step"] = stepFound ? step : null, ["errorLine"] = line.Trim(), ["class"] = triageClass };
     }
 
     private static string Unclipped(string line) => line.EndsWith(LogText.ClipMarker, StringComparison.Ordinal) ? line[..^LogText.ClipMarker.Length] : line;
