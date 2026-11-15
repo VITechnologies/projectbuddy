@@ -115,6 +115,56 @@ jobs:
               raise SystemExit("projectbuddy-ask coverage must be 100% line and branch")
           PY
 
+  peer-bench:
+    # tools/peer/bench (projectbuddy-bench, #217): unit tests with a 100% line and branch gate,
+    # plus a trimmed single-file publish of the win-x64 binary the peer runs.
+    name: Peer Bench Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/peer/bench/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/peer/bench
+        run: |
+          dotnet restore ProjectBuddy.PeerBench.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.PeerBench.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-bench-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/peer-bench-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-bench coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-bench coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-bench coverage must be 100% line and branch")
+          PY
+
+      - name: Publish Trimmed win-x64
+        shell: bash
+        working-directory: tools/peer/bench
+        run: |
+          dotnet publish ProjectBuddy.PeerBench -c Release -r win-x64 -o "$RUNNER_TEMP/bench" --nologo
+          test -s "$RUNNER_TEMP/bench/projectbuddy-bench.exe"
+
   source-config:
     name: Source Configuration Tests (${{ matrix.os }})
     strategy:

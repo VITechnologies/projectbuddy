@@ -6,6 +6,17 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `projectbuddy-bench` (`tools/peer/bench`, #217), a .NET 10 single-file
+  benchmark that scores digest-pinned Ollama candidates against #210 D10 on
+  both the workstation and the peer. It covers triage extraction and
+  diagnosis, security recall with clean controls, native tool calling, VRAM
+  residency and latency.
+  - It talks only to loopback Ollama.
+  - It refuses reported prompt counts that could hide Ollama's silent
+    `num_ctx/2` truncation, after a per-model probe proves the server still
+    truncates that way.
+  - It fails malformed model output closed.
+  - CI enforces 100% line and branch coverage and a trimmed win-x64 publish.
 - Add a locally tested, read-only active-capture MCP evidence consumer for
   issue #255. It validates sealed server/run/VM identity, ordered bounded
   batches, lifecycle, and explicit frame integrity without capture mutation
