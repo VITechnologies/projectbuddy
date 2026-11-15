@@ -210,6 +210,233 @@
       "mustContain": [
         "/home/<user>/<path>"
       ]
+    },
+    {
+      "id": "unc-with-spaces",
+      "input": "copy \\\\fs01\\Customer Share\\Acme Corp\\plan.txt",
+      "mustNotContain": [
+        "fs01",
+        "Customer Share",
+        "Acme Corp",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "copy <path>"
+      ]
+    },
+    {
+      "id": "long-and-device-paths",
+      "input": "\\\\?\\C:\\Users\\Jane\\Desktop\\x.txt\n\\\\?\\UNC\\fs01\\share\\acme\\x\n\\\\.\\pipe\\acme-secret-pipe\nopen \\\\fs01",
+      "mustNotContain": [
+        "Jane",
+        "Desktop",
+        "fs01",
+        "acme"
+      ],
+      "mustContain": [
+        "\\\\?\\C:\\Users\\<user>\\<path>",
+        "open <path>"
+      ]
+    },
+    {
+      "id": "forward-slash-and-url-paths",
+      "input": "C:/Users/Jane/Documents/plan.txt\nfile:///C:/Users/Jane/plan.txt\nC%3A%2FUsers%2FJane%2Fplan.txt\n/c/Users/Jane/plan.txt\n/mnt/d/Clients/x\n/users/jane/Library",
+      "mustNotContain": [
+        "Jane",
+        "plan.txt",
+        "Clients",
+        "Library"
+      ],
+      "mustContain": [
+        "C:/Users/<user>/<path>",
+        "file:///C:/Users/<user>/<path>",
+        "C%3A%2FUsers%2F<user>%2F<path>",
+        "/users/<user>/<path>"
+      ]
+    },
+    {
+      "id": "escaped-paths",
+      "input": "{\"path\":\"C:\\\\Users\\\\Jane\\\\Desktop\\\\plan.txt\",\"twice\":\"C:\\\\\\\\Users\\\\\\\\Jane\\\\\\\\Desktop\",\"unc\":\"\\\\\\\\fs01\\\\share\\\\x\"}",
+      "mustNotContain": [
+        "Jane",
+        "Desktop",
+        "fs01",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "\"C:\\\\Users\\\\<user>\\\\<path>\"",
+        "\"C:\\\\\\\\Users\\\\\\\\<user>\\\\\\\\<path>\"",
+        "\"unc\":\"<path>\""
+      ]
+    },
+    {
+      "id": "mixed-separators-and-traversal",
+      "input": "C:\\Windows\\Temp/acme/x.log\nC:\\Windows\\System32/../../Users/Jane\nC:\\Windows\\..\\Users\\Jane\\x\nC:\\Windows\\System32\\..\\..\\Clients\\x",
+      "mustNotContain": [
+        "acme",
+        "Jane",
+        "Clients"
+      ],
+      "mustContain": [
+        "C:\\Windows\\Temp/<path>"
+      ]
+    },
+    {
+      "id": "depth-limits",
+      "input": "C:\\Program Files\\Acme\\Customer\\Secret\\deep\\x.txt\nC:\\ProgramData\\Other\\x\nC:\\Users\\Jane\\.ollama\\models\\blobs\\sha256-abc",
+      "mustNotContain": [
+        "deep",
+        "x.txt",
+        "Other",
+        "sha256-abc",
+        "Jane"
+      ],
+      "mustContain": [
+        "C:\\Program Files\\Acme\\Customer\\Secret\\<path>",
+        "C:\\Users\\<user>\\.ollama\\models\\blobs\\<path>"
+      ]
+    },
+    {
+      "id": "spaces-and-apostrophes",
+      "input": "D:\\Acme Projects\\O'Brien Ltd\\plan.txt was missing\nC:\\Users\\Jane Doe\\Desktop\\plan.txt",
+      "mustNotContain": [
+        "Acme",
+        "Brien",
+        "Ltd",
+        "plan.txt",
+        "Doe",
+        "Jane"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\<path>"
+      ]
+    },
+    {
+      "id": "prefixed-and-flag-secrets",
+      "input": "ACTIONS_RUNNER_INPUT_TOKEN=abcdef123456\nDB_PASSWORD: hunter2xx\nconfig.sh --url https://github.com/x --token AAAAB3secret99 --name runner",
+      "mustNotContain": [
+        "abcdef123456",
+        "hunter2xx",
+        "AAAAB3secret99"
+      ],
+      "mustContain": [
+        "ACTIONS_RUNNER_INPUT_TOKEN=<secret>",
+        "DB_PASSWORD: <secret>",
+        "--token <secret> --name runner"
+      ]
+    },
+    {
+      "id": "environment-table",
+      "input": "Name                Value\n----                -----\nDB_PASSWORD         hunter2xx\nPATH                C:\\Windows",
+      "mustNotContain": [
+        "hunter2xx"
+      ],
+      "mustContain": [
+        "DB_PASSWORD         <secret>",
+        "PATH                C:\\Windows"
+      ]
+    },
+    {
+      "id": "connection-strings",
+      "input": "Server=sql01;Database=app;User Id=sa;Password=Pa55 w0rd!;Encrypt=true\nDefaultEndpointsProtocol=https;AccountName=acmestore;AccountKey=abcd1234==;EndpointSuffix=core.windows.net",
+      "mustNotContain": [
+        "Pa55",
+        "w0rd",
+        "abcd1234"
+      ],
+      "mustContain": [
+        "Password=<secret>;Encrypt=true",
+        "AccountKey=<secret>;"
+      ]
+    },
+    {
+      "id": "xml-and-authorization",
+      "input": "<add key=\"ClearTextPassword\" value=\"hunter2xx\" />\nAuthorization: token abc123def\n{\"Authorization\": \"Bearer abc123def456ghi\"}\nAuthorization: AWS4-HMAC-SHA256 Credential=AKID/2024, SignedHeaders=host, Signature=abc123",
+      "mustNotContain": [
+        "hunter2xx",
+        "abc123",
+        "AKID",
+        "SignedHeaders"
+      ],
+      "mustContain": [
+        "value=\"<secret>\"",
+        "Authorization: token <secret>",
+        "\"Bearer <secret>\"",
+        "AWS4-HMAC-SHA256 <secret>"
+      ]
+    },
+    {
+      "id": "sas-signatures",
+      "input": "?sv=2020&se=2024&sig=abcd%2Bsecret\nhttps://acmestore.blob.core.windows.net/c/x?sv=2020&sig=efgh%2Bsecret",
+      "mustNotContain": [
+        "abcd%2Bsecret",
+        "efgh",
+        "acmestore"
+      ],
+      "mustContain": [
+        "&sig=<secret>"
+      ]
+    },
+    {
+      "id": "addresses-in-prose",
+      "input": "connected to 192.168.4.20.\nreverse 20.4.168.192.in-addr.arpa\nping 2001:db8::1.",
+      "mustNotContain": [
+        "192.168.4.20",
+        "20.4.168.192",
+        "2001:db8"
+      ],
+      "mustContain": [
+        "connected to <ip>.",
+        "ping <ip>."
+      ]
+    },
+    {
+      "id": "git-remotes-and-hosts",
+      "input": "git clone build01:acme/repo.git\ngit clone git@build01:acme/repo.git\nresolve fs01.corp.acme.com failed\nsee www.acme.com/clients\napi.github.com/repos/x",
+      "mustNotContain": [
+        "build01",
+        "acme",
+        "fs01",
+        "clients"
+      ],
+      "mustContain": [
+        "git clone <url>",
+        "resolve <host> failed",
+        "api.github.com/<path>"
+      ]
+    },
+    {
+      "id": "deny-term-spellings",
+      "input": "Example  Widgets\nLtd shipped\nExample\u00a0Widgets Ltd left\nWS-\u200bCORP-01 joined\nExam\u200bple Widgets Ltd paid",
+      "mustNotContain": [
+        "Widgets",
+        "CORP-01",
+        "Exam"
+      ],
+      "mustContain": [
+        "<private> shipped",
+        "<private> left",
+        "<private> joined",
+        "<private> paid"
+      ]
+    },
+    {
+      "id": "kept-diagnostics-2",
+      "input": "Version=13.0.0.0, Culture=neutral\nBasic authentication failed\nv1.2.3.4 released\nmain.vi and ollama.exe and System.Text.Json\nC:\\Program Files\\National Instruments\\LabVIEW 2025\\LabVIEW.exe\nC:\\Windows\\System32\\cmd.exe /c dir\nat Foo.Bar() in D:\\src\\acme\\x.cs:line 42\nD:\\src\\acme\\proj.csproj(12,5): error CS1002: ; expected",
+      "mustNotContain": [
+        "acme",
+        "src"
+      ],
+      "mustContain": [
+        "Version=13.0.0.0, Culture=neutral",
+        "Basic authentication failed",
+        "v1.2.3.4 released",
+        "main.vi and ollama.exe and System.Text.Json",
+        "C:\\Program Files\\National Instruments\\LabVIEW 2025\\LabVIEW.exe",
+        "C:\\Windows\\System32\\cmd.exe /c dir",
+        "in <path>:line 42",
+        "<path>: error CS1002: ; expected"
+      ]
     }
   ]
 }

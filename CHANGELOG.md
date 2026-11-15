@@ -9,10 +9,19 @@ release's notes for the exact pinned commit.
 - Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
   deterministic and idempotent redaction that peer evidence passes through
   before a local model sees it and before it leaves the peer.
-  - It covers secrets, URLs (allow-listed hosts only, never a path), e-mail
-    addresses, paths (system prefixes kept, profiles reduced to `<user>`),
-    MACs and IPs (loopback and the cable kept), and an operator-private
-    deny list plus the host's own machine and account names.
+  - It covers secrets (token formats, `Authorization` headers, flags,
+    prefixed and table-style assignments, connection strings, XML settings,
+    SAS signatures), URLs (allow-listed hosts only, never a path), git
+    remotes, e-mail addresses, bare host names, and paths in every spelling
+    (forward-slash, escaped, `file:///`, encoded, long, device, UNC, Git Bash
+    and WSL).
+  - Allow-listed paths are kept only to a fixed depth, and any `..` hides the
+    whole path. Profiles are reduced to `<user>`.
+  - MACs and IPs are redacted except loopback and the cable. An operator-private
+    deny list plus the host's own machine and account names become
+    `<private>`, matched across any whitespace and invisible characters.
+  - Evidence over 4,000,000 characters is refused whole, and adversarial
+    input stays linear.
   - Diagnostics stay: digests, versions, exit codes and times.
   - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
     matrix at 100% coverage.

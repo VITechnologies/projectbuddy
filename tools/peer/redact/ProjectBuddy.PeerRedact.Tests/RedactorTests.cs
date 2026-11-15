@@ -97,8 +97,6 @@ public class RedactorTests
     [Theory]
     [InlineData("ab")]
     [InlineData("line\nbreak")]
-    [InlineData("rivat")]
-    [InlineData("<path>")]
     public void InvalidDenyTermsAreRefused(string term) => Assert.Throws<RedactionException>(() => new Redactor([term]));
 
     [Fact]
@@ -166,7 +164,7 @@ public class RedactorTests
     [Fact]
     public void AllowListsCanBeReplaced()
     {
-        var redactor = new Redactor([], allowedHosts: ["corp.example"], allowedNetworks: ["192.168.0.0/16", "0.0.0.0/0"], allowedPaths: ["E:\\vms\\"], allowedProfilePaths: []);
+        var redactor = new Redactor([], allowedHosts: ["corp.example"], allowedNetworks: ["192.168.0.0/16", "0.0.0.0/0"], allowedPaths: [new(@"E:\vms", 1)], allowedProfilePaths: []);
         Assert.Equal("https://git.corp.example/<path> <url> 192.168.5.5 8.8.8.8 E:\\vms\\x.vdi C:\\Users\\<user>\\<path>",
             redactor.Redact("https://git.corp.example/a https://github.com/a 192.168.5.5 8.8.8.8 E:\\vms\\x.vdi C:\\Users\\Jane\\AppData\\Local\\Programs\\x").Text);
     }
@@ -196,4 +194,61 @@ public class RedactorTests
     [Fact]
     public void AnUnterminatedPrivateKeyIsRedactedToTheEnd() =>
         Assert.Equal("x <secret>", Plain().Redact("x -----BEGIN " + "RSA PRIVATE KEY-----\nMIIabc\nrest of log").Text);
+
+    [Fact]
+    public void ForHostAcceptsNamesThatOverlapPlaceholders()
+    {
+        var redactor = Redactor.ForHost([], "PATH-HOST", "User");
+        var once = redactor.Redact("User on PATH-HOST wrote C:\\Users\\Jane\\x\n<user> stays");
+        Assert.Equal("<private> on <private> wrote C:\\<private>s\\<user>\\<path>\n<user> stays", once.Text);
+        Assert.Equal(once.Text, redactor.Redact(once.Text).Text);
+    }
+
+    [Theory]
+    [InlineData("vms")]
+    [InlineData("E:vms")]
+    public void AllowedPathsNeedADriveRoot(string prefix) =>
+        Assert.Throws<RedactionException>(() => new Redactor([], allowedPaths: [new(prefix, 1)]));
+
+    [Fact]
+    public void AllowedPathsNeedANonNegativeDepth() =>
+        Assert.Throws<RedactionException>(() => new Redactor([], allowedPaths: [new(@"E:\vms", -1)]));
+
+    [Theory]
+    [InlineData("copy to C:\\", "copy to C:\\")]
+    [InlineData("C:\\Users", "C:\\Users")]
+    [InlineData("C:\\Windows\\", "C:\\Windows\\")]
+    [InlineData("C:\\Windows\\Temp\\", "C:\\Windows\\Temp\\")]
+    [InlineData("C:\\Windows\\Temp\\x\\", "C:\\Windows\\Temp\\<path>")]
+    public void RootsAndTrailingSeparatorsNameNothing(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Fact]
+    public void OversizedEvidenceIsRefusedWhole() =>
+        Assert.Throws<RedactionException>(() => Plain().Redact(new string('a', Redactor.MaxInputChars + 1)));
+
+    [Fact]
+    public void InvisibleAndBrokenCharactersAreCleaned()
+    {
+        var redactor = new Redactor(["Example Widgets"]);
+        Assert.Equal("<private> \uFFFD x \U0001F600", redactor.Redact("Exa\u00ADmple\u200B Widgets \uD800 x \U0001F600").Text);
+    }
+
+    // Each shape once made a rule backtrack quadratically; a megabyte must stay well inside interactive time.
+    [Theory]
+    [InlineData("a.")]
+    [InlineData("a-")]
+    [InlineData("a\\")]
+    [InlineData("a/")]
+    [InlineData("C:\\")]
+    [InlineData("a@")]
+    [InlineData("password=a ")]
+    [InlineData("password=\"a ")]
+    [InlineData("--token a ")]
+    public void LargeAdversarialInputsStayFast(string unit)
+    {
+        var text = string.Concat(Enumerable.Repeat(unit, 1_000_000 / unit.Length));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Plain().Redact(text);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"{unit}: {watch.Elapsed}");
+    }
 }
