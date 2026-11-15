@@ -3,15 +3,17 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.PeerAdvise;
 
-public sealed record LogTail(string Text, int Bytes, int DroppedLines);
+// Lines are the log-derived lines in Text: never the tool's own headings.
+public sealed record LogTail(string Text, int Bytes, int DroppedLines, IReadOnlyList<string> Lines);
 
-public sealed record Evidence(string Text, int Bytes, int SignalLines, int DroppedLines);
+public sealed record Evidence(string Text, int Bytes, int SignalLines, int DroppedLines, IReadOnlyList<string> Lines);
 
 // Shrinks a CI log to the evidence a model needs: no ANSI codes, no per-line timestamps, one header per
 // GitHub job/step instead of a prefix on every line, and only the newest lines that fit the byte budget.
 public static partial class LogText
 {
     public const int MaxLineChars = 2000;
+    public const string ClipMarker = " [...]";
     public const int MaxSignalLines = 40;
     public const string SignalHeading = "# Lines that look like errors, from the whole log:";
     public const string TailHeading = "# End of the log:";
@@ -43,7 +45,7 @@ public static partial class LogText
             line = line.TrimEnd();
             if (line.Length > MaxLineChars)
             {
-                line = line[..MaxLineChars] + " [...]";
+                line = line[..MaxLineChars] + ClipMarker;
             }
 
             if (line.Length == 0 && (output.Count == 0 || output[^1].Length == 0))
@@ -54,7 +56,11 @@ public static partial class LogText
             output.Add(line);
         }
 
-        return string.Join('\n', output).Trim('\n');
+        // A section with no content (an empty last step, say) would give the model a header and nothing to read;
+        // then drop blank lines left in front of a header or another blank line.
+        var kept = output.Where((line, index) => !IsHeader(line) || output.Skip(index + 1).TakeWhile(next => !IsHeader(next)).Any(next => next.Length > 0)).ToList();
+        var tidy = kept.Where((line, index) => line.Length > 0 || (index + 1 < kept.Count && kept[index + 1].Length > 0 && !IsHeader(kept[index + 1])));
+        return string.Join('\n', tidy).Trim('\n');
     }
 
     // Errors sit at the end of a log, so keep the newest whole lines that fit, counting the header of the
@@ -88,14 +94,14 @@ public static partial class LogText
             }
         }
 
-        if (start == lines.Length)
+        if (start == lines.Length || lines[start..].All(IsHeader))
         {
-            return new LogTail("", 0, lines.Length);
+            return new LogTail("", 0, lines.Length, []);
         }
 
-        var kept = string.Join('\n', lines[start..]);
-        var text = IsHeader(lines[start]) || headerOf[start] is null ? kept : headerOf[start] + "\n" + kept;
-        return new LogTail(text, Encoding.UTF8.GetByteCount(text), start);
+        var kept = IsHeader(lines[start]) || headerOf[start] is null ? lines[start..] : [headerOf[start]!, .. lines[start..]];
+        var text = string.Join('\n', kept);
+        return new LogTail(text, Encoding.UTF8.GetByteCount(text), start, kept);
     }
 
     // A failure buried among hundreds of passing lines, or before the tail, still reaches the model: the
@@ -118,11 +124,16 @@ public static partial class LogText
 
         var prefix = signals.Count == 0 ? "" : SignalHeading + "\n" + string.Join('\n', signals) + "\n" + TailHeading + "\n";
         var tail = Tail(normalized, maxBytes - Encoding.UTF8.GetByteCount(prefix));
-        var text = tail.Text.Length == 0 ? "" : prefix + tail.Text;
-        return new Evidence(text, Encoding.UTF8.GetByteCount(text), signals.Count, tail.DroppedLines);
+        if (tail.Text.Length == 0)
+        {
+            return new Evidence("", 0, 0, tail.DroppedLines, []);
+        }
+
+        var text = prefix + tail.Text;
+        return new Evidence(text, Encoding.UTF8.GetByteCount(text), signals.Count, tail.DroppedLines, [.. signals, .. tail.Lines]);
     }
 
-    private static bool IsHeader(string line) => line.StartsWith("== ", StringComparison.Ordinal) && line.EndsWith(" ==", StringComparison.Ordinal);
+    public static bool IsHeader(string line) => line.StartsWith("== ", StringComparison.Ordinal) && line.EndsWith(" ==", StringComparison.Ordinal);
 
     [GeneratedRegex(@"\b(FAIL(ED|URE)?|[Ee]rror|ERROR|[Ff]atal|FATAL|[Ee]xception|[Pp]anic|[Ss]egmentation fault|Killed|[Tt]imed out|[Dd]enied|[Rr]efused|[Mm]ismatch|exit(ed)?( with)?( code)?:? ?[1-9][0-9]*)\b")]
     private static partial Regex Signal();

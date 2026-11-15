@@ -6,7 +6,9 @@ namespace ProjectBuddy.PeerAdvise;
 
 public static class Triage
 {
+    public const int MinStepChars = 3;
     public const int MaxStepChars = 200;
+    public const int MinQuoteChars = 8;
 
     public static async Task<JsonObject> RunAsync(Policy policy, byte[] input, OllamaClient ollama)
     {
@@ -39,7 +41,7 @@ public static class Triage
                 continue;
             }
 
-            var answer = Validate(policy, tail.Text, result.Content);
+            var answer = Validate(policy, tail, result.Content);
             return new JsonObject
             {
                 ["schema"] = Versions.TriageSchema,
@@ -74,26 +76,30 @@ public static class Triage
         throw new PeerException(AdviseExitCodes.NoAdvice, $"the evidence did not provably fit half the context after {attempts} attempt(s); lower maxInputBytes");
     }
 
-    // Model output is evidence to check, never to trust: every claim must be grounded in the text it was sent.
-    internal static JsonObject Validate(Policy policy, string evidence, string content)
+    // Model output is evidence to check, never to trust: every claim must come from a line of the log itself,
+    // never from the tool's own headings, and the reported error line is the whole log line the quote came from.
+    internal static JsonObject Validate(Policy policy, Evidence evidence, string content)
     {
         var answer = Json.TryObject(content);
         var step = Json.TryString(answer?["step"])?.Trim();
-        var errorLine = Json.TryString(answer?["errorLine"])?.Trim();
+        var quote = Json.TryString(answer?["errorLine"])?.Trim();
         var triageClass = Json.TryString(answer?["class"]);
-        if (answer is null || answer.Count != 3 || step is null || errorLine is null || triageClass is null)
+        if (answer is null || answer.Count != 3 || step is null || quote is null || triageClass is null)
         {
             throw NoAdvice("the answer is not exactly {step, errorLine, class}");
         }
 
-        if (step.Length == 0 || step.Length > MaxStepChars || !evidence.Contains(step, StringComparison.OrdinalIgnoreCase))
+        if (step.Length < MinStepChars || step.Length > MaxStepChars || !evidence.Lines.Any(line => line.Contains(step, StringComparison.OrdinalIgnoreCase)))
         {
-            throw NoAdvice("the step does not appear in the evidence");
+            throw NoAdvice("the step does not appear in the log");
         }
 
-        if (errorLine.Length == 0 || errorLine.IndexOfAny(['\n', '\r']) >= 0 || !evidence.Contains(errorLine, StringComparison.Ordinal))
+        var line = quote.Length < MinQuoteChars || quote.IndexOfAny(['\n', '\r']) >= 0
+            ? null
+            : evidence.Lines.LastOrDefault(line => !LogText.IsHeader(line) && Unclipped(line).Contains(quote, StringComparison.Ordinal));
+        if (line is null)
         {
-            throw NoAdvice("the error line is not one line quoted verbatim from the evidence");
+            throw NoAdvice($"the error line is not a quote of at least {MinQuoteChars} characters from one log line");
         }
 
         if (!policy.TriageClasses.Contains(triageClass))
@@ -101,8 +107,10 @@ public static class Triage
             throw NoAdvice("the class is not in the policy");
         }
 
-        return new JsonObject { ["step"] = step, ["errorLine"] = errorLine, ["class"] = triageClass };
+        return new JsonObject { ["step"] = step, ["errorLine"] = line.Trim(), ["class"] = triageClass };
     }
+
+    private static string Unclipped(string line) => line.EndsWith(LogText.ClipMarker, StringComparison.Ordinal) ? line[..^LogText.ClipMarker.Length] : line;
 
     internal static JsonObject Format(Policy policy) => new()
     {

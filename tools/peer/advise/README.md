@@ -69,12 +69,19 @@ costs about 2800 tokens.
 - **Accept rule.** A reply is used only when
   `0 < prompt_eval_count < num_ctx/2` and the reply fits in the context.
   Otherwise the tool retries once with half the byte budget, then exits 6.
-- **Grounding.** The answer must be exactly `{step, errorLine, class}`:
-  - `step` must appear in the evidence;
-  - `errorLine` must be one line, copied verbatim from the evidence;
+- **Grounding.** The answer must be exactly `{step, errorLine, class}`, and
+  it is checked against the **log's own lines**: the error-looking lines,
+  the tail lines and the `== job / step ==` headers. The tool's own headings
+  never count.
+  - `step` must be at least 3 characters and appear in one of those lines.
+  - The model's `errorLine` must be a verbatim quote of at least 8
+    characters from **one** log line, not a header. The report then gives
+    that **whole log line**, so a fragment quote still returns the complete
+    message.
   - `class` must be in the policy.
 
-  Anything else exits 6. A paraphrased or invented quote is never passed on.
+  Anything else exits 6. A paraphrased, invented or trivially short quote is
+  never passed on.
 
 ## Report (`projectbuddy/advise-triage@1`)
 
@@ -96,7 +103,7 @@ read a SIGSEGV as an out-of-memory kill.
 On three real failed runs, using an 8 GB GPU with Ollama 0.32.3:
 - each report was 685–961 bytes, against 46–65 KB of raw log (51–94× less);
 - each took 3–8 s;
-- every `errorLine` was verbatim.
+- every `errorLine` was a whole log line.
 
 A PowerShell failure whose message spans several lines produced no advice
 (exit 6) rather than a misquote.

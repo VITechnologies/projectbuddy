@@ -23,6 +23,13 @@ public class LogTextTests
     }
 
     [Fact]
+    public void NormalizeDropsSectionsWithoutContent()
+    {
+        var raw = "build\tverify\t2026-11-15T09:26:25Z FAIL thing\nbuild\tempty\t2026-11-15T09:26:26Z \nbuild\tlast\t2026-11-15T09:26:27Z done\nbuild\tPost Run\t2026-11-15T09:26:28Z \n";
+        Assert.Equal("== build / verify ==\nFAIL thing\n== build / last ==\ndone", LogText.Normalize(raw));
+    }
+
+    [Fact]
     public void NormalizeClipsVeryLongLines()
     {
         var line = LogText.Normalize(new string('x', LogText.MaxLineChars + 50));
@@ -53,6 +60,7 @@ public class LogTextTests
         Assert.Equal(("", 0, 2), (tail.Text, tail.Bytes, tail.DroppedLines));
         Assert.Equal("", LogText.Tail("== job / a ==\nthree", 10).Text);
         Assert.Equal("", LogText.Tail(new string('x', 50), 20).Text);
+        Assert.Empty(LogText.Tail("== job / a ==\n== job / b ==", 100).Lines);
     }
 
     [Fact]
@@ -68,6 +76,8 @@ public class LogTextTests
         var evidence = LogText.Build(normalized, 400);
         Assert.StartsWith($"{LogText.SignalHeading}\nerror: early\nFAIL  late gate\n{LogText.TailHeading}\n== job / a ==\nPASS fine", evidence.Text);
         Assert.Equal(2, evidence.SignalLines);
+        Assert.Equal(["error: early", "FAIL  late gate", "== job / a =="], evidence.Lines.Take(3));
+        Assert.DoesNotContain(LogText.SignalHeading, evidence.Lines);
         Assert.True(evidence.Bytes <= 400);
         Assert.Equal(Encoding.UTF8.GetByteCount(evidence.Text), evidence.Bytes);
     }
@@ -86,7 +96,8 @@ public class LogTextTests
         Assert.Equal("all good", LogText.Build("all good", 100).Text);
         var nothing = LogText.Build("error: " + new string('x', 500), 200);
         Assert.Equal("", nothing.Text);
-        Assert.Equal(0, nothing.Bytes);
+        Assert.Equal((0, 0), (nothing.Bytes, nothing.SignalLines));
+        Assert.Empty(nothing.Lines);
     }
 }
 
@@ -181,6 +192,11 @@ public class TriageTests
         { "two lines", """{"step":"gate-x","errorLine":"compiling\nFAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
         { "carriage return", """{"step":"gate-x","errorLine":"FAIL\r gate-x","class":"gate-failure"}""" },
         { "paraphrase", """{"step":"gate-x","errorLine":"FAIL gate-x -- broken thing","class":"gate-failure"}""" },
+        { "tool heading as line", """{"step":"verify","errorLine":"# End of the log:","class":"gate-failure"}""" },
+        { "tool heading as step", """{"step":"Lines that look like errors","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
+        { "tiny fragment", """{"step":"gate-x","errorLine":"1","class":"gate-failure"}""" },
+        { "tiny step", """{"step":"e","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""" },
+        { "section header as line", """{"step":"verify","errorLine":"== build / verify ==","class":"gate-failure"}""" },
         { "unknown class", """{"step":"gate-x","errorLine":"FAIL  gate-x  -- broken thing","class":"weather"}""" },
     };
 
@@ -188,10 +204,27 @@ public class TriageTests
     [MemberData(nameof(Ungrounded))]
     public void UngroundedAnswersGiveNoAdvice(string label, string content)
     {
-        var evidence = LogText.Build(LogText.Normalize(Fixtures.Log), 12000).Text;
+        var evidence = LogText.Build(LogText.Normalize(Fixtures.Log), 12000);
         var error = Assert.Throws<PeerException>(() => Triage.Validate(Fixtures.ParsePolicy(), evidence, content));
         Assert.Equal(AdviseExitCodes.NoAdvice, error.ExitCode);
         Assert.False(string.IsNullOrEmpty(label));
+    }
+
+    [Fact]
+    public void AGroundedFragmentReportsTheWholeLogLine()
+    {
+        var evidence = LogText.Build(LogText.Normalize(Fixtures.Log), 12000);
+        var answer = Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"verify","errorLine":"-- broken thing","class":"gate-failure"}""");
+        Assert.Equal("""{"step":"verify","errorLine":"FAIL  gate-x  -- broken thing","class":"gate-failure"}""", answer.ToJsonString());
+    }
+
+    [Fact]
+    public void QuotesOfClippedLinesMatchTheirTextButNotTheClipMarker()
+    {
+        var evidence = LogText.Build(LogText.Normalize("error: " + new string('x', LogText.MaxLineChars)), 12000);
+        var answer = Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"error","errorLine":"error: xxxxxxxx","class":"segfault"}""");
+        Assert.EndsWith(LogText.ClipMarker, answer["errorLine"]!.GetValue<string>());
+        Assert.Throws<PeerException>(() => Triage.Validate(Fixtures.ParsePolicy(), evidence, """{"step":"error","errorLine":"xxxxx [...]","class":"segfault"}"""));
     }
 
     [Fact]
