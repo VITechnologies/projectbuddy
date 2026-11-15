@@ -38,6 +38,42 @@ public class UnifiedDiffTests
     }
 
     [Fact]
+    public void ALeadingByteOrderMarkDoesNotHideTheFirstFile() =>
+        Assert.Equal(Files().Select(file => file.Path), UnifiedDiff.Parse("\uFEFF" + Fixtures.Diff).Select(file => file.Path));
+
+    [Theory]
+    [InlineData("@@ -1 +99999999999 @@")]
+    [InlineData("@@ -1 +100000001 @@")]
+    public void UnusableHunkNumbersAreRefused(string header) =>
+        Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => UnifiedDiff.Parse($"diff --git a/x b/x\n--- a/x\n+++ b/x\n{header}\n+y")).ExitCode);
+
+    [Fact]
+    public void NonAsciiDigitsAreNotAHunkHeader() =>
+        Assert.Empty(UnifiedDiff.Parse("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +\u0661\u0662 @@\n+y"));
+
+    [Theory]
+    [InlineData("+++ \"b/t\\303\\253st.cs\"", "tëst.cs")]
+    [InlineData("+++ \"b/a\\\"q\\\\x\\tz\\n\\r\\a\\b\\f\\v\"", "a\"q\\x\tz\n\r\a\b\f\v")]
+    [InlineData("+++ \"b/\U0001F600 \\\"q\"", "\U0001F600 \"q")]
+    [InlineData("+++ w/x.cs", "x.cs")]
+    [InlineData("+++ i/x.cs", "x.cs")]
+    [InlineData("+++ \"", "\"")]
+    [InlineData("+++ plain.cs", "plain.cs")]
+    public void TargetsAreUnquotedAndUnprefixed(string target, string path) =>
+        Assert.Equal(path, Assert.Single(UnifiedDiff.Parse($"diff --git a/x b/x\n--- a/x\n{target}\n@@ -0,0 +1 @@\n+y")).Path);
+
+    [Theory]
+    [InlineData("\"b/\\q\"")]
+    [InlineData("\"b/x\\\"")]
+    [InlineData("\"b/\\12\"")]
+    [InlineData("\"b/\\477\"")]
+    [InlineData("\"b/\\377\"")]
+    [InlineData("\"b/\\18x\"")]
+    [InlineData("\"b/\\1/x\"")]
+    public void BrokenQuotedPathsAreRefused(string target) =>
+        Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => UnifiedDiff.Unquote(target)).ExitCode);
+
+    [Fact]
     public void RenderNumbersEveryLine()
     {
         var app = Files()[0];
@@ -87,6 +123,18 @@ public class PreReviewBatchTests
         var plan = PreReview.Batch([new FileDiff("f.txt", hunks)], 160);
         Assert.Equal(2, plan.Batches.Count);
         Assert.Equal([1, 11], plan.Batches[0].Added["f.txt"].Keys.Order());
+    }
+
+    [Fact]
+    public void WindowsThatFitAreNeverReportedAsOversized()
+    {
+        for (var width = 10; width <= 120; width++)
+        {
+            var plan = PreReview.Batch([File("w.txt", 60, width)], 600);
+            Assert.Empty(plan.Unreviewed);
+            Assert.Equal(Enumerable.Range(1, 60), plan.Batches.SelectMany(batch => batch.Added["w.txt"].Keys).Order());
+            Assert.All(plan.Batches, batch => Assert.True(Encoding.UTF8.GetByteCount(batch.Text) <= 600));
+        }
     }
 
     [Fact]
@@ -196,6 +244,17 @@ public class PreReviewTests
         Assert.Equal(["the prompt may have been cut", "the reply was not a findings list", "batch limit reached"], reasons);
         Assert.False(report["coverage"]!["complete"]!.GetValue<bool>());
         Assert.Equal(["rejected", "malformed", "reviewed"], report["receipt"]!["batches"]!.AsArray().Select(batch => batch!["outcome"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task APathThatAppearsTwiceIsRefusedBeforeContactingOllama()
+    {
+        var fake = new FakeOllama();
+        var twice = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+a\ndiff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n a\n+b";
+        var error = await Assert.ThrowsAsync<PeerException>(() => Run(fake, diff: twice));
+        Assert.Equal(ExitCodes.Refused, error.ExitCode);
+        Assert.Contains("x appears more than once", error.Message);
+        Assert.Empty(fake.Requests);
     }
 
     [Fact]

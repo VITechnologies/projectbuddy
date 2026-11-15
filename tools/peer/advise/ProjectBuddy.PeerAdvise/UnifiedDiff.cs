@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using ProjectBuddy.PeerOllama;
 
 namespace ProjectBuddy.PeerAdvise;
 
@@ -25,6 +26,10 @@ public sealed record FileDiff(string Path, IReadOnlyList<DiffHunk> Hunks)
 public static partial class UnifiedDiff
 {
     public const string FileHeading = "=== file: ";
+    public const int MaxLineNumber = 100_000_000;
+
+    // git's default prefix (b/) and its mnemonic prefixes for the new side (w/ work tree, i/ index, c/ commit, o/ object).
+    private static readonly string[] Prefixes = ["b/", "w/", "i/", "c/", "o/"];
 
     public static IReadOnlyList<FileDiff> Parse(string text)
     {
@@ -57,7 +62,8 @@ public static partial class UnifiedDiff
             hunks = null;
         }
 
-        foreach (var raw in text.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'))
+        // A byte-order mark (Windows PowerShell's UTF-8 files) would otherwise hide the first "diff --git" line.
+        foreach (var raw in text.TrimStart('\uFEFF').Replace("\r\n", "\n").TrimEnd('\n').Split('\n'))
         {
             if (raw.StartsWith("diff --git ", StringComparison.Ordinal))
             {
@@ -73,8 +79,9 @@ public static partial class UnifiedDiff
 
             if (lines is null && raw.StartsWith("+++ ", StringComparison.Ordinal))
             {
-                var target = raw[4..].Trim();
-                path = target == "/dev/null" ? null : target.StartsWith("b/", StringComparison.Ordinal) ? target[2..] : target;
+                var target = Unquote(raw[4..].Trim());
+                var prefix = Prefixes.FirstOrDefault(candidate => target.StartsWith(candidate, StringComparison.Ordinal));
+                path = target == "/dev/null" ? null : prefix is null ? target : target[prefix.Length..];
                 continue;
             }
 
@@ -83,7 +90,11 @@ public static partial class UnifiedDiff
             {
                 CloseHunk();
                 header = raw;
-                newLine = int.Parse(hunk.Groups["start"].Value);
+                if (!int.TryParse(hunk.Groups["start"].Value, out newLine) || newLine > MaxLineNumber)
+                {
+                    throw new PeerException(ExitCodes.Refused, $"hunk header is not usable: {raw}");
+                }
+
                 lines = [];
                 continue;
             }
@@ -134,6 +145,65 @@ public static partial class UnifiedDiff
         return text.ToString();
     }
 
-    [GeneratedRegex(@"^@@ -\d+(,\d+)? \+(?<start>\d+)(,\d+)? @@")]
+    // git C-quotes paths with special or non-ASCII characters: "b/t\303\253st.cs" is b/tëst.cs.
+    internal static string Unquote(string target)
+    {
+        if (target.Length < 2 || target[0] != '"' || target[^1] != '"')
+        {
+            return target;
+        }
+
+        var bytes = new List<byte>();
+        var plain = new StringBuilder();
+        for (var index = 1; index < target.Length - 1; index++)
+        {
+            var character = target[index];
+            if (character != '\\')
+            {
+                plain.Append(character);
+                continue;
+            }
+
+            // Plain runs are encoded whole, so a surrogate pair (an emoji left unescaped) stays one character.
+            bytes.AddRange(Encoding.UTF8.GetBytes(plain.ToString()));
+            plain.Clear();
+
+            var next = index + 1 < target.Length - 1 ? target[++index] : '\0';
+            if (next is >= '0' and <= '3' && index + 2 < target.Length - 1 && IsOctal(target[index + 1]) && IsOctal(target[index + 2]))
+            {
+                bytes.Add((byte)(((next - '0') << 6) | ((target[index + 1] - '0') << 3) | (target[index + 2] - '0')));
+                index += 2;
+                continue;
+            }
+
+            bytes.Add(next switch
+            {
+                'n' => (byte)'\n',
+                't' => (byte)'\t',
+                'r' => (byte)'\r',
+                'a' => 7,
+                'b' => 8,
+                'f' => 12,
+                'v' => 11,
+                '"' => (byte)'"',
+                '\\' => (byte)'\\',
+                _ => throw new PeerException(ExitCodes.Refused, $"path is not valid C-quoted text: {target}"),
+            });
+        }
+
+        bytes.AddRange(Encoding.UTF8.GetBytes(plain.ToString()));
+        try
+        {
+            return new UTF8Encoding(false, true).GetString(bytes.ToArray());
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new PeerException(ExitCodes.Refused, $"path is not valid UTF-8: {target}");
+        }
+    }
+
+    private static bool IsOctal(char character) => character is >= '0' and <= '7';
+
+    [GeneratedRegex(@"^@@ -[0-9]+(,[0-9]+)? \+(?<start>[0-9]+)(,[0-9]+)? @@")]
     private static partial Regex HunkHeader();
 }

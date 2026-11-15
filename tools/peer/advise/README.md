@@ -133,6 +133,15 @@ gh pr diff <n> --repo <owner/repo> | out/projectbuddy-advise pre-review --policy
   have added lines are reviewable; deletions and binary changes are skipped.
   Every line is shown to the model with its new-file line number, for example
   `+   42| code`.
+  - Give it **one diff at a time**. A path that appears twice (for example
+    staged plus unstaged, or `git log -p`) is refused before Ollama is
+    contacted, because its line numbers would refer to different versions of
+    the file.
+  - A leading byte-order mark is ignored, and C-quoted paths
+    (`core.quotePath`) are unquoted.
+  - The default `b/` prefix and git's mnemonic prefixes (`w/`, `i/`, `c/`,
+    `o/`) are stripped.
+  - Hunk headers with unusable line numbers are refused.
 - **Batching.** Files go in path order. A file too big for one request is
   split by hunk, and a hunk too big is split by window of lines, keeping the
   line numbers. Chunks are packed into requests within `maxInputBytes`, up to

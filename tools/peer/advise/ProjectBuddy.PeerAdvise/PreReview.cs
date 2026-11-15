@@ -22,6 +22,14 @@ public static partial class PreReview
             throw new PeerException(ExitCodes.Refused, "the diff adds no reviewable lines");
         }
 
+        // Concatenated diffs (staged plus unstaged, git log -p) number one path against different file versions,
+        // so anchors could not be told apart; review them one diff at a time.
+        var repeated = files.GroupBy(file => file.Path, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        if (repeated is not null)
+        {
+            throw new PeerException(ExitCodes.Refused, $"{repeated.Key} appears more than once; review one diff at a time");
+        }
+
         var version = await ollama.VersionAsync();
         await ModelPin.RequireInstalledAsync(ollama, [policy.Model]);
         var probeTokens = await TruncationGuard.ProbeAsync(ollama, policy.Model.Name, policy.NumCtx, policy.Seed);
@@ -276,7 +284,8 @@ public static partial class PreReview
         var part = 1;
         foreach (var line in hunk.Lines)
         {
-            if (window.Count > 0 && Bytes(UnifiedDiff.Render(path, [new DiffHunk(hunk.Header, [.. window, line])])) > maxBytes)
+            // Measure with the header the window will carry: "(part N)" adds bytes.
+            if (window.Count > 0 && Bytes(UnifiedDiff.Render(path, [new DiffHunk($"{hunk.Header} (part {part})", [.. window, line])])) > maxBytes)
             {
                 yield return new DiffHunk($"{hunk.Header} (part {part++})", window);
                 window = [];
