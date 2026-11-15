@@ -47,9 +47,12 @@ public class UnifiedDiffTests
     public void UnusableHunkNumbersAreRefused(string header) =>
         Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => UnifiedDiff.Parse($"diff --git a/x b/x\n--- a/x\n+++ b/x\n{header}\n+y")).ExitCode);
 
-    [Fact]
-    public void NonAsciiDigitsAreNotAHunkHeader() =>
-        Assert.Empty(UnifiedDiff.Parse("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +\u0661\u0662 @@\n+y"));
+    [Theory]
+    [InlineData("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +\u0661\u0662 @@\n+y")]
+    [InlineData("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n a\n+b\n@@ -50 +\u0665\u0660,2 @@\n c\n+evil()")]
+    [InlineData("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ garbage @@\n+y")]
+    public void DamagedHunkHeadersAreRefusedWhereverTheyAppear(string diff) =>
+        Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => UnifiedDiff.Parse(diff)).ExitCode);
 
     [Theory]
     [InlineData("+++ \"b/t\\303\\253st.cs\"", "tëst.cs")]
@@ -57,6 +60,8 @@ public class UnifiedDiffTests
     [InlineData("+++ \"b/\U0001F600 \\\"q\"", "\U0001F600 \"q")]
     [InlineData("+++ w/x.cs", "x.cs")]
     [InlineData("+++ i/x.cs", "x.cs")]
+    [InlineData("+++ a/x.cs", "x.cs")]
+    [InlineData("+++ \"b/t\\351.cs\"", "\"b/t\\351.cs\"")]
     [InlineData("+++ \"", "\"")]
     [InlineData("+++ plain.cs", "plain.cs")]
     public void TargetsAreUnquotedAndUnprefixed(string target, string path) =>
@@ -67,7 +72,6 @@ public class UnifiedDiffTests
     [InlineData("\"b/x\\\"")]
     [InlineData("\"b/\\12\"")]
     [InlineData("\"b/\\477\"")]
-    [InlineData("\"b/\\377\"")]
     [InlineData("\"b/\\18x\"")]
     [InlineData("\"b/\\1/x\"")]
     public void BrokenQuotedPathsAreRefused(string target) =>

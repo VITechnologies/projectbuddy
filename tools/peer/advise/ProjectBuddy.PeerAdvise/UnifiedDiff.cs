@@ -28,8 +28,8 @@ public static partial class UnifiedDiff
     public const string FileHeading = "=== file: ";
     public const int MaxLineNumber = 100_000_000;
 
-    // git's default prefix (b/) and its mnemonic prefixes for the new side (w/ work tree, i/ index, c/ commit, o/ object).
-    private static readonly string[] Prefixes = ["b/", "w/", "i/", "c/", "o/"];
+    // git's default new-side prefix (b/; a/ under -R) and its mnemonic prefixes (w/ work tree, i/ index, c/ commit, o/ object).
+    private static readonly string[] Prefixes = ["b/", "a/", "w/", "i/", "c/", "o/"];
 
     public static IReadOnlyList<FileDiff> Parse(string text)
     {
@@ -97,6 +97,13 @@ public static partial class UnifiedDiff
 
                 lines = [];
                 continue;
+            }
+
+            // Any other "@@" line is a damaged hunk header; skipping it would number the next lines as part of
+            // the previous hunk and anchor findings to the wrong code.
+            if (raw.StartsWith("@@", StringComparison.Ordinal))
+            {
+                throw new PeerException(ExitCodes.Refused, $"hunk header is not usable: {raw}");
             }
 
             if (lines is null)
@@ -198,7 +205,8 @@ public static partial class UnifiedDiff
         }
         catch (DecoderFallbackException)
         {
-            throw new PeerException(ExitCodes.Refused, $"path is not valid UTF-8: {target}");
+            // A legacy (non-UTF-8) file name keeps git's quoted spelling; it labels findings but never anchors them.
+            return target;
         }
     }
 

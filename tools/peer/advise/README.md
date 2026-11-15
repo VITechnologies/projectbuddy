@@ -137,11 +137,14 @@ gh pr diff <n> --repo <owner/repo> | out/projectbuddy-advise pre-review --policy
     staged plus unstaged, or `git log -p`) is refused before Ollama is
     contacted, because its line numbers would refer to different versions of
     the file.
-  - A leading byte-order mark is ignored, and C-quoted paths
-    (`core.quotePath`) are unquoted.
-  - The default `b/` prefix and git's mnemonic prefixes (`w/`, `i/`, `c/`,
-    `o/`) are stripped.
-  - Hunk headers with unusable line numbers are refused.
+  - A leading byte-order mark is ignored.
+  - C-quoted paths (`core.quotePath`) are unquoted. A legacy, non-UTF-8 file
+    name keeps git's quoted spelling.
+  - The default `b/` prefix (`a/` under `-R`) and git's mnemonic prefixes
+    (`w/`, `i/`, `c/`, `o/`) are stripped. **Limitation:** with
+    `--no-prefix`, a path whose first directory is one of those letters loses
+    that directory.
+  - Any damaged `@@` hunk header is refused.
 - **Batching.** Files go in path order. A file too big for one request is
   split by hunk, and a hunk too big is split by window of lines, keeping the
   line numbers. Chunks are packed into requests within `maxInputBytes`, up to
