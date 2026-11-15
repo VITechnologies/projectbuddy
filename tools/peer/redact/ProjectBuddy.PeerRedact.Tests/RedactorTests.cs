@@ -54,7 +54,8 @@ public class CorpusTests
     {
         var corpus = Corpus();
         Assert.Equal("projectbuddy/redaction-corpus@1", corpus["schema"]!.GetValue<string>());
-        var redactor = new Redactor(corpus["denyTerms"]!.AsArray().Select(term => term!.GetValue<string>()));
+        var redactor = new Redactor(corpus["denyTerms"]!.AsArray().Select(term => term!.GetValue<string>()),
+            wholeWordTerms: corpus["wholeWordTerms"]!.AsArray().Select(term => term!.GetValue<string>()));
         var item = corpus["items"]!.AsArray().Single(candidate => candidate!["id"]!.GetValue<string>() == id)!;
         var output = redactor.Redact(Expand(item["input"]!.GetValue<string>())).Text;
         foreach (var gone in item["mustNotContain"]!.AsArray().Select(value => Expand(value!.GetValue<string>())))
@@ -200,7 +201,7 @@ public class RedactorTests
     {
         var redactor = Redactor.ForHost([], "PATH-HOST", "User");
         var once = redactor.Redact("User on PATH-HOST wrote C:\\Users\\Jane\\x\n<user> stays");
-        Assert.Equal("<private> on <private> wrote C:\\<private>s\\<user>\\<path>\n<user> stays", once.Text);
+        Assert.Equal("<private> on <private> wrote C:\\Users\\<user>\\<path>\n<user> stays", once.Text);
         Assert.Equal(once.Text, redactor.Redact(once.Text).Text);
     }
 
@@ -233,22 +234,69 @@ public class RedactorTests
         Assert.Equal("<private> \uFFFD x \U0001F600", redactor.Redact("Exa\u00ADmple\u200B Widgets \uD800 x \U0001F600").Text);
     }
 
-    // Each shape once made a rule backtrack quadratically; a megabyte must stay well inside interactive time.
+    // Each shape once made a rule backtrack quadratically, or is the worst case of one; input up to the cap must stay
+    // well inside interactive time.
     [Theory]
-    [InlineData("a.")]
-    [InlineData("a-")]
-    [InlineData("a\\")]
-    [InlineData("a/")]
-    [InlineData("C:\\")]
-    [InlineData("a@")]
-    [InlineData("password=a ")]
-    [InlineData("password=\"a ")]
-    [InlineData("--token a ")]
-    public void LargeAdversarialInputsStayFast(string unit)
+    [InlineData("", "a.")]
+    [InlineData("", "a-")]
+    [InlineData("", "a\\")]
+    [InlineData("", "a/")]
+    [InlineData("", "C:\\")]
+    [InlineData("", "a@")]
+    [InlineData("", "pass" + "word=a ")]
+    [InlineData("", "pass" + "word=\"a ")]
+    [InlineData("", "--token a ")]
+    [InlineData("key=\"", "pwd")]
+    [InlineData("key=\"", "token")]
+    [InlineData("", ";pass" + "word=a b")]
+    [InlineData("", "C:\\a b:\\c ")]
+    [InlineData("", "-oD:\\a ")]
+    [InlineData("", "a.b.c.it.")]
+    [InlineData("net use ", "a ")]
+    [InlineData("", "CN=a\\,")]
+    public void LargeAdversarialInputsStayFast(string head, string unit)
     {
-        var text = string.Concat(Enumerable.Repeat(unit, 1_000_000 / unit.Length));
+        var text = head + string.Concat(Enumerable.Repeat(unit, (Redactor.MaxInputChars - head.Length) / unit.Length));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         Plain().Redact(text);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"{unit}: {watch.Elapsed}");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"{head}{unit}: {watch.Elapsed}");
     }
+
+    [Fact]
+    public void RedactionThatDoesNotSettleIsRefused()
+    {
+        var redactor = new Redactor([]) { Passes = 1 };
+        Assert.Equal("nothing here", redactor.Redact("nothing here").Text);
+        Assert.Throws<RedactionException>(() => redactor.Redact("mail a@b.example"));
+    }
+
+    [Theory]
+    [InlineData("lab", "LabVIEW by lab, lab-01, lab_build, labs", "LabVIEW by <private>, <private>-01, <private>_build, labs")]
+    [InlineData("admin", "Administrators and admin", "Administrators and <private>")]
+    [InlineData("Jane Doe", "Jane\u00A0 Doe and JaneDoe", "<private> and JaneDoe")]
+    public void WholeWordTermsMatchOnlyWholeWords(string term, string input, string expected) =>
+        Assert.Equal(expected, new Redactor([], wholeWordTerms: [term]).Redact(input).Text);
+
+    [Theory]
+    [InlineData("net use Z: \\\\fs01\\share Sup3r extra", "net use Z: <path> <secret> extra")]
+    [InlineData("net user jane Sup3r extra /add", "net user <user> <secret> extra /add")]
+    [InlineData("net user", "net user")]
+    [InlineData("NET.EXE USE LPT1: \\\\fs01\\printer", "NET.EXE USE LPT1: <path>")]
+    [InlineData("schtasks /Query /P /F /RU", "schtasks /Query /P /F /RU")]
+    [InlineData("schtasks.exe /Change /TN x /RP Sup3r", "schtasks.exe /Change /TN x /RP <secret>")]
+    public void CommandLinesHideTheirPasswordArguments(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData("{\"password\":\"x\"}", "{\"password\":<secret>}")]
+    [InlineData("--token \"x\"}", "--token <secret>}")]
+    [InlineData("User Id=\"sa\";", "User Id=<user>;")]
+    public void RedactedValuesAreNotTakenAgain(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData("C:\\Windows\\Temp\\ ", "C:\\Windows\\Temp\\ ")]
+    [InlineData("C:\\Users\\ ", "C:\\Users\\ ")]
+    [InlineData("C:\\Windows\\Temp\\x  /c", "C:\\Windows\\Temp\\<path>  /c")]
+    [InlineData("C:\\Windows\\...\\x", "<path>")]
+    [InlineData("C:\\Windows\\ .. \\x", "<path>")]
+    public void PathEdgesKeepSpacingAndRefuseDotSegments(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 }

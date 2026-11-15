@@ -9,19 +9,27 @@ release's notes for the exact pinned commit.
 - Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
   deterministic and idempotent redaction that peer evidence passes through
   before a local model sees it and before it leaves the peer.
-  - It covers secrets (token formats, `Authorization` headers, flags,
-    prefixed and table-style assignments, connection strings, XML settings,
-    SAS signatures), URLs (allow-listed hosts only, never a path), git
-    remotes, e-mail addresses, bare host names, and paths in every spelling
-    (forward-slash, escaped, `file:///`, encoded, long, device, UNC, Git Bash
-    and WSL).
-  - Allow-listed paths are kept only to a fixed depth, and any `..` hides the
-    whole path. Profiles are reduced to `<user>`.
+  - It covers secrets (token formats, `Authorization` headers including
+    escaped JSON and table layouts, flags and Windows switches, command-line
+    passwords for `net use`, `net user`, `schtasks` and
+    `ConvertTo-SecureString`, prefixed and table-style assignments, connection
+    strings, XML settings, SAS signatures).
+  - It also covers accounts in switches and `user@address`, URLs (allow-listed
+    hosts only, never a path), git remotes, e-mail addresses, directory names,
+    and bare host names under generic and country domains.
+  - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
+    encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
+    runs through spaces and stops at a colon, a switch, or the next path.
+  - Allow-listed paths are kept only to a fixed depth. Separators and trailing
+    dots cannot dodge a limit, any `.` or `..` hides the whole path, and
+    profiles are reduced to `<user>`.
   - MACs and IPs are redacted except loopback and the cable. An operator-private
-    deny list plus the host's own machine and account names become
-    `<private>`, matched across any whitespace and invisible characters.
-  - Evidence over 4,000,000 characters is refused whole, and adversarial
-    input stays linear.
+    deny list (substring) plus the host's own machine and account names
+    (whole word) become `<private>`, matched across any whitespace and invisible
+    characters.
+  - Rules repeat until the text settles, so the output is idempotent by
+    construction. Evidence over 4,000,000 characters is refused whole, and
+    adversarial input stays linear up to that cap.
   - Diagnostics stay: digests, versions, exit codes and times.
   - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
     matrix at 100% coverage.

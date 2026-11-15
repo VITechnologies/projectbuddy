@@ -5,6 +5,10 @@
     "WS-CORP-01",
     "Example Widgets Ltd"
   ],
+  "wholeWordTerms": [
+    "lab",
+    "WS-HOST-7"
+  ],
   "items": [
     {
       "id": "link-outage",
@@ -436,6 +440,153 @@
         "C:\\Windows\\System32\\cmd.exe /c dir",
         "in <path>:line 42",
         "<path>: error CS1002: ; expected"
+      ]
+    },
+    {
+      "id": "posix-paths-with-spaces",
+      "input": "/d/Customer Work/Bid A/main.vi\n/mnt/d/Customer Work/Bid B/main.vi\n/cygdrive/d/Customer Work/x\n/home/jane/Customer Work/Bid C/x\n//fileserver01/Customer Projects/x.zip\nfile:////fileserver01/Customer Projects/x\n/home/jane/x.py:42: error",
+      "mustNotContain": [
+        "Customer",
+        "Work",
+        "Bid",
+        "fileserver01",
+        "Projects",
+        "jane"
+      ],
+      "mustContain": [
+        "/home/<user>/<path>",
+        "<path>:42: error"
+      ]
+    },
+    {
+      "id": "windows-command-secrets",
+      "input": "Server=db01;User Id=sa;Password=Pa55 hidden words\n$pw = ConvertTo-SecureString \"Sup3rSecure\" -AsPlainText -Force\n\"Sup3rPiped\" | ConvertTo-SecureString -AsPlainText -Force\nnet use Z: \\\\fs01\\share /user:CORP\\jane Sup3rNetUse\nnet user jane Sup3rNetUser /add\ncmdkey /add:fs01 /user:jane /pass:Sup3rCmdkey\nschtasks /Create /TN Nightly /RU CORP\\svc /RP Sup3rTask /F\nplink -ssh jane@10.0.0.5 -pw Sup3rPlink",
+      "mustNotContain": [
+        "Pa55",
+        "hidden words",
+        "Sup3r",
+        "jane",
+        "CORP",
+        "fs01\\share",
+        "svc"
+      ],
+      "mustContain": [
+        "Password=<secret>",
+        "ConvertTo-SecureString <secret> -AsPlainText",
+        "<secret> | ConvertTo-SecureString",
+        "net use Z: <path> /user:<user> <secret>",
+        "net user <user> <secret> /add",
+        "/pass:<secret>",
+        "/RU <user> /RP <secret> /F",
+        "-pw <secret>"
+      ]
+    },
+    {
+      "id": "escaped-and-table-authorization",
+      "input": "Authorization                  token 0123abcd4567\n{\\\"Authorization\\\":\\\"token 4567efgh0123\\\"}\n{\\\"password\\\":\\\"hunter2xx\\\"}",
+      "mustNotContain": [
+        "0123abcd",
+        "4567efgh",
+        "hunter2xx"
+      ],
+      "mustContain": [
+        "Authorization                  token <secret>",
+        "{\\\"Authorization\\\":\\\"token <secret>\\\"}",
+        "{\\\"password\\\":<secret>}"
+      ]
+    },
+    {
+      "id": "doubled-separators-and-system-data",
+      "input": "C:/Users//Jane//Documents//Plans\nC:\\Users\\/Jane\\x\nC:\\Windows\\.\\Temp\\Acme Bid\\plan.docx\nC:\\Windows\\Temp.\\Acme\\x\nC:\\Windows\\SystemTemp\\Acme_build\\x.log\nC:\\Windows\\Prefetch\\TESTER.EXE-1.pf\nC:\\Windows\\System32\\Tasks\\Nightly Sync",
+      "mustNotContain": [
+        "Jane",
+        "Plans",
+        "Acme",
+        "TESTER",
+        "Nightly"
+      ],
+      "mustContain": [
+        "C:/Users//<user>//<path>",
+        "C:\\Windows\\Temp.\\<path>",
+        "C:\\Windows\\SystemTemp\\<path>",
+        "C:\\Windows\\System32\\Tasks\\<path>"
+      ]
+    },
+    {
+      "id": "more-domains-and-directory-names",
+      "input": "fs01.lanl.gov daq.mit.edu x.mil contoso.com.au contoso.co.jp contoso.fr contoso.ai www.contoso.it\n_ldap._tcp.dc._msdcs.contoso.com\nCN=Doe\\, John,OU=Lab,DC=corp,DC=local\nuser.id and arr.at and README.md and CN=github.com",
+      "mustNotContain": [
+        "lanl",
+        "mit.edu",
+        "x.mil",
+        "contoso",
+        "Doe",
+        "John",
+        "corp"
+      ],
+      "mustContain": [
+        "user.id and arr.at and README.md and CN=github.com",
+        "CN=<private>,OU=<private>,DC=<private>,DC=<private>"
+      ]
+    },
+    {
+      "id": "dotnet-and-version-diagnostics",
+      "input": "Microsoft.NETCore.App 10.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\nC:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\nusing System.IO; ASP.NET Core\nC:\\Windows\\System32\\chcp.com 65001\nalpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\"ProductVersion\": \"1.0.0.0\"\nProductVersion : 1.0.0.0",
+      "mustNotContain": [
+        "<host>",
+        "<ip>",
+        "<url>",
+        "<path>"
+      ],
+      "mustContain": [
+        "Microsoft.NETCore.App 10.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]",
+        "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
+        "using System.IO; ASP.NET Core",
+        "C:\\Windows\\System32\\chcp.com 65001",
+        "alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "\"ProductVersion\": \"1.0.0.0\"",
+        "ProductVersion : 1.0.0.0"
+      ]
+    },
+    {
+      "id": "drives-after-switches-and-escapes",
+      "input": "7z x a.zip -oD:\\Clients\\Acme\ncl.exe /ID:\\Clients\\inc\n\"fatal:\\tD:/Clients/Acme Bid/firmware\"\nC:\\Program Files\\7-Zip\\7z.exe x a.zip -oD:\\Clients\nC:\\x\\abcD:\\y\\z\nhttps:\\/\\/acme.com\\/x\nD:\\tools\\x.exe /user:CORP\\jane",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "abcD",
+        "acme.com",
+        "jane"
+      ],
+      "mustContain": [
+        "7z x a.zip -o<path>",
+        "cl.exe /I<path>",
+        "\"fatal:\\t<path>\"",
+        "C:\\Program Files\\7-Zip\\7z.exe x a.zip -o<path>",
+        "<path> /user:<user>"
+      ]
+    },
+    {
+      "id": "host-names-whole-word",
+      "input": "LabVIEW 2025 run by lab on WS-HOST-7; lab-01 and Administrators",
+      "mustNotContain": [
+        "WS-HOST-7",
+        " lab ",
+        "lab-01"
+      ],
+      "mustContain": [
+        "LabVIEW 2025 run by <private> on <private>; <private>-01 and Administrators"
+      ]
+    },
+    {
+      "id": "invisible-tag-characters",
+      "input": "Exam\udb40\udc20ple Widgets Ltd and WS-\udb40\udc41CORP-01",
+      "mustNotContain": [
+        "Widgets",
+        "CORP-01"
+      ],
+      "mustContain": [
+        "<private> and <private>"
       ]
     }
   ]
