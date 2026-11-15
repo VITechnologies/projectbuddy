@@ -869,6 +869,69 @@
         "Cannot find path '<path>' because it does not exist.",
         "Cannot find path '<path>' because it doesn't exist."
       ]
+    },
+    {
+      "id": "json-command-line-secrets",
+      "input": "{\"CommandLine\":\"C:\\\\Tools\\\\sync.exe --password \\u0022Sup3rSync Zqone\\u0022 --host fs01\"}\n{\"CommandLine\":\"pscp -pw \\u0022Sup3rPscp\\u0022 a b\"}\n{\"CommandLine\":\"NetworkCredential(\\u0022jane\\u0022, \\u0022Sup3rCred Zqtwo\\u0022)\"}\n{\"CommandLine\":\"ConvertTo-SecureString \\u0022Sup3rSecure Zqthree\\u0022 -AsPlainText\"}\n{\"CommandLine\":\"runas /user:\\u0022CORP\\\\Sup3rUser Name\\u0022 cmd\"}\n{\"CommandLine\":\"https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\"}\n{\"CommandLine\":\"C:\\\\Tools\\\\sync.exe --password \\\"Sup3rSync Zqone\\\" --host fs01\"}\n{\"CommandLine\":\"pscp -pw \\\"Sup3rPscp\\\" a b\"}\n{\"CommandLine\":\"NetworkCredential(\\\"jane\\\", \\\"Sup3rCred Zqtwo\\\")\"}\n{\"CommandLine\":\"ConvertTo-SecureString \\\"Sup3rSecure Zqthree\\\" -AsPlainText\"}\n{\"CommandLine\":\"runas /user:\\\"CORP\\\\Sup3rUser Name\\\" cmd\"}\n{\"CommandLine\":\"https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\"}",
+      "mustNotContain": [
+        "Sup3r",
+        "Zqone",
+        "Zqtwo",
+        "Zqthree",
+        "acme"
+      ],
+      "mustContain": [
+        "{\"CommandLine\":\"<path> <secret> --host fs01\"}",
+        "{\"CommandLine\":\"pscp -pw <secret> a b\"}",
+        "{\"CommandLine\":\"NetworkCredential(<user>, <secret>)\"}",
+        "{\"CommandLine\":\"runas /user:<user> cmd\"}"
+      ]
+    },
+    {
+      "id": "json-in-json-command-line-secrets",
+      "input": "{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022C:\\\\\\\\Tools\\\\\\\\sync.exe --password \\\\u0022Sup3rSync Zqone\\\\u0022 --host fs01\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022pscp -pw \\\\u0022Sup3rPscp\\\\u0022 a b\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022NetworkCredential(\\\\u0022jane\\\\u0022, \\\\u0022Sup3rCred Zqtwo\\\\u0022)\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022ConvertTo-SecureString \\\\u0022Sup3rSecure Zqthree\\\\u0022 -AsPlainText\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022runas /user:\\\\u0022CORP\\\\\\\\Sup3rUser Name\\\\u0022 cmd\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\\u0022}\"}",
+      "mustNotContain": [
+        "Sup3r",
+        "Zqone",
+        "Zqtwo",
+        "Zqthree",
+        "acme"
+      ],
+      "mustContain": [
+        "--host fs01",
+        "pscp -pw <secret> a b",
+        "ConvertTo-SecureString <secret> -AsPlainText"
+      ]
+    },
+    {
+      "id": "short-switch-unc-and-posix",
+      "input": "7z x a.7z -o\\\\fs01\\Customer Projects\\Acme Bid\n7z x a.7z -o//fs01/Customer Projects/Acme Bid\ncl /I\\\\srv\\share\\inc x.c\ntar -C/c/Users/jane/Acme -x\nx -o/home/jane/Acme Bid\nAccess to the path 'D:\\Clients\\Jones' Bakery.docx' is denied.",
+      "mustNotContain": [
+        "fs01",
+        "Customer",
+        "Acme",
+        "srv",
+        "jane",
+        "Clients",
+        "Bakery"
+      ],
+      "mustContain": [
+        "7z x a.7z -o<path>",
+        "cl /I<path>",
+        "tar -C<path>",
+        "x -o/home/<user>/<path>",
+        "Access to the path '<path>' is denied."
+      ]
+    },
+    {
+      "id": "github-own-certificate",
+      "input": "Subject: O=\"GitHub, Inc.\", CN=github.com, L=San Francisco, S=California, C=US",
+      "mustNotContain": [
+        "<private>"
+      ],
+      "mustContain": [
+        "Subject: O=\"GitHub, Inc.\", CN=github.com, L=San Francisco, S=California, C=US"
+      ]
     }
   ]
 }

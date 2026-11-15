@@ -287,6 +287,9 @@ public class RedactorTests
     [InlineData("net use ", "\"a ")]
     [InlineData("CN=a, O=\"", "a")]
     [InlineData("", "'D:\\a' because ")]
+    [InlineData("\"", "\\\"")]
+    [InlineData("", "\\\\u0022a")]
+    [InlineData("/user:\\\"", "a")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -355,6 +358,7 @@ public class RedactorTests
     [InlineData("$pass = 'Sup3r'", "$pass = <secret>")]
     [InlineData("db_pass=Sup3r", "db_pass=<secret>")]
     [InlineData("bypass=true", "bypass=true")]
+    [InlineData("<add key=\\\"ClearTextPassword\\\" value=\\\"Qzx secret9\\\" />", "<add key=\\\"ClearTextPassword\\\" value=\\\"<secret>\\\" />")]
     [InlineData("$pw = Read-Host -AsSecureString", "$pw = Read-Host -AsSecureString")]
     [InlineData("New-Object System.Net.NetworkCredential(\"jane\", \"Sup3r\")", "New-Object System.Net.NetworkCredential(<user>, <secret>)")]
     [InlineData("[NetworkCredential]::new('jane', 'Sup3r')", "[NetworkCredential]::new(<user>, <secret>)")]

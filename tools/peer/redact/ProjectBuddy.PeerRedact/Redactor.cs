@@ -153,7 +153,7 @@ public sealed partial class Redactor
         result = Apply(result, "secret", Token(), _ => "<secret>");
         result = Apply(result, "secret", Authorization(), match => match.Groups["key"].Value + match.Groups["quote"].Value + match.Groups["scheme"].Value + "<secret>");
         result = Apply(result, "secret", Bearer(), match => match.Groups["scheme"].Value + "<secret>");
-        result = Apply(result, "secret", XmlSecret(), match => match.Groups["key"].Value + "\"<secret>\"");
+        result = Apply(result, "secret", XmlSecret(), match => match.Groups["key"].Value + (match.Groups["value"].Value.StartsWith('\\') ? "\\\"<secret>\\\"" : "\"<secret>\""));
         result = Apply(result, "secret", Command(), RedactCommand);
         result = Apply(result, "secret", SecureString(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Credential(), match => match.Groups["head"].Value
@@ -482,8 +482,12 @@ public sealed partial class Redactor
 
     private const string AuthSchemes = "Bearer|Basic|Digest|token|Negotiate|NTLM|SharedKey|SharedKeyLite|ApiKey|SSWS|AWS4-HMAC-SHA256";
 
-    // A JSON string value, plain ("x") or escaped inside another string (\"x\").
-    private const string Quoted = @"(?<q>\\?"")(?:[^""\\\r\n]|\\(?!""))*\k<q>";
+    // A quoted value at any JSON nesting: "x" (with \" escapes inside), \"x\" (JSON), \\\"x\\\" and \\u0022x\\u0022
+    // (JSON inside JSON), and a raw \u0022x\u0022. Each closes only with its own spelling.
+    private const string Quoted = @"(?:\\\\\\""(?:(?!\\\\\\"")[^\r\n])*\\\\\\""|\\\\u0022(?:(?!\\\\u0022)[^\r\n])*\\\\u0022|\\u0022(?:(?!\\u0022)[^\r\n])*\\u0022|\\""(?:[^""\\\r\n]|\\[^""\r\n])*\\""|""(?:[^""\\\r\n]|\\.)*"")";
+
+    // A plain token never ends in the "\" of an escaped quote, so a placeholder can never split a JSON string.
+    private const string Bare = @"(?:[^\s""',;\\]|\\(?!""))+";
 
     private const string Placeholder = "<(?:private|secret|email|url|host|path|user|ip|mac)>";
 
@@ -496,11 +500,14 @@ public sealed partial class Redactor
 
     // A drive starts after a non-alphanumeric character, a JSON \t, \n or \r escape, or a short switch (-oD:\x,
     // /ID:\x); never inside a word, so "https://" is not a drive "s:".
-    private const string DriveBehind = @"(?:(?<![A-Za-z0-9])|(?<=\\[tnr])|" + AfterEscape + @"|(?<=(?<![\w\\/.:-])[-/][A-Za-z]{1,3}))";
+    // A short switch glued to a path (-oD:\x, /ID:\x, -o\\fs01\x, -o/home/x).
+    private const string ShortSwitch = @"(?<=(?<![\w\\/.:-])[-/][A-Za-z]{1,3})";
+
+    private const string DriveBehind = @"(?:(?<![A-Za-z0-9])|(?<=\\[tnr])|" + AfterEscape + "|" + ShortSwitch + ")";
 
     private const string DriveHead = DriveBehind + "[A-Za-z]" + Colon + AnySeparator;
 
-    private const string UncHead = @"(?:(?<![A-Za-z0-9\\/]|(?<![A-Za-z0-9])[A-Za-z]:)|" + AfterEscape + @")(?:\\\\\\\\|\\\\)";
+    private const string UncHead = @"(?:(?<![A-Za-z0-9\\/]|(?<![A-Za-z0-9])[A-Za-z]:)|" + AfterEscape + "|" + ShortSwitch + @")(?:\\\\\\\\|\\\\)";
 
     // A path runs on through spaces (so "D:\Acme Projects\x" never leaks its tail) and through apostrophes inside
     // names (O'Brien, Customers' Data; only a path opened by an apostrophe ends at one). It stops at a double quote,
@@ -514,9 +521,9 @@ public sealed partial class Redactor
 
     // Inside a path opened by an apostrophe, an apostrophe stays part of a name when doubled (PowerShell's '' escape),
     // before a letter or digit (O'Brien), when more path (a "\" or "/") follows before the next apostrophe
-    // ('D:\Customers' Data\x'), or when the next apostrophe is the one that closes the quote, before " because" or the
-    // line end ('D:\Jones' Bakery.docx' because ...); otherwise it closes the path.
-    private const string QuotedApostrophe = @"(?:''|'(?=[A-Za-z0-9])|'(?=[^'\r\n]*[\\/][^'\r\n]*')|'(?=[^'\r\n]*'(?:[ \t]+because\b|[ \t]*[.,;:)]*[ \t]*(?:\r|\n|\z))))";
+    // ('D:\Customers' Data\x'), or when the next apostrophe is the one that closes the quote, before a lower-case word
+    // or the line end ('D:\Jones' Bakery.docx' is denied); otherwise it closes the path.
+    private const string QuotedApostrophe = @"(?:''|'(?=[A-Za-z0-9])|'(?=[^'\r\n]*[\\/][^'\r\n]*')|'(?=[^'\r\n]*'(?:[ \t]+[a-z]|[ \t]*[.,;:)]*[ \t]*(?:\r|\n|\z))))";
 
     // Set when a path follows an opening apostrophe ('D:\x'), so only then does an apostrophe end it.
     private const string Open = "(?<open>(?<='))?";
@@ -551,7 +558,8 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<scheme>\b(?:Bearer|Basic)\s+)(?=[A-Za-z0-9._~+/=-]*[0-9])[A-Za-z0-9._~+/=-]{16,}", RegexOptions.IgnoreCase)]
     private static partial Regex Bearer();
 
-    [GeneratedRegex(@"(?<key>\bkey\s*=\s*""[^""\r\n]*(?:password|passwd|pwd|secret|token|key)[^""\r\n]*""\s+value\s*=\s*)""[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    // Plain or escaped inside a JSON string (key=\"Password\" value=\"x\"); the quoting is kept.
+    [GeneratedRegex(@"(?<key>\bkey\s*=\s*\\?""[^""\r\n]*(?:password|passwd|pwd|secret|token|key)[^""\r\n]*""\s+value\s*=\s*)(?<value>\\""(?:[^""\\\r\n]|\\[^""\r\n])*\\""|""[^""\r\n]*"")", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex XmlSecret();
 
     [GeneratedRegex(@"(?<command>\b(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>[^\r\n]*)", RegexOptions.IgnoreCase)]
@@ -565,17 +573,18 @@ public sealed partial class Redactor
     [GeneratedRegex(@"^(?:[A-Za-z]:|\*|(?:LPT|COM)[0-9]:?)$", RegexOptions.IgnoreCase)]
     private static partial Regex NetDevice();
 
-    // ConvertTo-SecureString "x" -AsPlainText, ... -String x, and "x" | ConvertTo-SecureString.
-    [GeneratedRegex(@"(?<key>\bConvertTo-SecureString\b(?:[ \t]+-(?:AsPlainText|Force|String)\b)*[ \t]+)(?:""[^""\r\n]*""|'[^'\r\n]*'|(?!-)[^\s|;)]+)|(?:""[^""\r\n]*""|'[^'\r\n]*')(?=[ \t]*\|[ \t]*ConvertTo-SecureString\b)", RegexOptions.IgnoreCase)]
+    // ConvertTo-SecureString "x" -AsPlainText, ... -String x, and "x" | ConvertTo-SecureString. The piped form has no key
+    // to anchor it, so its quoted value never spans an escaped quote and each start scans only to the next quote.
+    [GeneratedRegex(@"(?<key>\bConvertTo-SecureString\b(?:[ \t]+-(?:AsPlainText|Force|String)\b)*[ \t]+)(?:" + Quoted + @"|'[^'\r\n]*'|(?!-)(?:[^\s|;)""\\]|\\(?!""))+)|(?:""[^""\r\n]*""|\\""[^""\r\n]*\\""|'[^'\r\n]*')(?=[ \t]*\|[ \t]*ConvertTo-SecureString\b)", RegexOptions.IgnoreCase)]
     private static partial Regex SecureString();
 
     // new NetworkCredential("jane", "x"), New-Object System.Net.NetworkCredential -ArgumentList 'jane', 'x', and
     // [NetworkCredential]::new($env:USERNAME, "x"); a literal account becomes <user>, a variable stays.
-    [GeneratedRegex(@"(?<head>\bNetworkCredential\]?(?:::new)?(?:[ \t]*\(|[ \t]+-ArgumentList)[ \t]*)(?<user>""[^""\r\n]*""|'[^'\r\n]*'|\$[\w:.]+)(?<separator>[ \t]*,[ \t]*)(?!" + Placeholder + @")(?:""[^""\r\n]*""|'[^'\r\n]*')")]
+    [GeneratedRegex(@"(?<head>\bNetworkCredential\]?(?:::new)?(?:[ \t]*\(|[ \t]+-ArgumentList)[ \t]*)(?<user>" + Quoted + @"|'[^'\r\n]*'|\$[\w:.]+)(?<separator>[ \t]*,[ \t]*)(?!" + Placeholder + ")(?:" + Quoted + @"|'[^'\r\n]*')")]
     private static partial Regex Credential();
 
     // Command-line flags: "--token x", "-pw x", "--password=x", "-passout pass:x", and Windows switches "/pass:x".
-    [GeneratedRegex(@"(?<key>(?<![\w/-])(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?<![\w/-])(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:" + Quoted + @"|'[^'\r\n]*'|" + Bare + ")", RegexOptions.IgnoreCase)]
     private static partial Regex FlagSecret();
 
     // Name with any prefix (ACTIONS_RUNNER_INPUT_TOKEN, DB_PASSWORD, "api_key", \"password\"), then ":"/"=" or a
@@ -583,7 +592,7 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\?"")?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)[^;\r\n""]{1,256}|(?:[^;\r\n]{1,256}?(?=;)|[^\s,;]+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:[^;\r\n""\\]|\\(?!"")){1,256}|(?:(?:[^;\r\n\\]|\\(?!"")){1,256}?(?=;)|(?:[^\s,;\\]|\\(?!""))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
@@ -591,11 +600,11 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)[^\s][^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex Registry();
 
-    [GeneratedRegex(@"(?<=[?&;])sig=[^&\s""'<>;]+", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<=[?&;]|\\u00(?:26|3[Ff]|3[Bb]))sig=(?:[^&\s""'<>;\\]|\\(?!""))+", RegexOptions.IgnoreCase)]
     private static partial Regex SasSignature();
 
     // Account names given as switches or connection-string keys: /user:CORP\jane, --username jane, User Id=sa.
-    [GeneratedRegex(@"(?<key>(?<![\w/-])/u(?:ser)?:|(?<![\w-])--user(?:name)?=|(?<![\w-])--username[ \t]+|\bUser[ \t_]?(?:Id|Name)[ \t]*=[ \t]*)(?!" + Placeholder + @")(?:""[^""\r\n]*""|[^\s;,""]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?<![\w/-])/u(?:ser)?:|(?<![\w-])--user(?:name)?=|(?<![\w-])--username[ \t]+|\bUser[ \t_]?(?:Id|Name)[ \t]*=[ \t]*)(?!" + Placeholder + @")(?:" + Quoted + @"|(?:[^\s;,""\\]|\\(?!""))+)", RegexOptions.IgnoreCase)]
     private static partial Regex UserFlag();
 
     // Plain and JSON-escaped (https:\/\/) URLs.
@@ -622,14 +631,14 @@ public sealed partial class Redactor
     private static partial Regex UncPath();
 
     // //server/share and file:////server/share spellings of a UNC path.
-    [GeneratedRegex(Open + @"(?:\bfile:/{4,5}|(?:(?<![\w:/.-])|" + AfterEscape + @")//)[A-Za-z0-9._$-]+/(?=[^\s/])" + PathTail)]
+    [GeneratedRegex(Open + @"(?:\bfile:/{4,5}|(?:(?<![\w:/.-])|" + AfterEscape + "|" + ShortSwitch + @")//)[A-Za-z0-9._$-]+/(?=[^\s/])" + PathTail)]
     private static partial Regex UncForward();
 
     // Git Bash (/c/...), WSL (/mnt/c/...) and Cygwin (/cygdrive/c/...) spellings of a drive path.
-    [GeneratedRegex(Open + @"(?:(?<![\w.~-])|" + AfterEscape + @")(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
+    [GeneratedRegex(Open + @"(?:(?<![\w.~-])|" + AfterEscape + "|" + ShortSwitch + @")(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
     private static partial Regex PosixDrive();
 
-    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(Open + @"(?<root>(?:(?<![\w.~-])|" + AfterEscape + "|" + ShortSwitch + @")/(?:home|Users)/)(?!<)(?:[^/""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|'))+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
     private static partial Regex PosixHome();
 
     [GeneratedRegex(@"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")]
@@ -667,7 +676,7 @@ public sealed partial class Redactor
     // Public certificate authorities and vendors, so TLS and code-signing issuers stay readable. The whole value must be
     // the issuer's name followed only by certificate-naming words (Microsoft Code Signing PCA 2011, DigiCert Global
     // Root G2), so "Contoso Microsoft Teams Room" and "Microsoft Teams Room - Contoso" are still private.
-    [GeneratedRegex(@"^\s*(?:DigiCert|GlobalSign|Sectigo|COMODO|USERTrust|ISRG|Let's Encrypt|Entrust|GoDaddy|Starfield|VeriSign|Thawte|GeoTrust|Baltimore|IdenTrust|QuoVadis|Certum|Symantec|Microsoft|Amazon|Google Trust Services|GitHub|Internet Security Research Group)(?:[\s,.-]+(?:Corporation|Corp|Inc|LLC|Limited|Ltd|Global|Root|CA|CAs|Certificate|Certification|Authority|Code|Signing|Server|Secure|TLS|SSL|RSA|ECC|EV|PCA|Intermediate|Issuing|Public|Primary|Universal|Trust|Trusted|Services?|Assured|ID|High|Assurance|Extended|Validation|Domain|Organization|Time-?Stamp(?:ing)?|Timestamping|Production|Windows|Azure|Update|Hybrid|SHA[0-9]*|[A-Z][0-9]+|[0-9]+|\(c\)|nv-sa))*\s*$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"^\s*(?:DigiCert|GlobalSign|Sectigo|COMODO|USERTrust|ISRG|Let's Encrypt|Entrust|GoDaddy|Starfield|VeriSign|Thawte|GeoTrust|Baltimore|IdenTrust|QuoVadis|Certum|Symantec|Microsoft|Amazon|Google Trust Services|GitHub|Internet Security Research Group)(?:[\s,.-]+(?:Corporation|Corp|Inc|LLC|Limited|Ltd|Global|Root|CA|CAs|Certificate|Certification|Authority|Code|Signing|Server|Secure|TLS|SSL|RSA|ECC|EV|PCA|Intermediate|Issuing|Public|Primary|Universal|Trust|Trusted|Services?|Assured|ID|High|Assurance|Extended|Validation|Domain|Organization|Time-?Stamp(?:ing)?|Timestamping|Production|Windows|Azure|Update|Hybrid|SHA[0-9]*|[A-Z][0-9]+|[0-9]+|\(c\)|nv-sa))*\.?\s*$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex PublicIssuer();
 
     // Bare host names with a known top-level domain (fs01.corp.example.com, _ldap._tcp.example.com, x.co.jp/path).
