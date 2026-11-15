@@ -90,18 +90,39 @@ JSON stays well formed, and a .NET type name
 Diagnostics often keep a secret's name and its value in sibling fields rather
 than as `key=value`. When the name holds a secret word (the assignment keys, plus
 `credential`), the value becomes `<secret>`:
-- a flat JSON object's `Name`/`Key` member and its `Value`, `VariableValue` or
-  `Data` member (`Get-ChildItem env: | ConvertTo-Json`, `Win32_Environment`,
-  `{"key":"ClearTextPassword","value":"…"}`). These objects and JSON argument
-  arrays are read before escaped strings are masked;
-- a Format-List or YAML record: `Name : DB_PASSWORD` (or `- name: …`) followed,
-  within eight lines, by `Value :`, `VariableValue :` or `Data :`;
-- a CSV table whose header row names a `Name`/`Key` column and a
-  `Value`/`VariableValue`/`Data` column (`ConvertTo-Csv`), row by row;
-- a JSON argument array (`["tool.exe","--password","…"]`), where the element
-  after a secret flag, or after a command's own password switch
-  (`["sqlcmd",…,"-P","…"]`), is secret, and the element after an account switch is
-  `<user>`.
+- **JSON objects at any depth:** an object's `Name`/`Key` member and its `Value`,
+  `VariableValue` or `Data` member. Examples are `Get-ChildItem env: |
+  ConvertTo-Json`, whose items also hold nested `PSDrive` and `PSProvider`
+  objects, `Win32_Environment`, and `{"key":"ClearTextPassword","value":"…"}`.
+  - One linear scan reads them, and it also tracks strings, nesting and
+    truncated JSON (a cut string runs to the line end).
+  - Past a depth of 256 the scan starts over, so memory stays bounded.
+  - JSON is read before escaped strings are masked.
+- **Format-List and YAML records:** `Name : DB_PASSWORD` (or `- name: …`), with
+  `Value :`, `VariableValue :` or `Data :` within eight lines, in either order.
+- **CSV tables** whose header row names a `Name`/`Key` column and a
+  `Value`/`VariableValue`/`Data` column (`ConvertTo-Csv`, `wmic … /format:csv`
+  with its `\r\r\n` line ends). A row with more fields than the header holds a
+  comma in an unquoted value, so everything from the value column on is secret.
+- **JSON argument arrays,** where the command is the first element or a sibling
+  `FileName`/`Path`/`Executable` member (`{"FileName":"sqlcmd.exe","Arguments":[…]}`).
+  - The element after a secret flag (`["tool.exe","--password","…"]`), or after
+    the command's own password switch (`["sqlcmd",…,"-P","…"]`), is secret.
+  - The element after an account switch is `<user>`.
+  - `docker`'s `-p` and `-u` count only after `login`; in `docker run` they are a
+    port and a container user.
+
+Secret names also include `passphrase`, a final `_KEY` part (`AZURE_STORAGE_KEY`,
+`SIGNING_KEY`) and a final `_PAT` part (`AZURE_DEVOPS_EXT_PAT`).
+
+Other value rules:
+- **Line-start keys:** a line that starts with an unquoted secret key
+  (`GPG_PASSPHRASE=…`, `export X=…`, `set X=…`, YAML `password: …`) takes its
+  unquoted value to the line end, so a value with spaces never leaks a word.
+- **Object and array values:** an assignment never takes a value that starts
+  with `{` or `[`; nested JSON is the scanner's.
+- **Bare JSON values:** after a quoted key (`"token": null`), the value is written
+  as a string (`"<secret>"`), so the JSON still parses.
 
 ## JSON evidence
 
@@ -118,17 +139,20 @@ inside another JSON envelope.
 - While the other rules run over the rest of the text, such a literal is held
   behind a quoted mask, so a value rule (`"password":"…"`) still takes it whole
   and nothing reads its escapes as path separators.
-- A quoted raw path is not decoded and stays with the path rules. That covers a
-  path not between JSON punctuation (`copy "C:\temp\new"`), and also any literal
-  that holds a raw drive or UNC path: a standalone drive colon, or a server name
-  at the start of a path, followed by a single backslash escape
-  (`path: "D:\repos\fabrikam", exit: 1`). An encoder always doubles the
-  backslash there.
+- A quoted raw path not between JSON punctuation (`copy "C:\temp\new"`) is not
+  decoded and stays with the path rules.
+- A literal that may hold a raw drive or UNC path is read both ways: decoded and
+  redacted, then left unmasked so the path rules read it raw as well. Such a
+  literal has a standalone drive colon, or a server name at the start of a path,
+  followed by a single backslash escape (`path: "D:\repos\fabrikam", exit: 1`);
+  an encoder always doubles the backslash there. Either reading can only add
+  redaction.
 - Outside such literals (escaped JSON shown in a log line), a quoted value closes
   only with its own quote spelling: `"x"`, `\"x\"`, `\\\"x\\\"`,
   `\\u0022x\\u0022` or `\u0022x\u0022`.
 - An unquoted value keeps a backslash with the next character and stops at the
-  close of a JSON string (`"` or `\"` before `,`, `:`, `]`, `}` or the line end),
+  close of a JSON string (`"` or `\"` before `,`, `:`, `]`, `}` or the line end)
+  or of a JSON object or array (`null}`),
   so a placeholder never splits a string or swallows its closing quote. A quoted
   command argument whose closing quote lies there keeps its opening quote
   (`"<secret>"`).

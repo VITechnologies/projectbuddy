@@ -349,6 +349,12 @@ public class RedactorTests
     [InlineData("", "[\"--password\",\"a\",")]
     [InlineData("", "a,")]
     [InlineData("", "Name : password\nValue : x\n")]
+    [InlineData("[\"--token\",\"x\"", ",\"a\"")]
+    [InlineData("", "[")]
+    [InlineData("", "{\"a\":")]
+    [InlineData("", "{\"Key\":\"password\",\"m\":{\"a\":1},\"Value\":\"a\"},")]
+    [InlineData("", "Value : x\nName : password\n")]
+    [InlineData("", "GPG_PASSPHRASE=a b\n")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -481,4 +487,32 @@ public class RedactorTests
     [InlineData(@"key=""Server"" value=""db01""", @"key=""Server"" value=""db01""")]
     [InlineData("a\uFDD0b", "ab")]
     public void JsonStringsAreRedactedAsTheTextTheyStandFor(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    // The JSON scanner pairs sibling members at every depth and survives truncated, malformed and deeply nested input.
+    [Theory]
+    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":{""Name"":""API_TOKEN"",""Value"":""x""}}", @"{""Key"":""DB_PASSWORD"",""Value"":""<secret>""}")]
+    [InlineData("{\"Key\":\"DB_PASSWORD\",\"Value\":\"x\n", "{\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"\n")]
+    [InlineData("{\"Key\":\"DB_PASSWORD\",\"Value\":\"x\r\n", "{\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"\r\n")]
+    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":""x", @"{""Key"":""DB_PASSWORD"",""Value"":""<secret>""")]
+    [InlineData(@"{""Key"":""a", @"{""Key"":""a")]
+    [InlineData(@"{""Ke", @"{""Ke")]
+    [InlineData(@"[] ""x", @"[] ""x")]
+    [InlineData(@"{""Key"":""DB\qPASSWORD"",""Value"":""x""}", @"{""Key"":""DB\qPASSWORD"",""Value"":""<secret>""}")]
+    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":123}", @"{""Key"":""DB_PASSWORD"",""Value"":""<secret>""}")]
+    [InlineData(@"{""Arguments"":[""-P"",""x"",""--password"",""y""]}", @"{""Arguments"":[""-P"",""x"",""--password"",""<secret>""]}")]
+    [InlineData(@"[{""Key"":""DB_PASSWORD"",""Value"":""Sup3r""", @"[{""Key"":""DB_PASSWORD"",""Value"":""<secret>""")]
+    [InlineData(@"""Credential"": {""UserName"": null, ""Password"": null}", @"""Credential"": {""UserName"": null, ""Password"": ""<secret>""}")]
+    [InlineData(@"{ code: [1, 2] } ] and [x] and {""a"":1}", @"{ code: [1, 2] } ] and [x] and {""a"":1}")]
+    public void JsonLayoutsAreReadAtEveryDepth(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData(255)]
+    [InlineData(256)]
+    [InlineData(257)]
+    [InlineData(1000)]
+    public void DeepJsonNestingNeitherLeaksNorGrowsWithoutBound(int depth)
+    {
+        var text = new string('[', depth) + @"{""Key"":""DB_PASSWORD"",""Value"":""Sup3r""}" + new string(']', depth);
+        Assert.DoesNotContain("Sup3r", Plain().Redact(text).Text, StringComparison.Ordinal);
+    }
 }

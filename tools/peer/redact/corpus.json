@@ -1025,6 +1025,87 @@
         "\"token\":\"<secret>\"",
         "\"Credential\":\"System.Management.Automation.PSCredential\""
       ]
+    },
+    {
+      "id": "powershell-env-json-compressed",
+      "input": "[{\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"Sup3rRunnerTok\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::ACTIONS_RUNNER_INPUT_TOKEN\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"ACTIONS_RUNNER_INPUT_TOKEN\"},{\"Key\":\"AZURE_STORAGE_KEY\",\"Value\":\"Sup3rAzureKey\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::AZURE_STORAGE_KEY\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"AZURE_STORAGE_KEY\"},{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rEnvPw\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::DB_PASSWORD\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"DB_PASSWORD\"}]",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"",
+        "\"Key\":\"AZURE_STORAGE_KEY\",\"Value\":\"<secret>\"",
+        "\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"<secret>\""
+      ]
+    },
+    {
+      "id": "powershell-env-json-pretty",
+      "input": "{\n  \"Key\": \"DB_PASSWORD\",\n  \"Value\": \"Sup3rEnvPw\",\n  \"PSPath\": \"Microsoft.PowerShell.Core\\\\Environment::DB_PASSWORD\",\n  \"PSDrive\": {\n    \"CurrentLocation\": \"\",\n    \"Name\": \"Env\",\n    \"Provider\": {\n      \"ImplementingType\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"HelpFile\": \"System.Management.Automation.dll-Help.xml\",\n      \"Name\": \"Environment\",\n      \"PSSnapIn\": \"Microsoft.PowerShell.Core\",\n      \"ModuleName\": \"Microsoft.PowerShell.Core\",\n      \"Module\": null,\n      \"Description\": \"\",\n      \"Capabilities\": 16,\n      \"Home\": \"\",\n      \"Drives\": \"Env\",\n      \"VolumeSeparatedByColon\": true,\n      \"ItemSeparator\": \"/\",\n      \"AltItemSeparator\": \"\\\\\"\n    },\n    \"Root\": \"\",\n    \"Description\": \"Drive that contains a view of the environment variables for the process\",\n    \"MaximumSize\": null,\n    \"Credential\": {\n      \"UserName\": null,\n      \"Password\": null\n    },\n    \"DisplayRoot\": null,\n    \"VolumeSeparatedByColon\": true\n  },\n  \"PSProvider\": {\n    \"ImplementingType\": {\n      \"IsCollectible\": false,\n      \"DeclaringMethod\": null,\n      \"FullName\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"AssemblyQualifiedName\": \"Microsoft.PowerShell.Commands.EnvironmentProvider, System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"Namespace\": \"Microsoft.PowerShell.Commands\",\n      \"GUID\": \"5ffe799d-9030-3db4-8eb8-c068dedaddcc\",\n      \"IsEnum\": false,\n      \"IsByRefLike\": false,\n      \"IsConstructedGenericType\": false,\n      \"IsGenericType\": false,\n      \"IsGenericTypeDefinition\": false,\n      \"GenericParameterAttributes\": null,\n      \"IsSZArray\": false,\n      \"GenericParameterPosition\": null,\n      \"ContainsGenericParameters\": false,\n      \"StructLayoutAttribute\": \"System.Runtime.InteropServices.StructLayoutAttribute\",\n      \"IsFunctionPointer\": false,\n      \"IsUnmanagedFunctionPointer\": false,\n      \"Name\": \"EnvironmentProvider\",\n      \"DeclaringType\": null,\n      \"Assembly\": \"System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"BaseType\": \"Microsoft.PowerShell.Commands.SessionStateProviderBase\",\n      \"IsGenericParameter\": false,\n      \"IsTypeDefinition\": true,\n      \"IsSecurityCritical\": true,\n      \"IsSecuritySafeCritical\": false,\n      \"IsSecurityTransparent\": false,\n      \"MemberType\": 32,\n      \"MetadataToken\": 33556228,\n      \"Module\": \"System.Management.Automation.dll\",\n      \"ReflectedType\": null,\n      \"TypeHandle\": \"System.RuntimeTypeHandle\",\n      \"UnderlyingSystemType\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"GenericTypeParameters\": \"\",\n      \"DeclaredConstructors\": \"Void .ctor()\",\n      \"DeclaredEvents\": \"\",\n      \"DeclaredFields\": \"System.String ProviderName\",\n      \"DeclaredMembers\": \"System.Collections.ObjectModel.Collection`1[System.Management.Automation.PSDriveInfo] InitializeDefaultDrives() System.Object GetSessionStateItem(System.String) Void SetSessionStateItem(System.String, System.Object, Boolean) Void RemoveSessionStateItem(System.String) System.Collections.IDictionary GetSessionStateTable() System.Object GetValueOfItem(System.Object) Void .ctor() System.String ProviderName\",\n      \"DeclaredMethods\": \"System.Collections.ObjectModel.Collection`1[System.Management.Automation.PSDriveInfo] InitializeDefaultDrives() System.Object GetSessionStateItem(System.String) Void SetSessionStateItem(System.String, System.Object, Boolean) Void RemoveSessionStateItem(System.String) System.Collections.IDictionary GetSessionStateTable() System.Object GetValueOfItem(System.Object)\",\n      \"DeclaredNestedTypes\": \"\",\n      \"DeclaredProperties\": \"\",\n      \"ImplementedInterfaces\": \"System.Management.Automation.IResourceSupplier System.Management.Automation.Provider.IContentCmdletProvider\",\n      \"IsInterface\": false,\n      \"IsNested\": false,\n      \"IsArray\": false,\n      \"IsByRef\": false,\n      \"IsPointer\": false,\n      \"IsGenericTypeParameter\": false,\n      \"IsGenericMethodParameter\": false,\n      \"IsVariableBoundArray\": false,\n      \"HasElementType\": false,\n      \"GenericTypeArguments\": \"\",\n      \"Attributes\": 1048833,\n      \"IsAbstract\": false,\n      \"IsImport\": false,\n      \"IsSealed\": true,\n      \"IsSpecialName\": false,\n      \"IsClass\": true,\n      \"IsNestedAssembly\": false,\n      \"IsNestedFamANDAssem\": false,\n      \"IsNestedFamily\": false,\n      \"IsNestedFamORAssem\": false,\n      \"IsNestedPrivate\": false,\n      \"IsNestedPublic\": false,\n      \"IsNotPublic\": false,\n      \"IsPublic\": true,\n      \"IsAutoLayout\": true,\n      \"IsExplicitLayout\": false,\n      \"IsLayoutSequential\": false,\n      \"IsAnsiClass\": true,\n      \"IsAutoClass\": false,\n      \"IsUnicodeClass\": false,\n      \"IsCOMObject\": false,\n      \"IsContextful\": false,\n      \"IsMarshalByRef\": false,\n      \"IsPrimitive\": false,\n      \"IsValueType\": false,\n      \"IsSignatureType\": false,\n      \"TypeInitializer\": null,\n      \"IsSerializable\": false,\n      \"IsVisible\": true,\n      \"CustomAttributes\": \"[System.Management.Automation.Provider.CmdletProviderAttribute(\\\"Environment\\\", (System.Management.Automation.Provider.ProviderCapabilities)16)]\"\n    },\n    \"HelpFile\": \"System.Management.Automation.dll-Help.xml\",\n    \"Name\": \"Environment\",\n    \"PSSnapIn\": {\n      \"Name\": \"Microsoft.PowerShell.Core\",\n      \"IsDefault\": true,\n      \"ApplicationBase\": \"/opt/microsoft/powershell/7\",\n      \"AssemblyName\": \"System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"ModuleName\": \"/opt/microsoft/powershell/7/System.Management.Automation.dll\",\n      \"PSVersion\": \"7.6.1\",\n      \"Version\": \"7.6.0.500\",\n      \"Types\": \"types.ps1xml typesv3.ps1xml\",\n      \"Formats\": \"Certificate.format.ps1xml DotNetTypes.format.ps1xml FileSystem.format.ps1xml Help.format.ps1xml HelpV3.format.ps1xml PowerShellCore.format.ps1xml PowerShellTrace.format.ps1xml Registry.format.ps1xml\",\n      \"Description\": null,\n      \"Vendor\": null,\n      \"LogPipelineExecutionDetails\": false\n    },\n    \"ModuleName\": \"Microsoft.PowerShell.Core\",\n    \"Module\": null,\n    \"Description\": \"\",\n    \"Capabilities\": 16,\n    \"Home\": \"\",\n    \"Drives\": [\n      \"Env\"\n    ],\n    \"VolumeSeparatedByColon\": true,\n    \"ItemSeparator\": \"/\",\n    \"AltItemSeparator\": \"\\\\\"\n  },\n  \"PSIsContainer\": false,\n  \"Name\": \"DB_PASSWORD\"\n}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Value\": \"<secret>\"",
+        "\"Name\": \"Environment\""
+      ]
+    },
+    {
+      "id": "name-value-nested-and-arguments",
+      "input": "{\"Name\":\"DB_PASSWORD\",\"Meta\":{\"a\":1},\"Value\":\"Sup3rNested\"}\n{\"FileName\":\"sqlcmd.exe\",\"Arguments\":[\"-S\",\"db01\",\"-U\",\"sa\",\"-P\",\"Sup3rArgs\"]}\n[\"docker\",\"run\",\"-p\",\"8080:80\",\"-u\",\"1000\",\"nginx\"]\n[\"docker\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rDocker\"]",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "\"Meta\":{\"a\":1},\"Value\":\"<secret>\"",
+        "\"-U\",\"<user>\",\"-P\",\"<secret>\"",
+        "[\"docker\",\"run\",\"-p\",\"8080:80\",\"-u\",\"1000\",\"nginx\"]",
+        "\"login\",\"-u\",\"<user>\",\"-p\",\"<secret>\""
+      ]
+    },
+    {
+      "id": "records-csv-variants",
+      "input": "Value : Sup3rFirst\nName  : DB_PASSWORD\n\r\r\nNode,Name,UserName,VariableValue\r\r\nWS01,DB_PASSWORD,SYSTEM,Sup3rWmic\r\r\nWS01,HOME,SYSTEM,/root\r\r\n\nName,Value\nDB_PASSWORD,Sup3r,Comma\nHOME,x",
+      "mustNotContain": [
+        "Sup3r",
+        "Comma"
+      ],
+      "mustContain": [
+        "Value : <secret>\nName  : DB_PASSWORD",
+        "WS01,DB_PASSWORD,SYSTEM,<secret>",
+        "WS01,HOME,SYSTEM,/root",
+        "DB_PASSWORD,<secret>\nHOME,x"
+      ]
+    },
+    {
+      "id": "secret-variable-names",
+      "input": "AZURE_STORAGE_KEY=Sup3rAzure==\nAZURE_DEVOPS_EXT_PAT=Sup3rPat\nGPG_PASSPHRASE=Sup3r correct horse\nSIGNING_KEY=Sup3rSign\nAZURE_STORAGE_KEY    Sup3rTable\n{\"name\":\"AZURE_STORAGE_KEY\",\"value\":\"Sup3rJson\"}\nexport DB_PASSWORD=Sup3r with spaces\npassword: Sup3r yaml words\nPassword     : Sup3r list words\n  \"token\": null,\nPass: 9\nCredential : System.Management.Automation.PSCredential",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "spaces",
+        "words"
+      ],
+      "mustContain": [
+        "AZURE_STORAGE_KEY=<secret>",
+        "AZURE_DEVOPS_EXT_PAT=<secret>",
+        "GPG_PASSPHRASE=<secret>",
+        "export DB_PASSWORD=<secret>",
+        "Password     : <secret>",
+        "\"token\": \"<secret>\",",
+        "Pass: 9",
+        "Credential : System.Management.Automation.PSCredential"
+      ]
+    },
+    {
+      "id": "drive-at-line-end-in-json",
+      "input": "{\"out\":\"Volume C:\\nName  : DB_PASSWORD\\nValue : Sup3rVolume\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Value : <secret>"
+      ]
     }
   ]
 }

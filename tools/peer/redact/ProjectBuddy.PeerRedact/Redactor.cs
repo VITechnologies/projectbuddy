@@ -156,26 +156,33 @@ public sealed partial class Redactor
 
         // Name/Value JSON (an object's Key/Value members, an argument array's flag and value) is read while its strings are
         // still plain JSON, before the escaped ones are redacted and masked below.
-        text = Apply(text, "secret", JsonObject(), RedactJsonObject);
-        text = Apply(text, "secret", JsonArray(), RedactJsonArray);
+        text = RedactJsonLayouts(text, counts);
 
         // A JSON string literal with escapes, between JSON punctuation ({"k":"v"}), is redacted as the text it stands for:
         // decoded (so "\n" is a line break and "\"" a quote), settled with every rule, nested JSON included, and
         // encoded again, so the output stays well formed. While the rules below run over the rest of the text, it is
         // held behind a quoted mask of noncharacters: a value rule ("password":"...") still takes it whole, and nothing
         // reads its escapes as path separators. A quoted raw path ("C:\temp\new") is not between JSON punctuation and
-        // stays with the rules, and so does any literal holding a raw drive or UNC path ("D:\repos\fabrikam",
-        // "\\fs01\temp"): an encoder always doubles the backslash there, so a single one means a raw path.
+        // stays with the rules. A literal holding what may be a raw drive or UNC path ("D:\repos\fabrikam",
+        // "\\fs01\temp"; an encoder always doubles the backslash there) is read both ways: decoded and redacted, then
+        // left unmasked so the path rules read it raw as well.
         var literals = new List<string>();
         var input = text;
         text = JsonString().Replace(text, literal =>
         {
-            if (!literal.Value.Contains('\\') || !InJson(input, literal) || RawPath().IsMatch(literal.Value))
+            if (!literal.Value.Contains('\\') || !InJson(input, literal))
             {
                 return literal.Value;
             }
 
-            literals.Add(Quote(Settle(Unescape(literal.Value), counts, false)));
+            // A literal that may be a raw path is read both ways: decoded here, then left unmasked for the path rules.
+            var redacted = Quote(Settle(Unescape(literal.Value), counts, false));
+            if (RawPath().IsMatch(literal.Value))
+            {
+                return redacted;
+            }
+
+            literals.Add(redacted);
             return "\"\uFDD0" + string.Concat((literals.Count - 1).ToString(CultureInfo.InvariantCulture).Select(digit => (char)('\uFDD2' + digit - '0'))) + "\uFDD1\"";
         });
 
@@ -190,9 +197,10 @@ public sealed partial class Redactor
             + (match.Groups["user"].Value.StartsWith('$') ? match.Groups["user"].Value : "<user>") + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Registry(), match => SecretToClose(match.Groups["key"].Value, match.Groups["value"].Value));
-        result = Apply(result, "secret", JsonObject(), RedactJsonObject);
         result = Apply(result, "secret", Record(), RedactRecord);
+        result = Apply(result, "secret", RecordValueFirst(), RedactRecord);
         result = Apply(result, "secret", CsvBlock(), RedactCsv);
+        result = Apply(result, "secret", LineAssignment(), RedactAssignment);
         result = Apply(result, "secret", Assignment(), RedactAssignment);
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
         result = Apply(result, "user", UserFlag(), match => match.Groups["key"].Value + "<user>");
@@ -339,35 +347,273 @@ public sealed partial class Redactor
     private static readonly Switches CertUtil = new(StringComparison.OrdinalIgnoreCase, ["-p", "/p"], [], true, false);
     private static readonly Switches SevenZip = new(StringComparison.Ordinal, ["-p"], [], false, true);
 
-    // Name/Value layouts keep a secret's name and its value in sibling fields, not key=value: a flat JSON object
-    // ({"Key":"DB_PASSWORD","Value":"x"}, Win32_Environment's VariableValue), a Format-List or YAML record
-    // (Name : DB_PASSWORD / Value : x), a CSV table with Name and Value columns, and a JSON argument array
+    // Name/Value layouts keep a secret's name and its value in sibling fields, not key=value: JSON objects
+    // ({"Key":"DB_PASSWORD","Value":"x"}, Win32_Environment's VariableValue), Format-List or YAML records
+    // (Name : DB_PASSWORD / Value : x), CSV tables with Name and Value columns, and JSON argument arrays
     // (["sqlcmd","-P","x"]). When the name holds a secret word, the value is secret.
     private static readonly string[] NameFields = ["Name", "Key"];
 
     private static readonly string[] ValueFields = ["Value", "VariableValue", "Data"];
 
-    private static string RedactJsonObject(Match match)
+    private static readonly string[] ProgramFields = ["FileName", "Path", "Executable", "Program", "Command"];
+
+    private static readonly string[] ArgumentFields = ["Arguments", "ArgumentList", "Args", "Argv"];
+
+    private const int MaxJsonDepth = 256;
+
+    private sealed record JsonValue(string? Name, int Start, int End, bool IsString, JsonFrame? Child);
+
+    private sealed class JsonFrame(bool isObject, int start, string? member, bool inParent)
     {
-        var members = JsonMember().Matches(match.Value);
-        return !members.Any(member => NameFields.Contains(member.Groups["name"].Value, StringComparer.OrdinalIgnoreCase) && SecretName().IsMatch(member.Groups["value"].Value.Trim('"')))
-            ? match.Value
-            : JsonMember().Replace(match.Value, member => ValueFields.Contains(member.Groups["name"].Value, StringComparer.OrdinalIgnoreCase)
-                ? match.Value[(member.Index)..(member.Groups["value"].Index)] + "\"<secret>\""
-                : member.Value);
+        public bool IsObject { get; } = isObject;
+
+        public int Start { get; } = start;
+
+        public string? Member { get; } = member;
+
+        public bool InParent { get; } = inParent;
+
+        public List<JsonValue> Values { get; } = [];
+
+        public string? Name { get; set; }
+
+        public bool ExpectValue { get; set; } = !isObject;
     }
 
+    // One linear scan pairs sibling members at every object depth, so an environment item that also holds nested
+    // objects (PSDrive, PSProvider in Get-ChildItem env: | ConvertTo-Json) is still read as Key/Value, and an argument
+    // array is read with its command, named in the array or in a sibling FileName. Text that is not JSON is left as
+    // it is: a closing bracket that does not match starts the scan over.
+    private static string RedactJsonLayouts(string text, Dictionary<string, int> counts)
+    {
+        if (text.IndexOfAny(['{', '[']) < 0)
+        {
+            return text;
+        }
+
+        var stack = new List<JsonFrame>();
+        var edits = new SortedDictionary<int, (int End, string Text)>();
+        int stringStart = -1, stringEnd = -1, previous = -1;
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (char.IsWhiteSpace(character))
+            {
+                continue;
+            }
+
+            var top = stack.Count > 0 ? stack[^1] : null;
+            if (character == '"')
+            {
+                var end = StringEnd(text, index);
+                if (end < 0 && top is { ExpectValue: true })
+                {
+                    // A string cut off at the line end (truncated JSON) is taken to the line end.
+                    var stop = text.IndexOfAny(['\r', '\n'], index);
+                    stop = stop < 0 ? text.Length : stop;
+                    top.Values.Add(new(top.Name, index, stop, false, null));
+                    top.ExpectValue = false;
+                    index = stop - 1;
+                }
+                else if (end > 0)
+                {
+                    if (top is { ExpectValue: true })
+                    {
+                        top.Values.Add(new(top.Name, index, end, true, null));
+                        top.ExpectValue = false;
+                    }
+
+                    (stringStart, stringEnd, index) = (index, end, end - 1);
+                }
+            }
+            else if (character is '{' or '[')
+            {
+                // Past the depth cap the scan starts over at this bracket, so memory stays bounded and nothing is skipped.
+                var inParent = top is { ExpectValue: true } && stack.Count < MaxJsonDepth;
+                if (stack.Count >= MaxJsonDepth)
+                {
+                    stack.Clear();
+                }
+
+                stack.Add(new(character == '{', index, inParent ? top!.Name : null, inParent));
+                if (inParent)
+                {
+                    top!.ExpectValue = false;
+                }
+            }
+            else if (character is '}' or ']')
+            {
+                if (top is null || top.IsObject != (character == '}'))
+                {
+                    stack.Clear();
+                }
+                else
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    Finish(text, top, edits);
+                    if (top.InParent)
+                    {
+                        stack[^1].Values.Add(new(top.Member, top.Start, index + 1, false, top));
+                    }
+                }
+            }
+            else if (character == ':')
+            {
+                if (top is { IsObject: true } && previous == stringEnd - 1)
+                {
+                    top.Name = text[(stringStart + 1)..(stringEnd - 1)];
+                    top.ExpectValue = true;
+                }
+            }
+            else if (character == ',')
+            {
+                if (top is not null)
+                {
+                    top.Name = null;
+                    top.ExpectValue = !top.IsObject;
+                }
+            }
+            else if (top is { ExpectValue: true })
+            {
+                var stop = index;
+                while (stop < text.Length && text[stop] is not (',' or '}' or ']') && !char.IsWhiteSpace(text[stop]))
+                {
+                    stop++;
+                }
+
+                top.Values.Add(new(top.Name, index, stop, false, null));
+                top.ExpectValue = false;
+                index = stop - 1;
+            }
+
+            previous = index;
+        }
+
+        // Truncated JSON (a cut log line) is read as far as it goes.
+        for (var depth = stack.Count - 1; depth >= 0; depth--)
+        {
+            Finish(text, stack[depth], edits);
+        }
+
+        if (edits.Count == 0)
+        {
+            return text;
+        }
+
+        var result = new StringBuilder(text.Length);
+        var position = 0;
+        foreach (var (start, (end, replacement)) in edits)
+        {
+            if (start < position)
+            {
+                continue;
+            }
+
+            result.Append(text, position, start - position).Append(replacement);
+            var rule = replacement.Contains("<user>", StringComparison.Ordinal) ? "user" : "secret";
+            counts[rule] = counts.GetValueOrDefault(rule) + 1;
+            position = end;
+        }
+
+        return result.Append(text, position, text.Length - position).ToString();
+    }
+
+    // The index after a string's closing quote, or -1 when the line ends first.
+    private static int StringEnd(string text, int start)
+    {
+        for (var index = start + 1; index < text.Length; index++)
+        {
+            switch (text[index])
+            {
+                case '"':
+                    return index + 1;
+                case '\\':
+                    index++;
+                    break;
+                case '\r' or '\n':
+                    return -1;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string StringText(string text, JsonValue value)
+    {
+        var literal = text[value.Start..value.End];
+        return JsonString().Match(literal) is { Success: true } match && match.Length == literal.Length ? Unescape(literal) : literal[1..^1];
+    }
+
+    private static void Finish(string text, JsonFrame frame, SortedDictionary<int, (int End, string Text)> edits)
+    {
+        if (!frame.IsObject)
+        {
+            RedactArguments(text, frame.Values, null, edits);
+            return;
+        }
+
+        bool Is(JsonValue value, string[] fields) => fields.Contains(value.Name!, StringComparer.OrdinalIgnoreCase);
+        if (frame.Values.Any(value => value.IsString && Is(value, NameFields) && SecretName().IsMatch(StringText(text, value))))
+        {
+            foreach (var value in frame.Values.Where(value => Is(value, ValueFields) && !(value.IsString && Redacted(StringText(text, value)))))
+            {
+                edits[value.Start] = (value.End, "\"<secret>\"");
+            }
+        }
+
+        var program = frame.Values.FirstOrDefault(value => value.IsString && Is(value, ProgramFields));
+        foreach (var arguments in frame.Values.Where(value => value.Child is { IsObject: false } && Is(value, ArgumentFields)))
+        {
+            RedactArguments(text, arguments.Child!.Values, program is null ? null : StringText(text, program), edits);
+        }
+    }
+
+    // In an argument array the element after a secret flag, or after the command's own password switch, is secret;
+    // after an account switch it is <user>. The command is the first element, or the sibling FileName.
+    private static void RedactArguments(string text, List<JsonValue> elements, string? program, SortedDictionary<int, (int End, string Text)> edits)
+    {
+        var words = elements.Select(element => element.IsString ? StringText(text, element) : null).ToList();
+        var switches = CommandSwitches(program ?? words.FirstOrDefault() ?? "");
+
+        // docker's -p and -u are ports and users of a container except after "login".
+        if (switches == Docker && !words.Take(2).Contains("login"))
+        {
+            switches = null;
+        }
+
+        for (var index = 0; index + 1 < words.Count; index++)
+        {
+            var (flag, next) = (words[index], words[index + 1]);
+            if (flag is null || next is null || next.StartsWith('-') || next.StartsWith('/') || Redacted(next))
+            {
+                continue;
+            }
+
+            var secret = SecretFlag().IsMatch(flag) || (switches is not null && switches.Secret.Contains(flag, StringComparer.FromComparison(switches.Case)));
+            var user = !secret && (UserSwitch().IsMatch(flag) || (switches is not null && switches.User.Contains(flag, StringComparer.FromComparison(switches.Case))));
+            if (secret || user)
+            {
+                edits[elements[index + 1].Start] = (elements[index + 1].End, secret ? "\"<secret>\"" : "\"<user>\"");
+            }
+        }
+    }
+
+    // Format-List and YAML records, with the name line first or the value line first.
     private static string RedactRecord(Match match) =>
-        SecretName().IsMatch(match.Groups["name"].Value.Trim()) && !Redacted(match.Groups["value"].Value) ? match.Groups["head"].Value + "<secret>" : match.Value;
+        SecretName().IsMatch(match.Groups["name"].Value.Trim()) && !Redacted(match.Groups["value"].Value)
+            ? match.Groups["head"].Value + "<secret>" + match.Groups["tail"].Value
+            : match.Value;
 
     private static bool Redacted(string value) => Placeholders.Contains(value.Trim().Trim('"'));
 
+    // A CSV row is read against the last header naming a name column and a value column. A row with more fields than
+    // the header holds a comma in an unquoted value, so everything from the value column on is secret.
     private static string RedactCsv(Match match)
     {
         int nameColumn = -1, valueColumn = -1, columns = 0;
         return string.Concat(CsvLine().Split(match.Value).Select(line =>
         {
-            var fields = CsvField().Matches(line).ToList();
+            var fields = CsvField().Matches(line.TrimEnd('\r')).ToList();
             var names = fields.Select(field => field.Value.Trim().Trim('"')).ToList();
             var name = names.FindIndex(field => NameFields.Contains(field, StringComparer.OrdinalIgnoreCase));
             var value = names.FindIndex(field => ValueFields.Contains(field, StringComparer.OrdinalIgnoreCase));
@@ -377,40 +623,15 @@ public sealed partial class Redactor
                 return line;
             }
 
-            if (columns == 0 || fields.Count != columns || !SecretName().IsMatch(names[nameColumn]) || Redacted(names[valueColumn]))
+            if (columns == 0 || fields.Count < columns || !SecretName().IsMatch(names[nameColumn]) || Redacted(names[valueColumn]))
             {
                 return line;
             }
 
             var target = fields[valueColumn];
-            return line[..target.Index] + (target.Value.StartsWith('"') ? "\"<secret>\"" : "<secret>") + line[(target.Index + target.Length)..];
+            var end = fields.Count > columns ? fields[^1].Index + fields[^1].Length : target.Index + target.Length;
+            return line[..target.Index] + (target.Value.StartsWith('"') ? "\"<secret>\"" : "<secret>") + line[end..];
         }));
-    }
-
-    private static string RedactJsonArray(Match match)
-    {
-        var elements = JsonString().Matches(match.Value).ToList();
-        var switches = elements.Count == 0 ? null : CommandSwitches(Unescape(elements[0].Value));
-        var replace = new Dictionary<int, string>();
-        for (var index = 0; index + 1 < elements.Count; index++)
-        {
-            var flag = Unescape(elements[index].Value);
-            var next = Unescape(elements[index + 1].Value);
-            if (next.StartsWith('-') || next.StartsWith('/') || Redacted(next))
-            {
-                continue;
-            }
-
-            var secret = SecretFlag().IsMatch(flag) || (switches is not null && switches.Secret.Contains(flag, StringComparer.FromComparison(switches.Case)));
-            var user = !secret && (UserSwitch().IsMatch(flag) || (switches is not null && switches.User.Contains(flag, StringComparer.FromComparison(switches.Case))));
-            if (secret || user)
-            {
-                replace[index + 1] = secret ? "\"<secret>\"" : "\"<user>\"";
-            }
-        }
-
-        return replace.Count == 0 ? match.Value
-            : JsonString().Replace(match.Value, element => replace.GetValueOrDefault(elements.FindIndex(candidate => candidate.Index == element.Index), element.Value));
     }
 
     // The switch table for a command, given its name or path (sqlcmd, C:\Tools\sqlcmd.exe, docker login).
@@ -573,8 +794,15 @@ public sealed partial class Redactor
     {
         var value = match.Groups["value"].Value;
         var quote = AssignmentQuotes.FirstOrDefault(spelling => value.Length >= 2 * spelling.Length && value.StartsWith(spelling, StringComparison.Ordinal) && value.EndsWith(spelling, StringComparison.Ordinal));
-        return TypeName().IsMatch(quote is null ? value : value[quote.Length..^quote.Length]) ? match.Value
-            : match.Groups["key"].Value + match.Groups["separator"].Value + quote + "<secret>" + quote;
+        if (TypeName().IsMatch(quote is null ? value : value[quote.Length..^quote.Length]))
+        {
+            return match.Value;
+        }
+
+        // A bare JSON value after a quoted key ("token": null) is written as a string, so the JSON still parses.
+        var key = match.Groups["key"].Value;
+        quote ??= QuoteSpellings.FirstOrDefault(spelling => key.EndsWith(spelling, StringComparison.Ordinal));
+        return key + match.Groups["separator"].Value + quote + "<secret>" + quote;
     }
 
     private static readonly string[] AssignmentQuotes = [.. QuoteSpellings, "'"];
@@ -693,15 +921,19 @@ public sealed partial class Redactor
         return ((uint)(bytes[0] << 24 | bytes[1] << 16 | bytes[2] << 8 | bytes[3]) & mask, mask);
     }
 
+    // A name that holds a secret: any prefix before a secret word (DB_PASSWORD, ACTIONS_RUNNER_INPUT_TOKEN), a
+    // *_KEY, or pw, pass or pat as a whole final part ($pw, db_pass, AZURE_DEVOPS_EXT_PAT; not bypass).
+    private const string SecretKey = @"(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|[A-Za-z0-9_.-]*[_.-]key|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass|pat)))";
+
     private const string AuthSchemes = "Bearer|Basic|Digest|token|Negotiate|NTLM|SharedKey|SharedKeyLite|ApiKey|SSWS|AWS4-HMAC-SHA256";
 
     // A quoted value at any JSON nesting: "x" (with \" escapes inside), \"x\" (JSON), \\\"x\\\" and \\u0022x\\u0022
     // (JSON inside JSON), and a raw \u0022x\u0022. Each closes only with its own spelling.
     private const string Quoted = @"(?:\\\\\\""(?:(?!\\\\\\"")[^\r\n])*\\\\\\""|\\\\u0022(?:(?!\\\\u0022)[^\r\n])*\\\\u0022|\\u0022(?:(?!\\u0022)[^\r\n])*\\u0022|\\""(?:[^""\\\r\n]|\\[^""\r\n])*\\""|""(?:[^""\\\r\n]|\\.)*"")";
 
-    // Not at the close of a JSON string ("..."} or \"...\"}), so a value never takes the quote that closes the string it
-    // sits in, and a placeholder never splits one.
-    private const string NotClosing = @"(?!\\?""[ \t]*(?:[,}\]:]|\r|\n|\z))";
+    // Not at the close of a JSON string ("..."} or \"...\"}) or of a JSON object or array (null}), so a value never takes
+    // the quote or bracket that closes what it sits in, and a placeholder never splits one.
+    private const string NotClosing = @"(?!\\?""[ \t]*(?:[,}\]:]|\r|\n|\z)|[}\]][ \t]*(?:[,}\]]|\r|\n|\z))";
 
     // The rest of a line, up to the close of a JSON string.
     private const string LineRest = "(?:" + NotClosing + @"[^\r\n])*";
@@ -812,7 +1044,7 @@ public sealed partial class Redactor
     private static partial Regex Credential();
 
     // Command-line flags: "--token x", "-pw x", "--password=x", "-passout pass:x", and Windows switches "/pass:x".
-    [GeneratedRegex(@"(?<key>(?:(?<![\w/-])|" + AfterEscape + @")(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:" + Quoted + @"|'[^'\r\n]*'|" + Bare + ")", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?:(?<![\w/-])|" + AfterEscape + @")(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|passphrase|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:" + Quoted + @"|'[^'\r\n]*'|" + Bare + ")", RegexOptions.IgnoreCase)]
     private static partial Regex FlagSecret();
 
     // Name with any prefix (ACTIONS_RUNNER_INPUT_TOKEN, DB_PASSWORD, "api_key", \"password\"), then ":"/"=" or a
@@ -820,13 +1052,18 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + @")(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + ")" + SecretKey + @"(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?![:=]|REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @"|[{\[])(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
     // (REG_DWORD, REG_QWORD) are flags such as DisablePasswordChange and stay.
-    [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)(?<value>[^\s][^\r\n]*)", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|passphrase|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)(?<value>[^\s][^\r\n]*)", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex Registry();
+
+    // At the start of a line, an unquoted secret key (GPG_PASSPHRASE=correct horse, export X=..., YAML "password: a b")
+    // takes its unquoted value to the line end, so a value with spaces never leaks a word.
+    [GeneratedRegex(@"(?<key>^[ \t]*(?:(?:export|set)[ \t]+|-[ \t]+)?" + SecretKey + @")(?<separator>[ \t]*[=:][ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?![""'])(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?<value>" + NotClosing + @"[^\s]" + LineRest + ")", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex LineAssignment();
 
     [GeneratedRegex(@"(?<=[?&;]|\\u00(?:26|3[Ff]|3[Bb]))sig=(?:[^&\s""'<>;\\]|\\(?!""))+", RegexOptions.IgnoreCase)]
     private static partial Regex SasSignature();
@@ -941,10 +1178,10 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:\\(?![\\""])|(?<![\\\w:])\\\\[A-Za-z0-9._$-]+\\(?![\\""])")]
     private static partial Regex RawPath();
 
-    [GeneratedRegex(@"password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass|pat)$|[_.-]key$", RegexOptions.IgnoreCase)]
     private static partial Regex SecretName();
 
-    [GeneratedRegex(@"^(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass))$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|passphrase|secret|pat|api-?key|pw|pass(?:in|out)?)|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass))$", RegexOptions.IgnoreCase)]
     private static partial Regex SecretFlag();
 
     [GeneratedRegex(@"^(?:--user(?:name)?|/u(?:ser)?)$", RegexOptions.IgnoreCase)]
@@ -953,24 +1190,19 @@ public sealed partial class Redactor
     [GeneratedRegex(@"^(?:System|Microsoft)(?:\.[A-Za-z_][\w`]*)+(?:\[[^\]]*\])?$")]
     private static partial Regex TypeName();
 
-    [GeneratedRegex(@"\{[^{}]*\}", RegexOptions.NonBacktracking)]
-    private static partial Regex JsonObject();
-
-    [GeneratedRegex(@"""(?<name>[^""\\]*)""[ \t\r\n]*:[ \t\r\n]*(?<value>""(?:[^""\\]|\\.)*""|[^,}\s]+)")]
-    private static partial Regex JsonMember();
-
-    [GeneratedRegex(@"\[[^\[\]]*\]", RegexOptions.NonBacktracking)]
-    private static partial Regex JsonArray();
-
-    // Format-List and YAML records: "Name : DB_PASSWORD" (or "- name: x"), then within a few lines "Value : x".
-    [GeneratedRegex(@"(?<head>^[ \t]*(?:-[ \t]+)?(?:Name|Key)[ \t]*:[ \t]*(?<name>[^\r\n]*)\r?\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r?\n){0,8}?[ \t]*(?:Value|VariableValue|Data)[ \t]*:[ \t]*)(?<value>[^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    // Format-List and YAML records: "Name : DB_PASSWORD" (or "- name: x"), then within a few lines "Value : x", or the
+    // value line first.
+    [GeneratedRegex(@"(?<head>^[ \t]*(?:-[ \t]+)?(?:Name|Key)[ \t]*:[ \t]*(?<name>[^\r\n]*)\r*\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r*\n){0,8}?[ \t]*(?:Value|VariableValue|Data)[ \t]*:[ \t]*)(?<value>[^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex Record();
 
+    [GeneratedRegex(@"(?<head>^[ \t]*(?:-[ \t]+)?(?:Value|VariableValue|Data)[ \t]*:[ \t]*)(?<value>[^\r\n]*)(?<tail>\r*\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r*\n){0,8}?[ \t]*(?:Name|Key)[ \t]*:[ \t]*(?<name>[^\r\n]*))", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex RecordValueFirst();
+
     // Consecutive lines that hold commas; RedactCsv finds the header among them.
-    [GeneratedRegex(@"^[^\r\n]*,[^\r\n]*(?:\r?\n[^\r\n]*,[^\r\n]*)+", RegexOptions.Multiline | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"^[^\r\n]*,[^\r\n]*(?:\r*\n[^\r\n]*,[^\r\n]*)+", RegexOptions.Multiline | RegexOptions.NonBacktracking)]
     private static partial Regex CsvBlock();
 
-    [GeneratedRegex(@"(\r?\n)")]
+    [GeneratedRegex(@"(\r*\n)")]
     private static partial Regex CsvLine();
 
     [GeneratedRegex(@"(?<=^|,)(?:""(?:[^""]|"""")*""|[^,]*)")]
