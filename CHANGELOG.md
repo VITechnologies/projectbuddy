@@ -19,8 +19,10 @@ release's notes for the exact pinned commit.
     hosts only, never a path), git remotes, e-mail addresses, directory names
     and certificate subjects, and bare host names under generic and country
     domains.
-  - It also covers `reg query` secret rows, `netsh` key content, and
-    certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts.
+  - It also covers `reg query` secret rows, `netsh` key content,
+    certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts, and
+    Name/Value layouts: JSON objects, Format-List and YAML records, CSV tables
+    and JSON argument arrays.
   - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
     first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
     text such as a Windows path is never decoded. JSON string literals with

@@ -70,6 +70,25 @@ public class CorpusTests
         }
 
         Assert.Equal(output, redactor.Redact(output).Text);
+
+        // Evidence that is JSON stays JSON.
+        if (IsJson(Expand(item["input"]!.GetValue<string>())))
+        {
+            using var document = JsonDocument.Parse(output);
+        }
+    }
+
+    private static bool IsJson(string text)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     // The same evidence inside JSON, as the agent and Windows tools emit it: System.Text.Json at one and two levels, and
@@ -326,6 +345,10 @@ public class RedactorTests
     [InlineData("/user:\\\"", "a")]
     [InlineData("[", "\"a\\nb\",")]
     [InlineData("", "{\"v\":\"a\\nb\"},")]
+    [InlineData("", "{\"Key\":\"password\",\"Value\":\"a\"},")]
+    [InlineData("", "[\"--password\",\"a\",")]
+    [InlineData("", "a,")]
+    [InlineData("", "Name : password\nValue : x\n")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -372,7 +395,7 @@ public class RedactorTests
     public void CommandLinesHideTheirPasswordArguments(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
     [Theory]
-    [InlineData("{\"password\":\"x\"}", "{\"password\":<secret>}")]
+    [InlineData("{\"password\":\"x\"}", "{\"password\":\"<secret>\"}")]
     [InlineData("--token \"x\"}", "--token <secret>}")]
     [InlineData("User Id=\"sa\";", "User Id=<user>;")]
     public void RedactedValuesAreNotTakenAgain(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
@@ -390,8 +413,8 @@ public class RedactorTests
         Assert.Equal("user <private><host><ip><path>", Redactor.ForHost([], "WS-01", "jane").Redact("user jane_fs01.corp.local::5\\\\fs01\\share").Text);
 
     [Theory]
-    [InlineData("$pw = \"Sup3r\"", "$pw = <secret>")]
-    [InlineData("$pass = 'Sup3r'", "$pass = <secret>")]
+    [InlineData("$pw = \"Sup3r\"", "$pw = \"<secret>\"")]
+    [InlineData("$pass = 'Sup3r'", "$pass = '<secret>'")]
     [InlineData("db_pass=Sup3r", "db_pass=<secret>")]
     [InlineData("bypass=true", "bypass=true")]
     [InlineData("<add key=\\\"ClearTextPassword\\\" value=\\\"Qzx secret9\\\" />", "<add key=\\\"ClearTextPassword\\\" value=\\\"<secret>\\\" />")]

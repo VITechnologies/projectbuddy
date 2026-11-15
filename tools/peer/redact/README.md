@@ -45,7 +45,7 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
   unlocks an earlier rule, so `Redactor.MaxPasses` (32) exceeds the number of
   rules: even a deliberate chain through every rule settles. Text that has not
   settled by then is refused. Idempotence therefore holds by construction. A
-  seeded fuzz of 300,000 glued-together fragments never needed more than 4
+  seeded fuzz of 300,000 glued-together fragments never needed more than 6
   passes.
 
 ## Rules, in order
@@ -80,8 +80,28 @@ version and build numbers, exit codes, times, file names such as `main.vi` or
 Windows `.com` programs under `System32` and `SysWOW64` (`chcp.com`), and
 PowerShell `::` calls.
 
-A rule never takes a value that is already a placeholder again, so a settled
-`{"password":<secret>}` keeps its closing brace.
+A rule never takes a value that is already a placeholder again. A quoted value
+keeps its quote spelling (`{"password":"<secret>"}`, `$pass = '<secret>'`), so
+JSON stays well formed, and a .NET type name
+(`"Credential":"System.Management.Automation.PSCredential"`) is not a secret.
+
+### Name/Value layouts
+
+Diagnostics often keep a secret's name and its value in sibling fields rather
+than as `key=value`. When the name holds a secret word (the assignment keys, plus
+`credential`), the value becomes `<secret>`:
+- a flat JSON object's `Name`/`Key` member and its `Value`, `VariableValue` or
+  `Data` member (`Get-ChildItem env: | ConvertTo-Json`, `Win32_Environment`,
+  `{"key":"ClearTextPassword","value":"…"}`). These objects and JSON argument
+  arrays are read before escaped strings are masked;
+- a Format-List or YAML record: `Name : DB_PASSWORD` (or `- name: …`) followed,
+  within eight lines, by `Value :`, `VariableValue :` or `Data :`;
+- a CSV table whose header row names a `Name`/`Key` column and a
+  `Value`/`VariableValue`/`Data` column (`ConvertTo-Csv`), row by row;
+- a JSON argument array (`["tool.exe","--password","…"]`), where the element
+  after a secret flag, or after a command's own password switch
+  (`["sqlcmd",…,"-P","…"]`), is secret, and the element after an account switch is
+  `<user>`.
 
 ## JSON evidence
 
@@ -98,8 +118,12 @@ inside another JSON envelope.
 - While the other rules run over the rest of the text, such a literal is held
   behind a quoted mask, so a value rule (`"password":"…"`) still takes it whole
   and nothing reads its escapes as path separators.
-- A quoted raw path that is not between JSON punctuation (`copy "C:\temp\new"`)
-  is not decoded and stays with the path rules.
+- A quoted raw path is not decoded and stays with the path rules. That covers a
+  path not between JSON punctuation (`copy "C:\temp\new"`), and also any literal
+  that holds a raw drive or UNC path: a standalone drive colon, or a server name
+  at the start of a path, followed by a single backslash escape
+  (`path: "D:\repos\fabrikam", exit: 1`). An encoder always doubles the
+  backslash there.
 - Outside such literals (escaped JSON shown in a log line), a quoted value closes
   only with its own quote spelling: `"x"`, `\"x\"`, `\\\"x\\\"`,
   `\\u0022x\\u0022` or `\u0022x\u0022`.
@@ -217,7 +241,8 @@ survive and strings that must stay, and every item must also be idempotent.
 Every item is also wrapped in JSON three ways (`System.Text.Json` at one and two
 levels, and PowerShell 5.1 style with `\"` escapes). Nothing listed may survive
 in the decoded value, the output must still parse at every level, and
-redaction must stay idempotent.
+redaction must stay idempotent. An item whose input is itself JSON must still
+parse after redaction.
 Token-shaped values are written as `{{templates}}` and assembled at test time,
 so no token-like literal is ever committed.
 

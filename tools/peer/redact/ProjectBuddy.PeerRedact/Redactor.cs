@@ -143,26 +143,7 @@ public sealed partial class Redactor
 
     private string Pass(string text, Dictionary<string, int> counts)
     {
-        // A JSON string literal with escapes, between JSON punctuation ({"k":"v"}), is redacted as the text it stands for:
-        // decoded (so "\n" is a line break and "\"" a quote), settled with every rule, nested JSON included, and
-        // encoded again, so the output stays well formed. While the rules below run over the rest of the text, it is
-        // held behind a quoted mask of noncharacters: a value rule ("password":"...") still takes it whole, and nothing
-        // reads its escapes as path separators. A quoted raw path ("C:\temp\new") is not between JSON punctuation and
-        // stays with the rules.
-        var literals = new List<string>();
-        var input = text;
-        text = JsonString().Replace(text, literal =>
-        {
-            if (!literal.Value.Contains('\\') || !InJson(input, literal))
-            {
-                return literal.Value;
-            }
-
-            literals.Add(Quote(Settle(Unescape(literal.Value), counts, false)));
-            return "\"\uFDD0" + string.Concat((literals.Count - 1).ToString(CultureInfo.InvariantCulture).Select(digit => (char)('\uFDD2' + digit - '0'))) + "\uFDD1\"";
-        });
-
-        string Apply(string input, string rule, Regex pattern, MatchEvaluator evaluator) => pattern.Replace(input, match =>
+        string Apply(string source, string rule, Regex pattern, MatchEvaluator evaluator) => pattern.Replace(source, match =>
         {
             var replaced = evaluator(match);
             if (replaced != match.Value)
@@ -171,6 +152,31 @@ public sealed partial class Redactor
             }
 
             return replaced;
+        });
+
+        // Name/Value JSON (an object's Key/Value members, an argument array's flag and value) is read while its strings are
+        // still plain JSON, before the escaped ones are redacted and masked below.
+        text = Apply(text, "secret", JsonObject(), RedactJsonObject);
+        text = Apply(text, "secret", JsonArray(), RedactJsonArray);
+
+        // A JSON string literal with escapes, between JSON punctuation ({"k":"v"}), is redacted as the text it stands for:
+        // decoded (so "\n" is a line break and "\"" a quote), settled with every rule, nested JSON included, and
+        // encoded again, so the output stays well formed. While the rules below run over the rest of the text, it is
+        // held behind a quoted mask of noncharacters: a value rule ("password":"...") still takes it whole, and nothing
+        // reads its escapes as path separators. A quoted raw path ("C:\temp\new") is not between JSON punctuation and
+        // stays with the rules, and so does any literal holding a raw drive or UNC path ("D:\repos\fabrikam",
+        // "\\fs01\temp"): an encoder always doubles the backslash there, so a single one means a raw path.
+        var literals = new List<string>();
+        var input = text;
+        text = JsonString().Replace(text, literal =>
+        {
+            if (!literal.Value.Contains('\\') || !InJson(input, literal) || RawPath().IsMatch(literal.Value))
+            {
+                return literal.Value;
+            }
+
+            literals.Add(Quote(Settle(Unescape(literal.Value), counts, false)));
+            return "\"\uFDD0" + string.Concat((literals.Count - 1).ToString(CultureInfo.InvariantCulture).Select(digit => (char)('\uFDD2' + digit - '0'))) + "\uFDD1\"";
         });
 
         var result = Apply(text, "secret", PrivateKey(), _ => "<secret>");
@@ -184,7 +190,10 @@ public sealed partial class Redactor
             + (match.Groups["user"].Value.StartsWith('$') ? match.Groups["user"].Value : "<user>") + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Registry(), match => SecretToClose(match.Groups["key"].Value, match.Groups["value"].Value));
-        result = Apply(result, "secret", Assignment(), match => match.Groups["key"].Value + match.Groups["separator"].Value + "<secret>");
+        result = Apply(result, "secret", JsonObject(), RedactJsonObject);
+        result = Apply(result, "secret", Record(), RedactRecord);
+        result = Apply(result, "secret", CsvBlock(), RedactCsv);
+        result = Apply(result, "secret", Assignment(), RedactAssignment);
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
         result = Apply(result, "user", UserFlag(), match => match.Groups["key"].Value + "<user>");
         result = Apply(result, "url", Url(), match => KeepHost(match.Groups["host"].Value, match.Groups["rest"].Value, match.Groups["scheme"].Value + match.Groups["separator"].Value, match.Groups["port"].Value, "<url>"));
@@ -330,12 +339,83 @@ public sealed partial class Redactor
     private static readonly Switches CertUtil = new(StringComparison.OrdinalIgnoreCase, ["-p", "/p"], [], true, false);
     private static readonly Switches SevenZip = new(StringComparison.Ordinal, ["-p"], [], false, true);
 
-    // net use takes its password as the first plain argument and net user as the second (after the account name).
-    private static string RedactCommand(Match match)
+    // Name/Value layouts keep a secret's name and its value in sibling fields, not key=value: a flat JSON object
+    // ({"Key":"DB_PASSWORD","Value":"x"}, Win32_Environment's VariableValue), a Format-List or YAML record
+    // (Name : DB_PASSWORD / Value : x), a CSV table with Name and Value columns, and a JSON argument array
+    // (["sqlcmd","-P","x"]). When the name holds a secret word, the value is secret.
+    private static readonly string[] NameFields = ["Name", "Key"];
+
+    private static readonly string[] ValueFields = ["Value", "VariableValue", "Data"];
+
+    private static string RedactJsonObject(Match match)
     {
-        var command = match.Groups["command"].Value;
-        var name = command.Split([' ', '\t'])[0].ToLowerInvariant().Replace(".exe", "", StringComparison.Ordinal);
-        var switches = name switch
+        var members = JsonMember().Matches(match.Value);
+        return !members.Any(member => NameFields.Contains(member.Groups["name"].Value, StringComparer.OrdinalIgnoreCase) && SecretName().IsMatch(member.Groups["value"].Value.Trim('"')))
+            ? match.Value
+            : JsonMember().Replace(match.Value, member => ValueFields.Contains(member.Groups["name"].Value, StringComparer.OrdinalIgnoreCase)
+                ? match.Value[(member.Index)..(member.Groups["value"].Index)] + "\"<secret>\""
+                : member.Value);
+    }
+
+    private static string RedactRecord(Match match) =>
+        SecretName().IsMatch(match.Groups["name"].Value.Trim()) && !Redacted(match.Groups["value"].Value) ? match.Groups["head"].Value + "<secret>" : match.Value;
+
+    private static bool Redacted(string value) => Placeholders.Contains(value.Trim().Trim('"'));
+
+    private static string RedactCsv(Match match)
+    {
+        int nameColumn = -1, valueColumn = -1, columns = 0;
+        return string.Concat(CsvLine().Split(match.Value).Select(line =>
+        {
+            var fields = CsvField().Matches(line).ToList();
+            var names = fields.Select(field => field.Value.Trim().Trim('"')).ToList();
+            var name = names.FindIndex(field => NameFields.Contains(field, StringComparer.OrdinalIgnoreCase));
+            var value = names.FindIndex(field => ValueFields.Contains(field, StringComparer.OrdinalIgnoreCase));
+            if (name >= 0 && value >= 0)
+            {
+                (nameColumn, valueColumn, columns) = (name, value, fields.Count);
+                return line;
+            }
+
+            if (columns == 0 || fields.Count != columns || !SecretName().IsMatch(names[nameColumn]) || Redacted(names[valueColumn]))
+            {
+                return line;
+            }
+
+            var target = fields[valueColumn];
+            return line[..target.Index] + (target.Value.StartsWith('"') ? "\"<secret>\"" : "<secret>") + line[(target.Index + target.Length)..];
+        }));
+    }
+
+    private static string RedactJsonArray(Match match)
+    {
+        var elements = JsonString().Matches(match.Value).ToList();
+        var switches = elements.Count == 0 ? null : CommandSwitches(Unescape(elements[0].Value));
+        var replace = new Dictionary<int, string>();
+        for (var index = 0; index + 1 < elements.Count; index++)
+        {
+            var flag = Unescape(elements[index].Value);
+            var next = Unescape(elements[index + 1].Value);
+            if (next.StartsWith('-') || next.StartsWith('/') || Redacted(next))
+            {
+                continue;
+            }
+
+            var secret = SecretFlag().IsMatch(flag) || (switches is not null && switches.Secret.Contains(flag, StringComparer.FromComparison(switches.Case)));
+            var user = !secret && (UserSwitch().IsMatch(flag) || (switches is not null && switches.User.Contains(flag, StringComparer.FromComparison(switches.Case))));
+            if (secret || user)
+            {
+                replace[index + 1] = secret ? "\"<secret>\"" : "\"<user>\"";
+            }
+        }
+
+        return replace.Count == 0 ? match.Value
+            : JsonString().Replace(match.Value, element => replace.GetValueOrDefault(elements.FindIndex(candidate => candidate.Index == element.Index), element.Value));
+    }
+
+    // The switch table for a command, given its name or path (sqlcmd, C:\Tools\sqlcmd.exe, docker login).
+    private static Switches? CommandSwitches(string command) =>
+        Path.GetFileName(command.Replace('\\', '/')).ToLowerInvariant().Replace(".exe", "", StringComparison.Ordinal) switch
         {
             "schtasks" => Schtasks,
             "sqlcmd" or "bcp" or "osql" => Sql,
@@ -345,6 +425,12 @@ public sealed partial class Redactor
             "7z" or "7za" or "7zr" => SevenZip,
             _ => null,
         };
+
+    // net use takes its password as the first plain argument and net user as the second (after the account name).
+    private static string RedactCommand(Match match)
+    {
+        var command = match.Groups["command"].Value;
+        var switches = CommandSwitches(command.Split([' ', '\t'])[0]);
         var user = switches is null && command.EndsWith("user", StringComparison.OrdinalIgnoreCase);
         var positional = 0;
         string? next = null;
@@ -480,6 +566,18 @@ public sealed partial class Redactor
     }
 
     private static readonly string[] QuoteSpellings = [@"\\\""", @"\\u0022", @"\u0022", "\\\"", "\""];
+
+    // A quoted value keeps its quote spelling ({"password":"<secret>"}), so JSON stays well formed; a .NET type name
+    // ("Credential":"System.Management.Automation.PSCredential") names a type, not a secret.
+    private static string RedactAssignment(Match match)
+    {
+        var value = match.Groups["value"].Value;
+        var quote = AssignmentQuotes.FirstOrDefault(spelling => value.Length >= 2 * spelling.Length && value.StartsWith(spelling, StringComparison.Ordinal) && value.EndsWith(spelling, StringComparison.Ordinal));
+        return TypeName().IsMatch(quote is null ? value : value[quote.Length..^quote.Length]) ? match.Value
+            : match.Groups["key"].Value + match.Groups["separator"].Value + quote + "<secret>" + quote;
+    }
+
+    private static readonly string[] AssignmentQuotes = [.. QuoteSpellings, "'"];
 
     // A quoted secret keeps the quote spelling it was written with, so JSON at any depth stays well formed.
     private static string Requote(string quoted)
@@ -722,7 +820,7 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + @")(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + @")(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass)))(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?!REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
@@ -837,6 +935,46 @@ public sealed partial class Redactor
 
     [GeneratedRegex("\"\uFDD0(?<index>[\uFDD2-\uFDDB]+)\uFDD1\"")]
     private static partial Regex Mask();
+
+    // A standalone drive colon, or a UNC server name at the start of a path, followed by a single backslash escape
+    // (\r, \f, \n, \t, ...): a raw path. "Issuer:\n" and an encoded "...\\LabVIEW.exe\n" are not.
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:\\(?![\\""])|(?<![\\\w:])\\\\[A-Za-z0-9._$-]+\\(?![\\""])")]
+    private static partial Regex RawPath();
+
+    [GeneratedRegex(@"password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass)$", RegexOptions.IgnoreCase)]
+    private static partial Regex SecretName();
+
+    [GeneratedRegex(@"^(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass))$", RegexOptions.IgnoreCase)]
+    private static partial Regex SecretFlag();
+
+    [GeneratedRegex(@"^(?:--user(?:name)?|/u(?:ser)?)$", RegexOptions.IgnoreCase)]
+    private static partial Regex UserSwitch();
+
+    [GeneratedRegex(@"^(?:System|Microsoft)(?:\.[A-Za-z_][\w`]*)+(?:\[[^\]]*\])?$")]
+    private static partial Regex TypeName();
+
+    [GeneratedRegex(@"\{[^{}]*\}", RegexOptions.NonBacktracking)]
+    private static partial Regex JsonObject();
+
+    [GeneratedRegex(@"""(?<name>[^""\\]*)""[ \t\r\n]*:[ \t\r\n]*(?<value>""(?:[^""\\]|\\.)*""|[^,}\s]+)")]
+    private static partial Regex JsonMember();
+
+    [GeneratedRegex(@"\[[^\[\]]*\]", RegexOptions.NonBacktracking)]
+    private static partial Regex JsonArray();
+
+    // Format-List and YAML records: "Name : DB_PASSWORD" (or "- name: x"), then within a few lines "Value : x".
+    [GeneratedRegex(@"(?<head>^[ \t]*(?:-[ \t]+)?(?:Name|Key)[ \t]*:[ \t]*(?<name>[^\r\n]*)\r?\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r?\n){0,8}?[ \t]*(?:Value|VariableValue|Data)[ \t]*:[ \t]*)(?<value>[^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex Record();
+
+    // Consecutive lines that hold commas; RedactCsv finds the header among them.
+    [GeneratedRegex(@"^[^\r\n]*,[^\r\n]*(?:\r?\n[^\r\n]*,[^\r\n]*)+", RegexOptions.Multiline | RegexOptions.NonBacktracking)]
+    private static partial Regex CsvBlock();
+
+    [GeneratedRegex(@"(\r?\n)")]
+    private static partial Regex CsvLine();
+
+    [GeneratedRegex(@"(?<=^|,)(?:""(?:[^""]|"""")*""|[^,]*)")]
+    private static partial Regex CsvField();
 
     [GeneratedRegex("(" + Placeholder + ")")]
     private static partial Regex PlaceholderSplit();

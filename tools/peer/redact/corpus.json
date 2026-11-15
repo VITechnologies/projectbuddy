@@ -149,7 +149,7 @@
       ],
       "mustContain": [
         "password=<secret>",
-        "\"api_key\": <secret>",
+        "\"api_key\": \"<secret>\"",
         "Bearer <secret>"
       ]
     },
@@ -492,7 +492,7 @@
       "mustContain": [
         "Authorization                  token <secret>",
         "{\\\"Authorization\\\":\\\"token <secret>\\\"}",
-        "{\\\"password\\\":<secret>}"
+        "{\\\"password\\\":\\\"<secret>\\\"}"
       ]
     },
     {
@@ -618,8 +618,8 @@
         "-p <secret> -importpfx",
         "7z a -p<secret> backup.7z",
         "-passout <secret>",
-        "$pw = <secret>",
-        "$pass = <secret>",
+        "$pw = \"<secret>\"",
+        "$pass = '<secret>'",
         "NetworkCredential(<user>, <secret>)",
         "$pw = Read-Host -AsSecureString",
         "bypass=true"
@@ -949,6 +949,81 @@
         "net user <user> \"<secret>\"",
         "-p\"<secret>\"",
         "/RP \"<secret>\""
+      ]
+    },
+    {
+      "id": "name-value-json",
+      "input": "[{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rEnv\",\"Name\":\"DB_PASSWORD\"},{\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"Sup3rRunner\"},{\"Key\":\"PATH\",\"Value\":\"C:\\\\Windows\"},{\"Name\":\"DB_PASSWORD\",\"UserName\":\"SYSTEM\",\"VariableValue\":\"Sup3rWmi\"},{\"key\":\"ClearTextPassword\",\"value\":\"Sup3rXml\"}]",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"",
+        "\"Key\":\"PATH\",\"Value\":\"C:\\\\Windows\"",
+        "\"VariableValue\":\"<secret>\"",
+        "\"key\":\"ClearTextPassword\",\"value\":\"<secret>\""
+      ]
+    },
+    {
+      "id": "name-value-records",
+      "input": "Name  : DB_PASSWORD\nValue : Sup3rList\n\nName           : API_TOKEN\nUserName       : SYSTEM\nVariableValue  : Sup3rWmi\n\nenv:\n- name: DB_PASSWORD\n  value: Sup3rYaml\n- name: HOME\n  value: /root\n\n\"PSPath\",\"Name\",\"Key\",\"Value\"\n\"Env:\\DB_PASSWORD\",\"DB_PASSWORD\",\"DB_PASSWORD\",\"Sup3rCsv\"\n\"Env:\\USERDOMAIN\",\"USERDOMAIN\",\"USERDOMAIN\",\"WORKGROUP\"\n\nTotal: 2, ok\nName,Value\nAPI_KEY,Sup3rPlain",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Value : <secret>",
+        "VariableValue  : <secret>",
+        "  value: <secret>",
+        "  value: /root",
+        "\"DB_PASSWORD\",\"DB_PASSWORD\",\"<secret>\"",
+        "\"USERDOMAIN\",\"WORKGROUP\"",
+        "API_KEY,<secret>"
+      ]
+    },
+    {
+      "id": "json-argument-arrays",
+      "input": "[\"tool.exe\",\"--password\",\"Sup3rArg\"]\n[\"sqlcmd\",\"-S\",\"db01\",\"-U\",\"sa\",\"-P\",\"Sup3rSql\"]\n[\"C:\\\\Tools\\\\docker.exe\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rDocker\"]\n[\"git\",\"status\"]\n[\"app.exe\",\"--username\",\"Zqjane\",\"--verbose\"]",
+      "mustNotContain": [
+        "Sup3r",
+        "jane",
+        "Zqjane"
+      ],
+      "mustContain": [
+        "\"--password\",\"<secret>\"",
+        "\"-U\",\"<user>\",\"-P\",\"<secret>\"",
+        "\"-u\",\"<user>\",\"-p\",\"<secret>\"",
+        "[\"git\",\"status\"]",
+        "\"--username\",\"<user>\",\"--verbose\""
+      ]
+    },
+    {
+      "id": "raw-paths-between-json-punctuation",
+      "input": "path: \"D:\\repos\\fabrikam\\notes.txt\", exit: 1\n\"D:\\repos\\fabrikam\\notes.txt\"\ngit,\"D:\\repos\\fabrikam-firmware\",clean\nshare: \"\\\\fs01\\temp\\fabrikam\", ok\n[\"C:\\tools\\build.bat\", \"D:\\builds\\northwind\\release\"]",
+      "mustNotContain": [
+        "repos",
+        "fabrikam",
+        "fs01",
+        "northwind",
+        "builds"
+      ],
+      "mustContain": [
+        "path: \"<path>\", exit: 1",
+        "git,\"<path>\",clean",
+        "share: \"<path>\", ok",
+        "[\"<path>\", \"<path>\"]"
+      ]
+    },
+    {
+      "id": "json-secret-members",
+      "input": "{\"password\":\"Sup3rA\",\"client_secret\":\"Sup3rB\",\"n\":1,\"token\":\"Sup3rC\",\"Credential\":\"System.Management.Automation.PSCredential\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"password\":\"<secret>\"",
+        "\"client_secret\":\"<secret>\",\"n\":1",
+        "\"token\":\"<secret>\"",
+        "\"Credential\":\"System.Management.Automation.PSCredential\""
       ]
     }
   ]
