@@ -20,5 +20,58 @@
       "missing-secret",
       "timeout"
     ]
+  },
+  "preReview": {
+    "prompt": "You pre-review one part of a unified diff for real defects introduced by its added lines. Each line is shown as '<marker> <new line number>| <code>', where '+' marks an added line, '-' a removed line and ' ' context. Report only defects that match one of the rules below. Cite the file exactly as written after '=== file: ' and the new line number of the added line where the defect is. Do not report style, naming, formatting or missing tests. Report a finding only when the cited added line itself clearly shows the defect; comments, tests and documentation are not defects unless they leak a secret. When unsure, report nothing. If there is no defect, return an empty findings list.",
+    "numPredict": 768,
+    "maxFindings": 6,
+    "maxBatches": 8,
+    "rules": [
+      {
+        "id": "secret-on-command-line",
+        "severity": "blocker",
+        "guidance": "A secret (password, token, key) is passed as a process argument or command-line flag, where other users, process listings and logs can read it."
+      },
+      {
+        "id": "command-injection",
+        "severity": "blocker",
+        "guidance": "Untrusted or external text reaches a shell or a command string without an argument list or strict quoting."
+      },
+      {
+        "id": "path-traversal",
+        "severity": "blocker",
+        "guidance": "Untrusted text builds a file path without being confined to an allowed directory."
+      },
+      {
+        "id": "secret-in-log",
+        "severity": "blocker",
+        "guidance": "A secret is printed, logged, or written to an artifact or report."
+      },
+      {
+        "id": "tls-verification-disabled",
+        "severity": "blocker",
+        "guidance": "Certificate or host-name verification is turned off."
+      },
+      {
+        "id": "fail-open-check",
+        "severity": "blocker",
+        "guidance": "A validation, permission, integrity or hash check passes when its input is missing, malformed, or when the check itself errors."
+      },
+      {
+        "id": "unpinned-download",
+        "severity": "warning",
+        "guidance": "Code or a binary is downloaded and run or installed without a pinned hash, signature or exact version."
+      },
+      {
+        "id": "swallowed-error",
+        "severity": "warning",
+        "guidance": "An error or non-zero exit code is caught or ignored and the operation continues or reports success."
+      },
+      {
+        "id": "comment-implementation-mismatch",
+        "severity": "warning",
+        "guidance": "A comment, message or name claims behavior that the added code does not implement."
+      }
+    ]
   }
 }

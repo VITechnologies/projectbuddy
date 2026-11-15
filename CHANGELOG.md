@@ -6,6 +6,21 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `projectbuddy-advise pre-review` (#284 slice 2). It gives advisory
+  findings on a `git diff`.
+  - Each finding must name a rule from the policy rubric, which fixes its
+    severity, and cite a non-blank added line. The report includes that line
+    of code.
+  - Large diffs are split by file, hunk and line window into requests within
+    the truncation-safe budget, and coverage reports exactly what was left
+    unreviewed.
+  - Findings that only restate their rule's guidance are labelled `generic`.
+  - Measured: F1 0.78 on the bench security corpus. On real PR diffs,
+    precision is low and every false positive was `generic`, so pre-review
+    stays a first look, never a substitute for review.
+- Advise reports keep quotes readable: relaxed JSON escaping, since the output
+  is never embedded in HTML.
+
 - `projectbuddy-advise triage` grounding refinements from the corpus
   accuracy check (#284):
   - an exact whole log line counts from 3 characters (a bare `Killed`),

