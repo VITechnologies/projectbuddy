@@ -33,7 +33,7 @@ public class ProgramTests
     {
         var (code, output, _) = Run(["--version"]);
         Assert.Equal(0, code);
-        Assert.Equal($"{Versions.Tool} {Versions.TriageSchema}", output.Trim());
+        Assert.Equal($"{Versions.Tool} {Versions.TriageSchema} {Versions.PreReviewSchema}", output.Trim());
     }
 
     [Fact]
@@ -73,6 +73,26 @@ public class ProgramTests
         Assert.Equal(0, code);
         Assert.Equal("", error);
         Assert.Equal(Versions.TriageSchema, JsonNode.Parse(output)!["schema"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void PreReviewVerbWritesItsReport()
+    {
+        var ollama = new FakeOllama();
+        ollama.Replies.Enqueue(FakeOllama.Reply("""{"findings":[]}"""));
+        var (code, output, _) = Run(["pre-review", "--policy", "p.json", "--ollama", "http://127.0.0.1:11435"], ollama, stdin: Fixtures.Diff);
+        Assert.Equal(0, code);
+        Assert.Equal(Versions.PreReviewSchema, JsonNode.Parse(output)!["schema"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReportsKeepQuotesReadable()
+    {
+        var ollama = new FakeOllama();
+        ollama.Replies.Enqueue(FakeOllama.Answer("verify", "FAIL  gate-x  -- broken thing", "gate-failure"));
+        var (_, output, _) = Run(Valid, ollama, read: path => path == "p.json" ? Fixtures.Bytes(Fixtures.Policy()) : Encoding.UTF8.GetBytes("build\tverify\t2026-11-15T09:26:26Z FAIL  gate-x  -- broken thing \"quoted\""));
+        Assert.Contains("\"errorLine\":\"FAIL  gate-x  -- broken thing \\\"quoted\\\"\"", output);
+        Assert.DoesNotContain("\\u0022", output);
     }
 
     [Fact]
@@ -123,6 +143,8 @@ public class PolicyTests
         Assert.Equal("qwen2.5:7b", policy.Model.Name);
         Assert.True(policy.MaxInputBytes * 2 <= policy.NumCtx * 4);
         Assert.Contains("segfault", policy.TriageClasses);
+        Assert.Contains(policy.PreReview.Rules, rule => rule.Id == "fail-open-check" && rule.Severity == "blocker");
+        Assert.True(policy.PreReview.MaxFindings > 0 && policy.PreReview.MaxBatches > 0);
     }
 
     [Fact]
@@ -148,6 +170,16 @@ public class PolicyTests
         { "triage keys", policy => policy["triage"]!.AsObject().Remove("prompt") },
         { "no classes", policy => policy["triage"]!["classes"] = new JsonArray() },
         { "repeated classes", policy => policy["triage"]!["classes"] = new JsonArray("a", "a") },
+        { "no preReview", policy => policy.Remove("preReview") },
+        { "preReview keys", policy => policy["preReview"]!.AsObject().Remove("maxBatches") },
+        { "preReview numPredict", policy => policy["preReview"]!["numPredict"] = 32 },
+        { "maxFindings", policy => policy["preReview"]!["maxFindings"] = 0 },
+        { "maxBatches", policy => policy["preReview"]!["maxBatches"] = 65 },
+        { "no rules", policy => policy["preReview"]!["rules"] = new JsonArray() },
+        { "rule keys", policy => policy["preReview"]!["rules"]![0]!.AsObject().Remove("guidance") },
+        { "rule id", policy => policy["preReview"]!["rules"]![0]!["id"] = "Bad Id" },
+        { "rule severity", policy => policy["preReview"]!["rules"]![0]!["severity"] = "critical" },
+        { "repeated rule", policy => policy["preReview"]!["rules"]!.AsArray().Add(Fixtures.Rule("naming", "nit")) },
     };
 
     [Theory]

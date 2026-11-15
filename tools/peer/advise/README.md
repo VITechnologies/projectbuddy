@@ -122,4 +122,75 @@ On the 8 triage items of the bench corpus (#217), all 8 were answered with
 
 The P1 baseline on the same items had 2 wrong extractions.
 
-Pre-review of diffs (`pre-review`) is the second slice of #284.
+## `pre-review`: advisory review of a diff
+
+```bash
+git diff origin/develop...HEAD | out/projectbuddy-advise pre-review --policy policy.json --ollama http://127.0.0.1:11434
+gh pr diff <n> --repo <owner/repo> | out/projectbuddy-advise pre-review --policy policy.json --ollama http://127.0.0.1:11434
+```
+
+- **Input.** The tool reads `git diff` output. Only files that still exist and
+  have added lines are reviewable; deletions and binary changes are skipped.
+  Every line is shown to the model with its new-file line number, for example
+  `+   42| code`.
+  - Give it **one diff at a time**. A path that appears twice (for example
+    staged plus unstaged, or `git log -p`) is refused before Ollama is
+    contacted, because its line numbers would refer to different versions of
+    the file.
+  - A leading byte-order mark is ignored.
+  - C-quoted paths (`core.quotePath`) are unquoted. A legacy, non-UTF-8 file
+    name keeps git's quoted spelling.
+  - The default `b/` prefix (`a/` under `-R`) and git's mnemonic prefixes
+    (`w/`, `i/`, `c/`, `o/`) are stripped. **Limitation:** with
+    `--no-prefix`, a path whose first directory is one of those letters loses
+    that directory.
+  - Any damaged `@@` hunk header is refused.
+- **Batching.** Files go in path order. A file too big for one request is
+  split by hunk, and a hunk too big is split by window of lines, keeping the
+  line numbers. Chunks are packed into requests within `maxInputBytes`, up to
+  `preReview.maxBatches` requests. Whatever is not reviewed is listed under
+  `coverage.unreviewed` with a reason, and `coverage.complete` is then
+  `false`.
+- **Rubric (`policy.json` `preReview.rules`).** Each rule has an id, a
+  **fixed severity** (`blocker`/`warning`/`nit`) and guidance. The committed
+  rubric covers:
+  - from `local-review`, the fail-closed and comment/implementation rules;
+  - from the bench, the security classes;
+  - swallowed errors.
+- **Every finding is checked.** A finding must be exactly
+  `{file, line, ruleId, message}`, and it is dropped and counted unless:
+  - its rule is in the policy;
+  - it cites a non-blank **added** line of that file in that request;
+  - its message is one line of at most 300 characters.
+
+  Drops are counted in `dropped.unanchored` and `dropped.malformed`, and
+  findings over `maxFindings` in `dropped.overLimit`. A batch whose prompt
+  may have been cut, or whose reply is not a findings list, counts as
+  unreviewed. If no batch could be reviewed, the tool exits 6.
+- **Report** (`projectbuddy/advise-pre-review@1`):
+  - `findings`, sorted by severity, then specific before generic, then file
+    and line. Each one includes the cited `code` line, so it can be checked
+    without opening the file.
+  - `summary`: `total`, `specific` and the count per severity.
+  - `coverage`, `dropped`, and per-batch receipts.
+
+### Precision: read `generic` findings as noise
+
+A finding whose message only restates its rule's guidance is labelled
+`"generic": true` and sorted last. It is kept because it is still anchored
+and checkable, but it carries no specific reason.
+
+Measured on the workstation GPU:
+- **Bench corpus**, 9 security excerpts as new-file diffs: 7 of 8 expected
+  defects found, plus 3 false positives, all on the clean controls (F1 0.78).
+  The P1 baseline was F1 0.67 on the workstation and 0.53 on the peer.
+- **Real merged PRs:**
+  - #283 (95 KB diff): 4 findings, all false and all `generic`. The real
+    issue the independent review found (proxy and redirect handling) is
+    outside the rubric.
+  - #286 (133 KB): 0 findings, reviewing 1200 of 2088 added lines in 8
+    batches.
+  - #287 (13 KB): 1 false positive, on a comment.
+
+Pre-review is a cheap, advisory first look, at 1–4 KB of report per diff. It
+**never** replaces the independent review (#210 D11).

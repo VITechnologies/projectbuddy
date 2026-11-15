@@ -1,3 +1,5 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using ProjectBuddy.PeerOllama;
 
 namespace ProjectBuddy.PeerAdvise;
@@ -5,9 +7,12 @@ namespace ProjectBuddy.PeerAdvise;
 public static class Program
 {
     public const string Usage =
-        "usage: projectbuddy-advise triage --policy <file> [--input <file>] [--ollama <http://127.0.0.1:port>] [--timeout-seconds <n>] | --version";
+        "usage: projectbuddy-advise triage|pre-review --policy <file> [--input <file>] [--ollama <http://127.0.0.1:port>] [--timeout-seconds <n>] | --version";
 
     public const string DefaultOllama = "http://127.0.0.1:11434";
+
+    // Reports quote code and log lines; they are read by agents and people, never embedded in HTML.
+    private static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     public static int Main(string[] args) =>
         Run(args, File.ReadAllBytes, ReadStdin, OllamaClient.LoopbackHandler(), Console.Out, Console.Error);
@@ -22,11 +27,11 @@ public static class Program
     {
         if (args is ["--version"])
         {
-            stdout.WriteLine($"{Versions.Tool} {Versions.TriageSchema}");
+            stdout.WriteLine($"{Versions.Tool} {Versions.TriageSchema} {Versions.PreReviewSchema}");
             return 0;
         }
 
-        if (args is not ["triage", .. var rest] || !TryParse(rest, out var options))
+        if (args is not [("triage" or "pre-review") and var verb, .. var rest] || !TryParse(rest, out var options))
         {
             stderr.WriteLine(Usage);
             return ExitCodes.Usage;
@@ -39,8 +44,8 @@ public static class Program
             var input = options.TryGetValue("--input", out var path) ? Read(readFile, path) : readStdin();
             var baseUri = OllamaClient.RequireLoopback(options["--ollama"]);
             using var ollama = new OllamaClient(handler, baseUri, TimeSpan.FromSeconds(int.Parse(options["--timeout-seconds"])));
-            var report = Triage.RunAsync(policy, input, ollama).GetAwaiter().GetResult();
-            stdout.WriteLine(report.ToJsonString());
+            var report = (verb == "triage" ? Triage.RunAsync(policy, input, ollama) : PreReview.RunAsync(policy, input, ollama)).GetAwaiter().GetResult();
+            stdout.WriteLine(report.ToJsonString(Output));
             return 0;
         }
         catch (PeerException error)
@@ -99,6 +104,7 @@ public static class Versions
 {
     public const string Tool = "0.1.0";
     public const string TriageSchema = "projectbuddy/advise-triage@1";
+    public const string PreReviewSchema = "projectbuddy/advise-pre-review@1";
 }
 
 public static class AdviseExitCodes
