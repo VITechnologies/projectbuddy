@@ -254,8 +254,17 @@ public class RedactorTests
     [InlineData("", "a.b.c.it.")]
     [InlineData("net use ", "a ")]
     [InlineData("", "CN=a\\,")]
-    public void LargeAdversarialInputsStayFast(string head, string unit)
+    [InlineData("", "1", 1000)]
+    [InlineData("", "1.2.3.4 ", 1000, '\n')]
+    [InlineData("", "Version 1.2.3.4 ", 40)]
+    [InlineData("", "/O=a")]
+    [InlineData("", "7z -pa ")]
+    [InlineData("", "sqlcmd -P a ")]
+    [InlineData("", "\\\\u0027")]
+    [InlineData("", "\\\\\\\\")]
+    public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
+        unit = new string(padding, pad) + unit;
         var text = head + string.Concat(Enumerable.Repeat(unit, (Redactor.MaxInputChars - head.Length) / unit.Length));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         Plain().Redact(text);
@@ -284,6 +293,18 @@ public class RedactorTests
     [InlineData("NET.EXE USE LPT1: \\\\fs01\\printer", "NET.EXE USE LPT1: <path>")]
     [InlineData("schtasks /Query /P /F /RU", "schtasks /Query /P /F /RU")]
     [InlineData("schtasks.exe /Change /TN x /RP Sup3r", "schtasks.exe /Change /TN x /RP <secret>")]
+    [InlineData("sqlcmd -S db01 -U sa -P Sup3r -Q x", "sqlcmd -S db01 -U <user> -P <secret> -Q x")]
+    [InlineData("sqlcmd -Usa -PSup3r -p", "sqlcmd -U<user> -P<secret> -p")]
+    [InlineData("bcp.exe t out f -P<secret>", "bcp.exe t out f -P<secret>")]
+    [InlineData("certutil -f -P Sup3r -importpfx x.pfx", "certutil -f -P <secret> -importpfx x.pfx")]
+    [InlineData("PsExec64 -u jane -p Sup3r cmd", "PsExec64 -u <user> -p <secret> cmd")]
+    [InlineData("docker login -u jane -pSup3r", "docker login -u <user> -p<secret>")]
+    [InlineData("7z a -pSup3r b.7z", "7z a -p<secret> b.7z")]
+    [InlineData("7za a -p b.7z", "7za a -p b.7z")]
+    [InlineData("7zr a -pSup3r b.7z", "7zr a -p<secret> b.7z")]
+    [InlineData("osql -U sa -P Sup3r", "osql -U <user> -P <secret>")]
+    [InlineData("psexec.exe -p Sup3r cmd", "psexec.exe -p <secret> cmd")]
+    [InlineData("openssl pkcs12 -passout pass:Sup3r -passin env:X", "openssl pkcs12 -passout <secret> -passin <secret>")]
     public void CommandLinesHideTheirPasswordArguments(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
     [Theory]
@@ -299,4 +320,56 @@ public class RedactorTests
     [InlineData("C:\\Windows\\...\\x", "<path>")]
     [InlineData("C:\\Windows\\ .. \\x", "<path>")]
     public void PathEdgesKeepSpacingAndRefuseDotSegments(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Fact]
+    public void ChainsThroughEveryRuleStillSettle() =>
+        Assert.Equal("user <private><host><ip><path>", Redactor.ForHost([], "WS-01", "jane").Redact("user jane_fs01.corp.local::5\\\\fs01\\share").Text);
+
+    [Theory]
+    [InlineData("$pw = \"Sup3r\"", "$pw = <secret>")]
+    [InlineData("$pass = 'Sup3r'", "$pass = <secret>")]
+    [InlineData("db_pass=Sup3r", "db_pass=<secret>")]
+    [InlineData("bypass=true", "bypass=true")]
+    [InlineData("$pw = Read-Host -AsSecureString", "$pw = Read-Host -AsSecureString")]
+    [InlineData("New-Object System.Net.NetworkCredential(\"jane\", \"Sup3r\")", "New-Object System.Net.NetworkCredential(<user>, <secret>)")]
+    [InlineData("[NetworkCredential]::new('jane', 'Sup3r')", "[NetworkCredential]::new(<user>, <secret>)")]
+    public void ScriptCredentialsAreHidden(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData("Subject : CN=fs01.contoso.local, O=Contoso Ltd, L=Austin, S=Texas, C=US", "Subject : CN=<private>, O=<private>, L=<private>, S=<private>, C=US")]
+    [InlineData("Issuer: O=Contoso Ltd", "Issuer: O=<private>")]
+    [InlineData("/C=US/ST=Texas/O=Contoso/CN=fs01", "/C=US/ST=<private>/O=<private>/CN=<private>")]
+    [InlineData("CN=DigiCert Global Root G2, O=Microsoft Corporation", "CN=DigiCert Global Root G2, O=Microsoft Corporation")]
+    [InlineData("CN=github.com", "CN=github.com")]
+    [InlineData("so=1 and x,o", "so=1 and x,o")]
+    public void CertificateNamesHideTheOwnerButKeepPublicIssuers(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData("Primary Dns Suffix . . . : acme.it", "Primary Dns Suffix . . . : <host>")]
+    [InlineData("Resolve-DnsName acme.pl; ping acme.in", "Resolve-DnsName <host>; ping <host>")]
+    [InlineData("user.id and README.md", "user.id and README.md")]
+    public void CompanyDomainsUnderRiskyCountryDomainsCountInDnsContext(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Theory]
+    [InlineData("at \\u0027D:/Clients/x\\u0027", "at '<path>'")]
+    [InlineData("\\u0022q\\u0022 \\u005C", "\\\"q\\\" \\\\")]
+    [InlineData("\\uD83D\\uDE00 \\uD800 \\u0001 \\u007F", "\U0001F600 \\uD800 \\u0001 \\u007F")]
+    [InlineData("x\\\\u0027 stays", "x\\\\u0027 stays")]
+    [InlineData("a\\\\u200Bb", "ab")]
+    [InlineData("at x\\\\u0027D:/Clients/x", "at x\\\\u0027<path>")]
+    [InlineData("at \\\\u0027D:/Clients/x", "at <path><path>")]
+    public void JsonEscapesCannotHidePaths(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
+
+    [Fact]
+    public void TermsMatchTheirJsonEscapedSpellings()
+    {
+        Assert.Equal("<private> and <private>", new Redactor(["O'Brien", "Müller"]).Redact("O\\\\u0027Brien and M\\\\u00fcller").Text);
+        Assert.Equal("x\\\\u0027<private>", Redactor.ForHost([], "WS-01", "jane").Redact("x\\\\u0027jane").Text);
+    }
+
+    [Theory]
+    [InlineData("C:\\Users\\ \\Jane\\x", "<path>")]
+    [InlineData("C:\\Windows\\ \\Temp\\x", "<path>")]
+    [InlineData("ProductVersion     : 1.2.3.4", "ProductVersion     : 1.2.3.4")]
+    public void BlankNamesCannotDodgeALimit(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 }

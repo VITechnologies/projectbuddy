@@ -27,7 +27,9 @@ public sealed partial class Redactor
     public const int MaxTermLength = 200;
     public const int MaxTerms = 1000;
     public const int MaxInputChars = 4_000_000;
-    public const int MaxPasses = 4;
+    // More than the number of rules: a later pass can only be needed when a rule unlocks an earlier one, so a
+    // deliberate chain through every rule still settles. Passes after the text settles never run.
+    public const int MaxPasses = 32;
 
     public static readonly string[] Placeholders = ["<private>", "<secret>", "<email>", "<url>", "<host>", "<path>", "<user>", "<ip>", "<mac>"];
 
@@ -141,6 +143,7 @@ public sealed partial class Redactor
         result = Apply(result, "secret", XmlSecret(), match => match.Groups["key"].Value + "\"<secret>\"");
         result = Apply(result, "secret", Command(), RedactCommand);
         result = Apply(result, "secret", SecureString(), match => match.Groups["key"].Value + "<secret>");
+        result = Apply(result, "secret", Credential(), match => match.Groups["head"].Value + "<user>" + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Assignment(), match => match.Groups["key"].Value + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
@@ -157,7 +160,8 @@ public sealed partial class Redactor
         result = Apply(result, "ip", IPv4(), match => AllowedIPv4(match.Value) ? match.Value : "<ip>");
         result = Apply(result, "ip", IPv6(), match => IPAddress.TryParse(match.Value, out var address) && address.AddressFamily == AddressFamily.InterNetworkV6
             && !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.IPv6Any) ? "<ip>" : match.Value);
-        result = Apply(result, "private", DirectoryName(), match => IsAllowedHost(match.Groups["value"].Value.Trim().ToLowerInvariant()) ? match.Value : match.Groups["key"].Value + "<private>");
+        result = Apply(result, "private", DirectoryName(), match => IsAllowedHost(match.Groups["value"].Value.Trim().ToLowerInvariant()) || PublicIssuer().IsMatch(match.Groups["value"].Value)
+            ? match.Value : match.Groups["key"].Value + "<private>");
         result = Apply(result, "host", Host(), match => KeepHost(match.Groups["host"].Value, match.Groups["rest"].Value, "", "", "<host>"));
         result = Apply(result, "user", AccountAt(), _ => "<user>@");
         foreach (var terms in new[] { deny, words })
@@ -192,26 +196,42 @@ public sealed partial class Redactor
         }
 
         // Longest first, words joined by any whitespace (wrapped lines, doubled or non-breaking spaces).
+        // A character other than an ASCII letter or digit may also be spelled as a JSON escape (M\u00FCller, O\u0027Brien).
+        static string Character(char character) => char.IsAsciiLetterOrDigit(character) ? character.ToString()
+            : $@"(?:{Regex.Escape(character.ToString())}|\\+u{(int)character:x4})";
         var alternatives = string.Join('|', terms.OrderByDescending(term => term.Length).ThenBy(term => term, StringComparer.Ordinal)
-            .Select(term => string.Join(@"\s+", term.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Regex.Escape))));
+            .Select(term => string.Join(@"\s+", term.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(word => string.Concat(word.Select(Character))))));
         return wholeWord
-            ? new Regex(@"(?<![\p{L}\p{N}])(?:" + alternatives + @")(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            ? new Regex(@"(?:(?<![\p{L}\p{N}])|" + AfterEscape + @")(?:" + alternatives + @")(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
             : new Regex(alternatives, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     }
 
-    // NFC, no invisible format characters (zero-width joiners and spaces, soft hyphens, tag characters) and no lone
-    // surrogates, so a term or address cannot be split by characters a reader never sees.
+    // JSON \uXXXX escapes first become their shortest JSON spelling: printable characters literal, a quote and a
+    // backslash as \" and \\. JSON meaning is unchanged, but an escaped apostrophe or umlaut can no longer hide a
+    // path or a term. Then NFC, no invisible format characters (zero-width joiners and spaces, soft hyphens, tag
+    // characters) and no lone surrogates, so a term or address cannot be split by characters a reader never sees.
+    // Escapes of invisible characters left at any deeper escape level (\\u200B in JSON inside JSON) are removed too.
     private static string Clean(string text)
     {
-        var clean = new StringBuilder(text.Length);
-        for (var index = 0; index < text.Length; index++)
+        var decoded = JsonEscape().Replace(text, match =>
         {
-            var character = text[index];
-            if (char.IsHighSurrogate(character) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+            var code = Convert.ToInt32(match.Groups["hex"].Value, 16);
+            var literal = match.Groups["low"].Success ? char.ConvertFromUtf32(char.ConvertToUtf32((char)code, (char)Convert.ToInt32(match.Groups["low"].Value, 16)))
+                : code is < 0x20 or 0x7F || char.IsSurrogate((char)code) ? null
+                : code == '"' ? "\\\"" : code == '\\' ? "\\\\" : ((char)code).ToString();
+            return literal is null ? match.Value : match.Groups["pairs"].Value + literal;
+        });
+        decoded = EscapedInvisible().Replace(decoded, "");
+
+        var clean = new StringBuilder(decoded.Length);
+        for (var index = 0; index < decoded.Length; index++)
+        {
+            var character = decoded[index];
+            if (char.IsHighSurrogate(character) && index + 1 < decoded.Length && char.IsLowSurrogate(decoded[index + 1]))
             {
-                if (CharUnicodeInfo.GetUnicodeCategory(char.ConvertToUtf32(character, text[index + 1])) != UnicodeCategory.Format)
+                if (CharUnicodeInfo.GetUnicodeCategory(char.ConvertToUtf32(character, decoded[index + 1])) != UnicodeCategory.Format)
                 {
-                    clean.Append(character).Append(text[index + 1]);
+                    clean.Append(character).Append(decoded[index + 1]);
                 }
 
                 index++;
@@ -238,13 +258,33 @@ public sealed partial class Redactor
         return IsAllowedHost(name) ? $"{scheme}{name}{port}{(rest.Length > 1 ? "/<path>" : rest)}" : replacement;
     }
 
-    // net use takes its password as the first plain argument and net user as the second (after the account name);
-    // schtasks takes them after /P and /RP, and accounts after /U and /RU.
+    // Tools whose password (and account) arguments follow a switch, or are glued to it (sqlcmd -PSecret, 7z -pSecret).
+    // A general "-p" is a port or a path flag, so these are matched only after their own command.
+    private sealed record Switches(StringComparison Case, string[] Secret, string[] User, bool Next, bool Attached);
+
+    private static readonly Switches Schtasks = new(StringComparison.OrdinalIgnoreCase, ["/P", "/RP"], ["/U", "/RU"], true, false);
+    private static readonly Switches Sql = new(StringComparison.Ordinal, ["-P"], ["-U"], true, true);
+    private static readonly Switches PsExec = new(StringComparison.OrdinalIgnoreCase, ["-p"], ["-u"], true, false);
+    private static readonly Switches Docker = new(StringComparison.Ordinal, ["-p"], ["-u"], true, true);
+    private static readonly Switches CertUtil = new(StringComparison.OrdinalIgnoreCase, ["-p"], [], true, false);
+    private static readonly Switches SevenZip = new(StringComparison.Ordinal, ["-p"], [], false, true);
+
+    // net use takes its password as the first plain argument and net user as the second (after the account name).
     private static string RedactCommand(Match match)
     {
         var command = match.Groups["command"].Value;
-        var net = command.StartsWith("net", StringComparison.OrdinalIgnoreCase);
-        var user = net && command.EndsWith("user", StringComparison.OrdinalIgnoreCase);
+        var name = command.Split([' ', '\t'])[0].ToLowerInvariant().Replace(".exe", "", StringComparison.Ordinal);
+        var switches = name switch
+        {
+            "schtasks" => Schtasks,
+            "sqlcmd" or "bcp" or "osql" => Sql,
+            "psexec" or "psexec64" => PsExec,
+            "docker" => Docker,
+            "certutil" => CertUtil,
+            "7z" or "7za" or "7zr" => SevenZip,
+            _ => null,
+        };
+        var user = switches is null && command.EndsWith("user", StringComparison.OrdinalIgnoreCase);
         var positional = 0;
         string? next = null;
         return command + Argument().Replace(match.Groups["args"].Value, argument =>
@@ -252,13 +292,21 @@ public sealed partial class Redactor
             var value = argument.Value;
             if (value[0] is '/' or '-')
             {
-                next = net ? null : value.ToUpperInvariant() switch
+                next = null;
+                if (switches is null)
                 {
-                    "/P" or "/RP" => "<secret>",
-                    "/U" or "/RU" => "<user>",
-                    _ => null,
-                };
-                return value;
+                    return value;
+                }
+
+                if (switches.Next)
+                {
+                    next = switches.Secret.Contains(value, StringComparer.FromComparison(switches.Case)) ? "<secret>"
+                        : switches.User.Contains(value, StringComparer.FromComparison(switches.Case)) ? "<user>" : null;
+                }
+
+                var glued = switches.Attached ? switches.Secret.Concat(switches.User)
+                    .FirstOrDefault(flag => value.Length > flag.Length && value.StartsWith(flag, switches.Case) && !value[flag.Length..].StartsWith('<')) : null;
+                return glued is null ? value : glued + (switches.Secret.Contains(glued) ? "<secret>" : "<user>");
             }
 
             if (next is not null)
@@ -269,7 +317,7 @@ public sealed partial class Redactor
             }
 
             var bare = value.TrimStart('"');
-            if (!net || bare.StartsWith(@"\\", StringComparison.Ordinal) || bare.StartsWith("<path>", StringComparison.Ordinal) || NetDevice().IsMatch(value))
+            if (switches is not null || bare.StartsWith(@"\\", StringComparison.Ordinal) || bare.StartsWith("<path>", StringComparison.Ordinal) || NetDevice().IsMatch(value))
             {
                 return value;
             }
@@ -294,14 +342,16 @@ public sealed partial class Redactor
         var segments = separators.Select((separator, index) =>
             rest[(separator.Index + separator.Value.Length)..(index + 1 < separators.Length ? separators[index + 1].Index : rest.Length)]).ToArray();
 
-        // "." and ".." (and Windows' trailing-dot spellings of them) move the path, so it cannot be judged by prefix.
-        if (segments.Any(segment => segment.Trim().Length > 0 && Name(segment).Length == 0))
+        // "." and ".." (and Windows' trailing-dot spellings of them) move the path, and a blank name before a real one
+        // hides where it leads, so neither can be judged by prefix.
+        var lastNamed = Array.FindLastIndex(segments, segment => !Blank(segment));
+        if (segments.Where((segment, index) => Name(segment).Length == 0 && (!Blank(segment) || index < lastNamed)).Any())
         {
             return Cut(value);
         }
 
         // A bare drive root (C:\) names nothing.
-        if (segments.All(Blank))
+        if (lastNamed < 0)
         {
             return value;
         }
@@ -314,7 +364,7 @@ public sealed partial class Redactor
         if (drive == "C" && Name(segments[0]).Equals("Users", StringComparison.OrdinalIgnoreCase))
         {
             // Already redacted ("C:\Users\" before a placeholder) or the bare profiles folder: nothing to hide.
-            if (segments.Length == 1 || Blank(segments[1]))
+            if (lastNamed == 0)
             {
                 return value;
             }
@@ -398,22 +448,27 @@ public sealed partial class Redactor
 
     private const string Placeholder = "<(?:private|secret|email|url|host|path|user|ip|mac)>";
 
+    // A JSON \uXXXX escape left in the text (from double-escaped JSON) is a boundary, like the character it stands for.
+    private const string AfterEscape = @"(?<=\\u[0-9A-Fa-f]{4})";
+
     private const string Colon = @"(?::|%3[Aa])";
     private const string AnySeparator = @"(?:\\\\|\\|/|%2[Ff]|%5[Cc])";
     private const string BackSeparator = @"(?:\\\\|\\|%5[Cc])(?![\\/])";
 
     // A drive starts after a non-alphanumeric character, a JSON \t, \n or \r escape, or a short switch (-oD:\x,
     // /ID:\x); never inside a word, so "https://" is not a drive "s:".
-    private const string DriveHead = @"(?:(?<![A-Za-z0-9])|(?<=\\[tnr])|(?<=(?<![\w\\/.:-])[-/][A-Za-z]{1,3}))[A-Za-z]" + Colon + AnySeparator;
+    private const string DriveBehind = @"(?:(?<![A-Za-z0-9])|(?<=\\[tnr])|" + AfterEscape + @"|(?<=(?<![\w\\/.:-])[-/][A-Za-z]{1,3}))";
 
-    private const string UncHead = @"(?<![A-Za-z0-9\\/]|(?<![A-Za-z0-9])[A-Za-z]:)(?:\\\\\\\\|\\\\)";
+    private const string DriveHead = DriveBehind + "[A-Za-z]" + Colon + AnySeparator;
+
+    private const string UncHead = @"(?:(?<![A-Za-z0-9\\/]|(?<![A-Za-z0-9])[A-Za-z]:)|" + AfterEscape + @")(?:\\\\\\\\|\\\\)";
 
     // A path runs on through spaces (so "D:\Acme Projects\x" never leaks its tail) and through apostrophes inside
     // names (O'Brien). It stops at a quote, <>|, a tab, a line end, a wildcard, or a colon, which no Windows name can
     // hold (file.cs:line 42, https://), before a switch (" /c"; no Windows name starts with "/" or ends with a space),
     // and before the next drive or UNC path, so a kept path never carries another one along. A colon before a
     // backslash is kept when its letter cannot start a drive (abcD:\x), so no tail leaks.
-    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /)(?:[^""'<>|:\r\n\t*?]|'(?=[A-Za-z0-9])|:(?=" + BackSeparator + @")))*";
+    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)\\"")(?:[^""'<>|:\r\n\t*?]|'(?=[A-Za-z0-9])|:(?=" + BackSeparator + @")))*";
 
     private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?]|'(?=[A-Za-z0-9]))*";
 
@@ -450,7 +505,7 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>\bkey\s*=\s*""[^""\r\n]*(?:password|passwd|pwd|secret|token|key)[^""\r\n]*""\s+value\s*=\s*)""[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex XmlSecret();
 
-    [GeneratedRegex(@"(?<command>\b(?:net(?:\.exe)?[ \t]+(?:use|user)|schtasks(?:\.exe)?)\b)(?<args>[^\r\n]*)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<command>\b(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>[^\r\n]*)", RegexOptions.IgnoreCase)]
     private static partial Regex Command();
 
     [GeneratedRegex(@"""[^""\r\n]*""|[^\s""]+")]
@@ -463,14 +518,19 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>\bConvertTo-SecureString\b(?:[ \t]+-(?:AsPlainText|Force|String)\b)*[ \t]+)(?:""[^""\r\n]*""|'[^'\r\n]*'|(?!-)[^\s|;)]+)|(?:""[^""\r\n]*""|'[^'\r\n]*')(?=[ \t]*\|[ \t]*ConvertTo-SecureString\b)", RegexOptions.IgnoreCase)]
     private static partial Regex SecureString();
 
-    // Command-line flags: "--token x", "-pw x", "--password=x", and Windows switches "/pass:x", "/password:x".
-    [GeneratedRegex(@"(?<key>(?<![\w/-])(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;]+)", RegexOptions.IgnoreCase)]
+    // new NetworkCredential("jane", "x"), New-Object System.Net.NetworkCredential('jane', 'x'), [NetworkCredential]::new(...).
+    [GeneratedRegex(@"(?<head>\bNetworkCredential\]?(?:::new)?[ \t]*\([ \t]*)(?:""[^""\r\n]*""|'[^'\r\n]*')(?<separator>[ \t]*,[ \t]*)(?!" + Placeholder + @")(?:""[^""\r\n]*""|'[^'\r\n]*')")]
+    private static partial Regex Credential();
+
+    // Command-line flags: "--token x", "-pw x", "--password=x", "-passout pass:x", and Windows switches "/pass:x".
+    [GeneratedRegex(@"(?<key>(?<![\w/-])(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pat|api-?key|pw|pass(?:in|out)?)\b(?:\s+|[=:])|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass)\b:))(?!-|" + Placeholder + @")(?:""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;]+)", RegexOptions.IgnoreCase)]
     private static partial Regex FlagSecret();
 
     // Name with any prefix (ACTIONS_RUNNER_INPUT_TOKEN, DB_PASSWORD, "api_key", \"password\"), then ":"/"=" or a
     // table gap of 2+ spaces. A value after a ";" (a connection-string item) runs to the next ";", the line end or a
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]*))?(?<key>(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)(?:\\?"")?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S))(?!" + Placeholder + ")(?:" + Quoted + @"|'[^'\r\n]*'|(?(ctx)[^;\r\n""]{1,256}|(?:[^;\r\n]{1,256}?(?=;)|[^\s,;]+)))", RegexOptions.IgnoreCase)]
+    // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret.
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass))(?:\\?"")?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S))(?!" + Placeholder + ")(?:" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)[^;\r\n""]{1,256}|(?:[^;\r\n]{1,256}?(?=;)|[^\s,;]+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     [GeneratedRegex(@"(?<=[?&;])sig=[^&\s""'<>;]+", RegexOptions.IgnoreCase)]
@@ -481,7 +541,7 @@ public sealed partial class Redactor
     private static partial Regex UserFlag();
 
     // Plain and JSON-escaped (https:\/\/) URLs.
-    [GeneratedRegex(@"\b(?<scheme>[A-Za-z][A-Za-z0-9+.-]*)(?<separator>://|:\\/\\/)(?:[^\s/\\@""'<>]+@)?(?<host>[^\s/\\:""'<>?#]+)(?<port>:[0-9]+)?(?<rest>[^\s""'<>]*)", RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"\b(?<scheme>[A-Za-z][A-Za-z0-9+.-]*)(?<separator>://|:\\/\\/)(?:[^\s/\\@""'<>]+@)?(?<host>[^\s/\\:""'<>?#]+)(?<port>:[0-9]+)?(?<rest>(?:[^\s""'<>\\]|\\[^\s""'<>])*)", RegexOptions.NonBacktracking)]
     private static partial Regex Url();
 
     // Any user@host:path remote, including SSH host aliases with no TLD (git@github.com-customer:org/repo.git), and a
@@ -497,21 +557,21 @@ public sealed partial class Redactor
     private static partial Regex Email();
 
     // One rule for every drive-path spelling: X:\, X:/, JSON-escaped X:\\, file:///X:/, X%3A/, \\?\X:\ and \\.\X:\.
-    [GeneratedRegex(@"(?:(?<![A-Za-z0-9])|(?<=\\[tnr])|(?<=(?<![\w\\/.:-])[-/][A-Za-z]{1,3}))(?<long>file:/{2,3}|\\\\\\\\[?.]\\\\|\\\\[?.]\\)?[A-Za-z]" + Colon + AnySeparator + PathTail)]
+    [GeneratedRegex(DriveBehind + @"(?<long>file:/{2,3}|\\\\\\\\[?.]\\\\|\\\\[?.]\\)?[A-Za-z]" + Colon + AnySeparator + PathTail)]
     private static partial Regex DrivePath();
 
     [GeneratedRegex(UncHead + @"(?![?.](?:\\\\|\\)[A-Za-z]" + Colon + @")(?:[A-Za-z0-9._$-]+|\?)" + PathTail)]
     private static partial Regex UncPath();
 
     // //server/share and file:////server/share spellings of a UNC path.
-    [GeneratedRegex(@"(?:\bfile:/{4,5}|(?<![\w:/.-])//)[A-Za-z0-9._$-]+/(?=[^\s/])" + PathTail)]
+    [GeneratedRegex(@"(?:\bfile:/{4,5}|(?:(?<![\w:/.-])|" + AfterEscape + @")//)[A-Za-z0-9._$-]+/(?=[^\s/])" + PathTail)]
     private static partial Regex UncForward();
 
     // Git Bash (/c/...), WSL (/mnt/c/...) and Cygwin (/cygdrive/c/...) spellings of a drive path.
-    [GeneratedRegex(@"(?<![\w.~-])(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
+    [GeneratedRegex(@"(?:(?<![\w.~-])|" + AfterEscape + @")(?:/mnt|/cygdrive)?/[A-Za-z]/" + PosixTail)]
     private static partial Regex PosixDrive();
 
-    [GeneratedRegex(@"(?<root>(?<![\w.~-])/(?:home|Users)/)(?!<)[^/""'<>|:\r\n\t*?]+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<root>(?:(?<![\w.~-])|" + AfterEscape + @")/(?:home|Users)/)(?!<)[^/""'<>|:\r\n\t*?]+(?<rest>/" + PosixTail + ")?", RegexOptions.IgnoreCase)]
     private static partial Regex PosixHome();
 
     [GeneratedRegex(@"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")]
@@ -519,25 +579,36 @@ public sealed partial class Redactor
 
     // An address at the end of a sentence still counts; a version (Version=13.0.0.0, "ProductVersion": "1.0.0.0",
     // v1.2.3.4) does not.
-    [GeneratedRegex(@"(?<![0-9]|[0-9]\.|[Vv]ersion""?\s*[=:]?\s*""?|\bv)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?!\.?[0-9])")]
+    [GeneratedRegex(@"(?<![0-9]|[0-9]\.|[Vv]ersion""?[ \t]{0,32}[=:]?[ \t]{0,32}""?|\bv)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?!\.?[0-9])")]
     private static partial Regex IPv4();
 
     [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Za-z:])")]
     private static partial Regex IPv6();
 
-    // Directory names: CN=Jane Doe,OU=Lab,DC=contoso,DC=local.
-    [GeneratedRegex(@"(?<key>\b(?:CN|OU|DC)=)(?<value>(?:[^,;+""\r\n<>=\\]|\\.)+)", RegexOptions.IgnoreCase)]
+    // Directory names and certificate subjects: CN=Jane Doe,OU=Lab,DC=contoso,DC=local; O=, L=, S=/ST= and E= inside a
+    // name (after "," or "/", or after Subject:/Issuer:). A "/" ends a value only before the next attribute.
+    [GeneratedRegex(@"(?<key>(?:\b(?:CN|OU|DC)|(?<=,[ \t]{0,4}|/|\b(?:Subject|Issuer)[ \t]{0,32}[:=][ \t]{0,4})(?:O|L|ST|S|E))=)(?<value>(?:[^,;+""\r\n<>=\\/]|\\.|/(?![A-Za-z]{1,2}=))+)", RegexOptions.IgnoreCase)]
     private static partial Regex DirectoryName();
+
+    // Public certificate authorities and vendors, so TLS and code-signing issuers stay readable.
+    [GeneratedRegex(@"\b(?:DigiCert|GlobalSign|Sectigo|COMODO|USERTrust|ISRG|Let's Encrypt|Entrust|GoDaddy|Starfield|VeriSign|Thawte|GeoTrust|Baltimore|IdenTrust|QuoVadis|Certum|Symantec|Microsoft|Amazon|Google Trust Services|GitHub)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PublicIssuer();
 
     // Bare host names with a known top-level domain (fs01.corp.example.com, _ldap._tcp.example.com, x.co.jp/path).
     // File names (main.vi, ollama.exe), .NET namespaces (System.IO, Microsoft.NETCore.App, ASP.NET) and Windows .com
     // programs (System32\chcp.com) are not hosts.
-    [GeneratedRegex(@"(?<![\w.@/-])(?<!(?:System32|SysWOW64)[\\/]+)(?!(?-i:System|Microsoft|ASP|Windows|Newtonsoft|NuGet)\.)(?<host>(?:" + Label + ")+(?:" + SafeDomains + ")|(?:" + Label + "){2,}(?:" + RiskyDomains + @"))(?<rest>/[^\s""'<>]*)?(?![\w-]|\.[\w-])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:(?<![\w.@/-])|" + AfterEscape + @")(?<!(?:System32|SysWOW64)[\\/]{1,4})(?!(?-i:System|Microsoft|ASP|Windows|Newtonsoft|NuGet)\.)(?<host>(?:" + Label + ")+(?:" + SafeDomains + ")|(?:" + Label + "){2,}(?:" + RiskyDomains + @")|(?<=\b(?:Suffix|Domain|ComputerName|Resolve-DnsName|nslookup|ping|tracert|Test-NetConnection|Test-Connection)[ \t.:=]{1,40})(?:" + Label + ")(?:" + RiskyDomains + @"))(?<rest>/[^\s""'<>]*)?(?![\w-]|\.[\w-])", RegexOptions.IgnoreCase)]
     private static partial Regex Host();
 
     // The account in user@address once the address is redacted (ssh jane@10.0.0.5).
     [GeneratedRegex(@"(?<![\w.-])[A-Za-z0-9._-]+@(?=<(?:ip|host)>)")]
     private static partial Regex AccountAt();
+
+    [GeneratedRegex(@"(?<!\\)(?<pairs>(?:\\\\)*)(?:\\u(?<hex>[Dd][89ABab][0-9A-Fa-f]{2})\\u(?<low>[Dd][C-Fc-f][0-9A-Fa-f]{2})|\\u(?<hex>[0-9A-Fa-f]{4}))")]
+    private static partial Regex JsonEscape();
+
+    [GeneratedRegex(@"(?<!\\)\\+u(?:00[Aa][Dd]|200[B-Fb-f]|202[A-Ea-e]|206[0-4]|[Ff][Ee][Ff][Ff])")]
+    private static partial Regex EscapedInvisible();
 
     [GeneratedRegex("(" + Placeholder + ")")]
     private static partial Regex PlaceholderSplit();

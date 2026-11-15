@@ -11,12 +11,16 @@ release's notes for the exact pinned commit.
   before a local model sees it and before it leaves the peer.
   - It covers secrets (token formats, `Authorization` headers including
     escaped JSON and table layouts, flags and Windows switches, command-line
-    passwords for `net use`, `net user`, `schtasks` and
-    `ConvertTo-SecureString`, prefixed and table-style assignments, connection
+    passwords for `net use`, `net user`, `schtasks`, `sqlcmd`, `bcp`, `psexec`,
+    `certutil`, `docker login` and `7z`, `ConvertTo-SecureString` and
+    `NetworkCredential`, prefixed and table-style assignments, connection
     strings, XML settings, SAS signatures).
   - It also covers accounts in switches and `user@address`, URLs (allow-listed
-    hosts only, never a path), git remotes, e-mail addresses, directory names,
-    and bare host names under generic and country domains.
+    hosts only, never a path), git remotes, e-mail addresses, directory names
+    and certificate subjects, and bare host names under generic and country
+    domains.
+  - JSON `\uXXXX` escapes are canonicalized first, so an escaped apostrophe or
+    umlaut cannot hide a path or a term.
   - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
     encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
     runs through spaces and stops at a colon, a switch, or the next path.
@@ -27,9 +31,10 @@ release's notes for the exact pinned commit.
     deny list (substring) plus the host's own machine and account names
     (whole word) become `<private>`, matched across any whitespace and invisible
     characters.
-  - Rules repeat until the text settles, so the output is idempotent by
-    construction. Evidence over 4,000,000 characters is refused whole, and
-    adversarial input stays linear up to that cap.
+  - Rules repeat until the text settles (at most 32 passes, more than the
+    number of rules), so the output is idempotent by construction. Evidence
+    over 4,000,000 characters is refused whole, and every adversarial shape
+    tested stays linear up to that cap.
   - Diagnostics stay: digests, versions, exit codes and times.
   - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
     matrix at 100% coverage.

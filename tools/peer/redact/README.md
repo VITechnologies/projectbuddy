@@ -18,16 +18,24 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 
 - Evidence over `Redactor.MaxInputChars` (4,000,000) is **refused whole**
   (`RedactionException`), never partly redacted.
-- Text is normalized to NFC first. Invisible format characters are removed,
+- JSON `\uXXXX` escapes (the default .NET `Utf8JsonWriter` and Windows
+  PowerShell 5.1 `ConvertTo-Json` escape `'`, `"`, `<`, `>`, `&` and every
+  non-ASCII character) become their shortest JSON spelling. Printable
+  characters are written literally, and a quote and a backslash as `\"` and
+  `\\`. JSON meaning is unchanged, but `\u0027D:/Clients` or `M\u00FCller` can
+  no longer hide a path or a term. Escapes of invisible characters left at a
+  deeper escape level (JSON inside JSON) are removed.
+- Text is then normalized to NFC. Invisible format characters are removed,
   including those outside the Basic Multilingual Plane (zero-width spaces and
   joiners, soft hyphens, tag characters), and lone surrogates become `U+FFFD`.
   Nothing a reader cannot see can split a term or an address.
 - The rules below run in order, and the whole order **repeats until the text
-  stops changing**: at most `Redactor.MaxPasses` (4) passes, the last of which
-  confirms. A later pass can only see more placeholders, so it only redacts
-  more. Text that has not settled by then is refused. Idempotence therefore
-  holds by construction. A seeded fuzz of 200,000 glued-together fragments
-  settled within 3 passes.
+  stops changing**. A later pass is needed only when one rule's placeholder
+  unlocks an earlier rule, so `Redactor.MaxPasses` (32) exceeds the number of
+  rules: even a deliberate chain through every rule settles. Text that has not
+  settled by then is refused. Idempotence therefore holds by construction. A
+  seeded fuzz of 300,000 glued-together fragments never needed more than 4
+  passes.
 
 ## Rules, in order
 
@@ -37,9 +45,10 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 | `Authorization`/`Proxy-Authorization` values, plain or in escaped JSON (`\"Authorization\":\"…\"`), after `:`, `=` or a table gap of 2+ spaces, to the closing quote or the end of the line | `<secret>` | the header name and a well-known scheme (`Bearer`, `Basic`, `token`, `AWS4-HMAC-SHA256`, …) |
 | Token-like `Bearer`/`Basic` credentials elsewhere (16+ characters with a digit) | `<secret>` | the scheme; prose such as "Basic authentication" stays |
 | XML `key="…Password…" value="…"` | `<secret>` | the key |
-| Command lines: the password argument of `net use` (first plain argument) and `net user` (second, after the account, which becomes `<user>`); `schtasks /P` and `/RP` (and `/U`, `/RU` as `<user>`); `ConvertTo-SecureString "…"`, `-String …` and `"…" \| ConvertTo-SecureString` | `<secret>` | the command and its switches |
-| Flags: `--token x`, `-pw x`, `--password=x`, `/pass:x`, `/password:x` | `<secret>` | the flag |
-| Assignments whose key contains a secret word, with any prefix (`DB_PASSWORD`, `ACTIONS_RUNNER_INPUT_TOKEN`, `"api_key"`, `\"password\"`), after `:`/`=` or a table gap. A quoted value (plain or escaped) is taken whole. After a `;` (a connection-string item), the value runs to the next `;`, the line end or a quote; elsewhere a `;` ends it. Both are capped at 256 characters. | `<secret>` | the key and separator |
+| Command lines: the password argument of `net use` (first plain argument) and `net user` (second, after the account, which becomes `<user>`); `schtasks /P`, `/RP`; `sqlcmd`, `bcp`, `osql` `-P` (also glued, `-PSecret`); `psexec`, `certutil`, `docker login` `-p`; `7z -pSecret`. The matching account switches (`/U`, `/RU`, `-U`, `-u`) become `<user>`. Short flags count only after their own command, because a general `-p` is a port. | `<secret>` | the command and its switches |
+| PowerShell: `ConvertTo-SecureString "…"`, `-String …` and `"…" \| ConvertTo-SecureString`; `NetworkCredential("user", "…")` (the user becomes `<user>`) | `<secret>` | the call |
+| Flags: `--token x`, `-pw x`, `--password=x`, `-passin`/`-passout pass:x`, `/pass:x`, `/password:x` | `<secret>` | the flag |
+| Assignments whose key contains a secret word, with any prefix (`DB_PASSWORD`, `ACTIONS_RUNNER_INPUT_TOKEN`, `"api_key"`, `\"password\"`), or whose key is `pw` or `pass` as a whole word part (`$pw`, `db_pass`, but not `bypass`), after `:`/`=` or a table gap. A quoted value (plain or escaped) is taken whole. After a `;` (a connection-string item), the value runs to the next `;`, the line end or a quote; elsewhere a `;` ends it. Both are capped at 256 characters. A value that starts with a credential cmdlet (`$pw = Read-Host …`) is code and stays. | `<secret>` | the key and separator |
 | SAS signatures (`?…&sig=…`) | `sig=<secret>` | the other query fields |
 | Accounts: `/user:x`, `/u:x`, `--user=x`, `--username x`, `User Id=x`, `UserName=x` | `<user>` | the switch or key |
 | URLs, plain or JSON-escaped (`https:\/\/`) | `<url>` | `scheme://host[:port]` for allow-listed hosts, with the path **always** replaced by `/<path>`; user info is dropped |
@@ -48,7 +57,7 @@ Redaction result = redactor.Redact(evidence);   // result.Text, result.Counts pe
 | UNC and device paths (`\\server\share`, `\\?\UNC\…`, `\\.\pipe\…`, `//server/share`, `file:////server/share`); Git Bash, WSL and Cygwin drive paths (`/c/…`, `/mnt/c/…`, `/cygdrive/c/…`) | `<path>` | — |
 | User profiles (`C:\Users\x`, `/home/x`, `/Users/x`, any case) | `<user>`, and the rest `<path>` | allow-listed profile folders to a fixed depth (below) |
 | MAC addresses; IPv4/IPv6 outside the allowed networks, including one that ends a sentence | `<mac>`, `<ip>` | loopback, the unspecified address and the cable `10.211.0.0/30`; versions such as `Version=13.0.0.0`, `"ProductVersion": "1.0.0.0"` and `v1.2.3.4` |
-| Directory names: `CN=`, `OU=`, `DC=` values | `<private>` | allow-listed hosts (`CN=github.com`) |
+| Directory names and certificate subjects: `CN=`, `OU=`, `DC=` values, and `O=`, `L=`, `S=`/`ST=`, `E=` inside a name (after `,`, `/` or `Subject:`/`Issuer:`) | `<private>` | allow-listed hosts (`CN=github.com`) and public certificate authorities and vendors (`DigiCert`, `GlobalSign`, `Let's Encrypt`, `Microsoft`, …) |
 | Bare host names (below) | `<host>` | allow-listed hosts, again with any path replaced by `/<path>` |
 | The account in `user@<ip>` or `user@<host>` (`ssh jane@10.0.0.5`) | `<user>` | — |
 | Deny-list terms (case-insensitive, longest first, words joined by any whitespace) | `<private>` | placeholders are never rewritten |
@@ -80,16 +89,21 @@ A path match runs on through spaces and through apostrophes inside names
 
 So a path that is not allowed takes the rest of its line up to one of these
 stops. That is fail-closed, at the cost of table columns that follow a path on
-the same line. POSIX paths have no switch or drive stop, since a POSIX name can
-hold anything.
+the same line. Switch arguments after a path stay visible
+(`D:\Work\run.bat /project X`), so only the deny list protects their values.
+POSIX paths have no switch or drive stop, since a POSIX name can hold anything.
+An escaped quote (`\"`) also ends a path, so escaped JSON stays well formed.
+
+In double-escaped JSON, `\\u0027` after a space looks exactly like a UNC path
+(`\\server`) and is redacted as one. That is over-redaction, never a leak.
 
 Segments are split on **every** separator spelling, and a run of separators
 counts as one, so mixing or doubling them (`C:\Windows\Temp/x`,
 `C:/Users//Jane`) cannot dodge a limit. The kept part is copied from the
 original text. Prefixes match the way Windows resolves names, ignoring trailing
-dots and spaces (`Temp.` is `Temp`). Any `.` or `..` segment turns the whole
-path into `<path>`. A bare drive root (`C:\`) and trailing separators or spaces
-name nothing and stay.
+dots and spaces (`Temp.` is `Temp`). Any `.` or `..` segment, or a blank name
+before a real one (`C:\Users\ \Jane`), turns the whole path into `<path>`. A
+bare drive root (`C:\`) and trailing separators or spaces name nothing and stay.
 
 An `AllowedPath(prefix, depth)` keeps the prefix plus `depth` more segments; the
 rest becomes `<path>`. The longest matching prefix wins:
@@ -116,17 +130,22 @@ A bare name counts as a host when it ends in a known top-level domain:
 
 Two-letter country domains that are also common file extensions or identifiers
 (`md`, `py`, `sh`, `so`, `id`, `at`, `it`, `in`, `no`, `pl`, …) count only after
-two or more labels (`www.contoso.it`, but not `user.id` or `README.md`). `vi`
-never counts, so LabVIEW files (`main.vi`) stay.
+two or more labels (`www.contoso.it`, but not `user.id` or `README.md`), or
+after a DNS context word (`Suffix`, `Domain`, `ComputerName`,
+`Resolve-DnsName`, `nslookup`, `ping`, `tracert`, `Test-NetConnection`,
+`Test-Connection`). `vi` never counts, so LabVIEW files (`main.vi`) stay.
 
 ## Performance
 
 The URL, scp-remote, e-mail, XML-setting and operator deny-list patterns run on
-.NET's non-backtracking engine. Every other unbounded scan was measured linear
-or is capped (a `;`-delimited value is at most 256 characters). The tests redact
-input at the 4,000,000-character cap for each adversarial shape (repeated `a.`,
-`C:\`, `key="` followed by `pwd`, `password=a `, `net use a `, …) and require it
-to finish well inside interactive time.
+.NET's non-backtracking engine. Every lookbehind is bounded (whitespace inside
+the version guard and the connection-string context is capped). Every other
+unbounded scan was measured linear, or is capped (a `;`-delimited value is at
+most 256 characters). The tests redact input at the 4,000,000-character cap for
+each adversarial shape and require it to finish well inside interactive time.
+The shapes include repeated `a.`, `C:\` and `password=a `; `key="` followed by
+`pwd`; whitespace runs before digits; `/O=a`; `sqlcmd -P a`; and backslash runs
+before `u0027`.
 
 ## The deny list is operator-private
 
@@ -134,7 +153,8 @@ Customer, project, machine and account names are **never** committed. The
 operator keeps them in a file on the peer (`projectbuddy/redaction-denylist@1`:
 `{"schema": …, "terms": [...]}`).
 - Operator terms match as substrings, so a term inside a longer word is
-  redacted too.
+  redacted too. Any character other than an ASCII letter or digit also matches
+  its JSON escape at any depth (`O\\u0027Brien`, `M\\u00FCller`).
 - `Redactor.ForHost` adds the machine and account names as **whole-word**
   terms: they match only between letters and digits, so an account `lab` leaves
   `LabVIEW` alone but still catches `lab-01` and `lab_build`. Names that overlap

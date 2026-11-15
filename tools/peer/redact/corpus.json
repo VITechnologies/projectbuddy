@@ -588,6 +588,83 @@
       "mustContain": [
         "<private> and <private>"
       ]
+    },
+    {
+      "id": "utf8-json-writer-escapes",
+      "input": "{\"stderr\":\"fatal: not a git repository at \\u0027D:/Clients/Acme/firmware\\u0027\",\"customer\":\"Example Widgets Lt\\u0064\",\"cmd\":\"git -C \\u0022D:/Clients/Acme Bid/firmware\\u0022 status\",\"name\":\"WS-\\u200BCORP-01\"}",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "Widgets",
+        "CORP-01"
+      ],
+      "mustContain": [
+        "at '<path>'",
+        "\"customer\":\"<private>\"",
+        "git -C \\\"<path>\\\" status",
+        "\"name\":\"<private>\""
+      ]
+    },
+    {
+      "id": "tool-credentials",
+      "input": "sqlcmd -S db01 -U sa -P Sup3rSql -Q x\nsqlcmd -Usa -PSup3rGlued\ncertutil -f -p Sup3rCert -importpfx x.pfx\npsexec -u jane -p Sup3rPsexec cmd\ndocker login -u jane -p Sup3rDocker ghcr.io\n7z a -pSup3rZip backup.7z\nopenssl pkcs12 -export -passout pass:Sup3rSsl\n$pw = \"Sup3rPw\"\n$pass = 'Sup3rPass'\nNew-Object System.Net.NetworkCredential(\"jane\", \"Sup3rCred\")\n$pw = Read-Host -AsSecureString\nbypass=true",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "-U <user> -P <secret> -Q x",
+        "-U<user> -P<secret>",
+        "-p <secret> -importpfx",
+        "7z a -p<secret> backup.7z",
+        "-passout <secret>",
+        "$pw = <secret>",
+        "$pass = <secret>",
+        "NetworkCredential(<user>, <secret>)",
+        "$pw = Read-Host -AsSecureString",
+        "bypass=true"
+      ]
+    },
+    {
+      "id": "certificate-subjects",
+      "input": "Subject : CN=fs01.acme.local, O=Acme Ltd, L=Austin, S=Texas, C=US\nsubject=/C=US/ST=Texas/O=Acme/CN=build01\nIssuer : CN=DigiCert Global Root G2, O=DigiCert Inc",
+      "mustNotContain": [
+        "acme",
+        "Austin",
+        "Texas",
+        "build01"
+      ],
+      "mustContain": [
+        "CN=<private>, O=<private>, L=<private>, S=<private>, C=US",
+        "/C=US/ST=<private>/O=<private>/CN=<private>",
+        "Issuer : CN=DigiCert Global Root G2, O=DigiCert Inc"
+      ]
+    },
+    {
+      "id": "dns-context-domains",
+      "input": "   Primary Dns Suffix  . . . . . . . : acme.it\nResolve-DnsName acme.pl; ping acme.in\nuser.id and README.md",
+      "mustNotContain": [
+        "acme"
+      ],
+      "mustContain": [
+        "Suffix  . . . . . . . : <host>",
+        "Resolve-DnsName <host>; ping <host>",
+        "user.id and README.md"
+      ]
+    },
+    {
+      "id": "rule-chain-settles",
+      "input": "user lab_fs01.corp.local::5\\\\fs01\\share\nC:\\Users\\ \\Jane\\Documents\\Acme\nProductVersion     : 1.2.3.4",
+      "mustNotContain": [
+        "fs01",
+        "corp.local",
+        "Jane",
+        "Acme"
+      ],
+      "mustContain": [
+        "user <private><host><ip><path>",
+        "ProductVersion     : 1.2.3.4"
+      ]
     }
   ]
 }
