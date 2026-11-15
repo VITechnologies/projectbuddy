@@ -665,6 +665,93 @@
         "user <private><host><ip><path>",
         "ProductVersion     : 1.2.3.4"
       ]
+    },
+    {
+      "id": "registry-and-wifi-secrets",
+      "input": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\n    AutoAdminLogon    REG_SZ    1\n    DefaultUserName    REG_SZ    vagrant\n    DefaultPassword    REG_SZ    Sup3rWinlogon\n    ProxyPassword    REG_SZ    my hidden phrase\n    Key Content            : MyWiFiS3cret",
+      "mustNotContain": [
+        "Sup3r",
+        "hidden phrase",
+        "MyWiFi"
+      ],
+      "mustContain": [
+        "AutoAdminLogon    REG_SZ    1",
+        "DefaultPassword    REG_SZ    <secret>",
+        "ProxyPassword    REG_SZ    <secret>",
+        "Key Content            : <secret>"
+      ]
+    },
+    {
+      "id": "apostrophes-in-paths",
+      "input": "D:\\Projects\\Customers' Data\\Acme Corp\\plan.docx\nD:\\Customers'\\Acme Bid\\plan.docx\nD:\\Music\\Rock 'n' Roll Ltd\\plan.docx\nCannot find path 'D:\\Clients\\x' because it does not exist.\nls: cannot access '/home/jane/Customer Work/x': No such file\n/home/o'brien/x",
+      "mustNotContain": [
+        "Data",
+        "Acme",
+        "Roll",
+        "Clients",
+        "Customer Work",
+        "brien"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "cannot access '/home/<user>/<path>': No such file"
+      ]
+    },
+    {
+      "id": "certificate-formats",
+      "input": "*  issuer: C=US; ST=Texas; O=Acme Ltd; CN=Acme Proxy CA\nissuer=C = US, ST = Texas, O = Acme Ltd, CN = Acme Proxy CA\nSubject: CN=Acme Microsoft Teams Room, O=Acme Ltd (Microsoft Partner), C=US",
+      "mustNotContain": [
+        "Acme",
+        "Texas",
+        "Teams"
+      ],
+      "mustContain": [
+        "issuer: C=US; ST=<private>; O=<private>; CN=<private>",
+        "issuer=C = US, ST = <private>, O = <private>, CN = <private>",
+        "Subject: CN=<private>, O=<private>, C=US"
+      ]
+    },
+    {
+      "id": "kept-counters-and-options",
+      "input": "retries=3, s=5, e=2\nsetup.exe /s=1 /L=1033\nTotal: 10, Pass: 9, Fail: 1\n# pass  9\ngcc -O=2 x.c\n$pw = Read-Host -AsSecureString",
+      "mustNotContain": [
+        "<private>",
+        "<secret>"
+      ],
+      "mustContain": [
+        "retries=3, s=5, e=2",
+        "setup.exe /s=1 /L=1033",
+        "Total: 10, Pass: 9, Fail: 1",
+        "# pass  9",
+        "gcc -O=2 x.c"
+      ]
+    },
+    {
+      "id": "more-tool-credentials",
+      "input": "certutil /f /p Sup3rCert /importpfx x.pfx\n7z x -p\"Sup3r Zip\" a.7z\nNew-Object System.Net.NetworkCredential -ArgumentList \"jane\", \"Sup3rArg\"\n[System.Net.NetworkCredential]::new($env:USERNAME, \"Sup3rNew\")",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "/p <secret> /importpfx",
+        "-p<secret> a.7z",
+        "-ArgumentList <user>, <secret>",
+        "::new($env:USERNAME, <secret>)"
+      ]
+    },
+    {
+      "id": "raw-escapes-not-decoded",
+      "input": "C:\\Windows\\Temp\\uadd1\\Acme Bid\\plan.docx\nC:\\Users\\u0123456\\Documents\\x",
+      "mustNotContain": [
+        "Acme",
+        "Documents",
+        "u0123456"
+      ],
+      "mustContain": [
+        "C:\\Windows\\Temp\\<path>",
+        "C:\\Users\\<user>\\<path>"
+      ]
     }
   ]
 }

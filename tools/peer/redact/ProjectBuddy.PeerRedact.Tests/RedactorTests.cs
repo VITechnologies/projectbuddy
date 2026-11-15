@@ -262,6 +262,11 @@ public class RedactorTests
     [InlineData("", "sqlcmd -P a ")]
     [InlineData("", "\\\\u0027")]
     [InlineData("", "\\\\\\\\")]
+    [InlineData("", "\"a")]
+    [InlineData("7z ", "-p\"a ")]
+    [InlineData("", "Subject: s=1, ")]
+    [InlineData("", "D:\\a' ")]
+    [InlineData("", "DefaultPassword  ")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -351,13 +356,18 @@ public class RedactorTests
     public void CompanyDomainsUnderRiskyCountryDomainsCountInDnsContext(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
     [Theory]
-    [InlineData("at \\u0027D:/Clients/x\\u0027", "at '<path>'")]
-    [InlineData("\\u0022q\\u0022 \\u005C", "\\\"q\\\" \\\\")]
-    [InlineData("\\uD83D\\uDE00 \\uD800 \\u0001 \\u007F", "\U0001F600 \\uD800 \\u0001 \\u007F")]
-    [InlineData("x\\\\u0027 stays", "x\\\\u0027 stays")]
-    [InlineData("a\\\\u200Bb", "ab")]
+    [InlineData("\"at \\u0027D:/Clients/x\\u0027\"", "\"at '<path>'\"")]
+    [InlineData("\"\\u0022q\\u0022 \\u005C\"", "\"\\\"q\\\" \\\\\"")]
+    [InlineData("\"\\uD83D\\uDE00 \\uD800 \\u0001 \\u007F\"", "\"\U0001F600 \\uD800 \\u0001 \\u007F\"")]
+    [InlineData("\"x\\\\u0027 stays\"", "\"x\\\\u0027 stays\"")]
+    [InlineData("\"a\\\\u200Bb\"", "\"ab\"")]
     [InlineData("at x\\\\u0027D:/Clients/x", "at x\\\\u0027<path>")]
     [InlineData("at \\\\u0027D:/Clients/x", "at <path><path>")]
+    [InlineData("at \\u0027D:/Clients/x", "at \\u0027<path>")]
+    [InlineData("C:\\Windows\\Temp\\uadd1\\Acme Bid\\plan.docx", "C:\\Windows\\Temp\\<path>")]
+    [InlineData("C:\\Users\\u0123456\\Documents\\x", "C:\\Users\\<user>\\<path>")]
+    [InlineData("\"C:\\Temp\\uadd1\\x\"", "\"<path>\"")]
+    [InlineData("x\\\u200Bu0041y", "x\\u0041y")]
     public void JsonEscapesCannotHidePaths(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 
     [Fact]

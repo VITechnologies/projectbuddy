@@ -19,8 +19,10 @@ release's notes for the exact pinned commit.
     hosts only, never a path), git remotes, e-mail addresses, directory names
     and certificate subjects, and bare host names under generic and country
     domains.
-  - JSON `\uXXXX` escapes are canonicalized first, so an escaped apostrophe or
-    umlaut cannot hide a path or a term.
+  - It also covers `reg query` secret rows and `netsh` key content.
+  - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
+    first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
+    text such as a Windows path is never decoded.
   - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
     encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
     runs through spaces and stops at a colon, a switch, or the next path.
