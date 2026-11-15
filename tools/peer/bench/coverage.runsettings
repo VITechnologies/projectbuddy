@@ -5,6 +5,8 @@
       <DataCollector friendlyName="XPlat code coverage">
         <Configuration>
           <Format>cobertura</Format>
+          <Include>[projectbuddy-bench]*</Include>
+          <Exclude>[ProjectBuddy.PeerOllama]*</Exclude>
           <ExcludeByFile>**/*.g.cs</ExcludeByFile>
           <ExcludeByAttribute>ExcludeFromCodeCoverage,GeneratedCodeAttribute</ExcludeByAttribute>
         </Configuration>

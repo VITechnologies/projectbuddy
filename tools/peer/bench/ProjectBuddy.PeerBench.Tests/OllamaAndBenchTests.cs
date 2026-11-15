@@ -1,93 +1,15 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using ProjectBuddy.PeerOllama;
 using Xunit;
 
 namespace ProjectBuddy.PeerBench.Tests;
-
-public class OllamaTests
-{
-    private static OllamaClient Client(FakeOllama fake) => new(fake, new Uri("http://127.0.0.1:11435/"), TimeSpan.FromSeconds(5));
-
-    [Theory]
-    [InlineData("http://127.0.0.1:11434")]
-    [InlineData("http://127.0.0.1:11434/")]
-    [InlineData("http://[::1]:11434")]
-    public void LoopbackIpLiteralsAreAccepted(string url) => Assert.True(OllamaClient.RequireLoopback(url).IsLoopback);
-
-    [Theory]
-    [InlineData("not a url")]
-    [InlineData("https://127.0.0.1:11434")]
-    [InlineData("http://localhost:11434")]
-    [InlineData("http://10.211.0.2:11434")]
-    [InlineData("http://127.0.0.1:11434/api")]
-    [InlineData("http://127.0.0.1:11434/?x=1")]
-    [InlineData("http://user@127.0.0.1:11434")]
-    public void EverythingElseIsRefused(string url) =>
-        Assert.Equal(ExitCodes.Refused, Assert.Throws<BenchException>(() => OllamaClient.RequireLoopback(url)).ExitCode);
-
-    [Fact]
-    public async Task ReadsVersionDigestsAndResidency()
-    {
-        var fake = new FakeOllama();
-        using var client = Client(fake);
-        Assert.Equal("0.32.3", await client.VersionAsync());
-        Assert.Equal(FakeOllama.Digest, (await client.DigestsAsync())[FakeOllama.Model]);
-        Assert.Equal(new Residency(100, 100), await client.ResidencyAsync(FakeOllama.Model));
-        Assert.Null(await client.ResidencyAsync("other:1"));
-        await client.UnloadAsync(FakeOllama.Model);
-        Assert.Equal(0, fake.Requests[^1].Body!["keep_alive"]!.GetValue<int>());
-    }
-
-    [Fact]
-    public async Task ParsesChatCountersAndToolCalls()
-    {
-        var fake = new FakeOllama { Respond = (_, _) => FakeOllama.Ok(FakeOllama.Reply("text", 120, 40, FakeOllama.Call("ask_peer", "vbox"))) };
-        using var client = Client(fake);
-        var result = await client.ChatAsync(new JsonObject { ["model"] = "m" });
-        Assert.Equal(("text", 120, 40, 2.0, 40.0), (result.Content, result.PromptTokens, result.OutputTokens, result.Seconds, result.TokensPerSecond));
-        Assert.Equal("vbox", result.ToolCalls.Single().Arguments!["verb"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task MissingOrInvalidCountersReadAsZero()
-    {
-        var reply = new JsonObject { ["message"] = new JsonObject(), ["prompt_eval_count"] = -5, ["eval_count"] = "many" };
-        var fake = new FakeOllama { Respond = (_, _) => FakeOllama.Ok(reply) };
-        using var client = Client(fake);
-        var result = await client.ChatAsync(new JsonObject());
-        Assert.Equal(("", 0, 0, 0.0, 0.0), (result.Content, result.PromptTokens, result.OutputTokens, result.Seconds, result.TokensPerSecond));
-        Assert.Empty(result.ToolCalls);
-    }
-
-    public static TheoryData<string, Func<string, JsonObject?, HttpResponseMessage>> Faults => new()
-    {
-        { "http 500", (_, _) => new HttpResponseMessage(HttpStatusCode.InternalServerError) },
-        { "redirect", (_, _) => new HttpResponseMessage(HttpStatusCode.TemporaryRedirect) { Headers = { Location = new Uri("http://10.0.0.9:11434/api/chat") } } },
-        { "duplicate keys", (_, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"message":{},"message":{}}""") } },
-        { "not json", (_, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>") } },
-        { "not object", (_, _) => FakeOllama.Ok(new JsonArray()) },
-        { "transport", (_, _) => throw new HttpRequestException("refused") },
-        { "timeout", (_, _) => throw new TaskCanceledException("slow") },
-        { "no message", (_, _) => FakeOllama.Ok(new JsonObject()) },
-        { "bad tool call", (_, _) => FakeOllama.Ok(new JsonObject { ["message"] = new JsonObject { ["tool_calls"] = new JsonArray(1) } }) },
-    };
-
-    [Theory]
-    [MemberData(nameof(Faults))]
-    public async Task ServerFaultsAreUnreachable(string label, Func<string, JsonObject?, HttpResponseMessage> respond)
-    {
-        using var client = Client(new FakeOllama { Respond = respond });
-        var error = await Assert.ThrowsAsync<BenchException>(() => client.ChatAsync(new JsonObject()));
-        Assert.Equal(ExitCodes.Unreachable, error.ExitCode);
-        Assert.False(string.IsNullOrEmpty(label));
-    }
-}
 
 public class BenchTests
 {
     private static Corpus Corpus() => Fixtures.Parse(Fixtures.Corpus());
 
-    private static IReadOnlyList<Candidate> Candidates() => Candidate.ParseAll(System.Text.Encoding.UTF8.GetBytes(Fixtures.Candidates));
+    private static IReadOnlyList<ModelPin> Candidates() => Candidate.ParseAll(System.Text.Encoding.UTF8.GetBytes(Fixtures.Candidates));
 
     private static async Task<JsonObject> Run(FakeOllama fake, Corpus? corpus = null)
     {
@@ -199,7 +121,7 @@ public class BenchTests
     public async Task BrokenTruncationProbeStopsTheRun()
     {
         var fake = new FakeOllama { ProbeTokens = 4095 };
-        Assert.Equal(ExitCodes.GuardBroken, (await Assert.ThrowsAsync<BenchException>(() => Run(fake))).ExitCode);
+        Assert.Equal(ExitCodes.GuardBroken, (await Assert.ThrowsAsync<PeerException>(() => Run(fake))).ExitCode);
     }
 
     [Theory]
@@ -211,7 +133,7 @@ public class BenchTests
         var tags = new JsonObject { ["models"] = new JsonArray(new JsonObject { ["name"] = name, ["digest"] = digest }) };
         var original = fake.Respond;
         fake.Respond = (path, body) => path == "/api/tags" ? FakeOllama.Ok(tags) : original(path, body);
-        Assert.Equal(ExitCodes.Refused, (await Assert.ThrowsAsync<BenchException>(() => Run(fake))).ExitCode);
+        Assert.Equal(ExitCodes.Refused, (await Assert.ThrowsAsync<PeerException>(() => Run(fake))).ExitCode);
     }
 
     [Theory]
@@ -247,13 +169,5 @@ public class BenchTests
         var model = (await Run(fake, Fixtures.Parse(json)))["models"]![0]!;
         Assert.Equal(2.0, model["latency"]!["medianSeconds"]!.GetValue<double>());
         Assert.Equal(0.0, model["latency"]!["meanTokensPerSecond"]!.GetValue<double>());
-    }
-
-    [Fact]
-    public void ProbeTextOutgrowsTheContext()
-    {
-        var text = Bench.ProbeText(64);
-        Assert.Equal(128, text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.StartsWith("w0 w1 ", text);
     }
 }

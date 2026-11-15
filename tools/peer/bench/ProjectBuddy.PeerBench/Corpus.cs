@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using ProjectBuddy.PeerOllama;
 
 namespace ProjectBuddy.PeerBench;
 
@@ -43,7 +44,7 @@ public sealed partial record Corpus(
         Json.Keys(root, "corpus", "schema", "numCtx", "numPredict", "seed", "prompts", "triageClasses", "securityClasses", "verbs", "items");
         if (Json.String(root["schema"], "corpus schema") != Schema)
         {
-            throw new BenchException(ExitCodes.Refused, $"corpus schema must be {Schema}");
+            throw new PeerException(ExitCodes.Refused, $"corpus schema must be {Schema}");
         }
 
         var numCtx = (int)Json.Integer(root["numCtx"], "numCtx", 2048, 131072);
@@ -68,7 +69,7 @@ public sealed partial record Corpus(
             var item = ParseItem(Json.Object(node, "item"), triageClasses, securityClasses, verbs);
             if (!ids.Add(item.Id))
             {
-                throw new BenchException(ExitCodes.Refused, $"duplicate item id {item.Id}");
+                throw new PeerException(ExitCodes.Refused, $"duplicate item id {item.Id}");
             }
 
             items.Add(item);
@@ -76,7 +77,7 @@ public sealed partial record Corpus(
 
         if (items.Count == 0)
         {
-            throw new BenchException(ExitCodes.Refused, "corpus has no items");
+            throw new PeerException(ExitCodes.Refused, "corpus has no items");
         }
 
         return new Corpus(Convert.ToHexStringLower(SHA256.HashData(bytes)), numCtx, numPredict, seed, promptMap, triageClasses, securityClasses, verbs, items);
@@ -88,14 +89,14 @@ public sealed partial record Corpus(
         var id = Json.String(node["id"], "item id");
         if (!IdPattern().IsMatch(id))
         {
-            throw new BenchException(ExitCodes.Refused, $"item id {id} must match [a-z0-9-]+");
+            throw new PeerException(ExitCodes.Refused, $"item id {id} must match [a-z0-9-]+");
         }
 
         Json.String(node["source"], $"{id} source");
         var input = Json.String(node["input"], $"{id} input");
         if (Encoding.UTF8.GetByteCount(input) > MaxInputBytes)
         {
-            throw new BenchException(ExitCodes.Refused, $"{id} input exceeds {MaxInputBytes} bytes");
+            throw new PeerException(ExitCodes.Refused, $"{id} input exceeds {MaxInputBytes} bytes");
         }
 
         var expect = Json.Object(node["expect"], $"{id} expect");
@@ -119,7 +120,7 @@ public sealed partial record Corpus(
                 Require(verbs.Contains(verb), $"{id} verb {verb} is not an allowed verb");
                 return new CorpusItem(id, ItemKind.Tool, input, "", "", "", [], verb);
             default:
-                throw new BenchException(ExitCodes.Refused, $"{id} kind must be triage, security or tool");
+                throw new PeerException(ExitCodes.Refused, $"{id} kind must be triage, security or tool");
         }
     }
 
@@ -133,7 +134,7 @@ public sealed partial record Corpus(
     {
         if (!condition)
         {
-            throw new BenchException(ExitCodes.Refused, message);
+            throw new PeerException(ExitCodes.Refused, message);
         }
     }
 
@@ -141,45 +142,38 @@ public sealed partial record Corpus(
     private static partial Regex IdPattern();
 }
 
-public sealed partial record Candidate(string Name, string Digest)
+public static class Candidate
 {
     public const string Schema = "projectbuddy/peer-bench-candidates@1";
 
-    public static IReadOnlyList<Candidate> ParseAll(byte[] bytes)
+    public static IReadOnlyList<ModelPin> ParseAll(byte[] bytes)
     {
         var root = Json.Object(Json.Parse(bytes, "candidates", ExitCodes.Refused), "candidates");
         Json.Keys(root, "candidates", "schema", "models");
         if (Json.String(root["schema"], "candidates schema") != Schema)
         {
-            throw new BenchException(ExitCodes.Refused, $"candidates schema must be {Schema}");
+            throw new PeerException(ExitCodes.Refused, $"candidates schema must be {Schema}");
         }
 
-        var models = new List<Candidate>();
+        var models = new List<ModelPin>();
         foreach (var node in Json.Array(root["models"], "models"))
         {
             var model = Json.Object(node, "model");
             Json.Keys(model, "model", "name", "digest");
-            var name = Json.String(model["name"], "model name");
-            var digest = Json.String(model["digest"], $"{name} digest");
-            if (!NamePattern().IsMatch(name) || !DigestPattern().IsMatch(digest) || models.Any(other => other.Name == name))
+            var pin = ModelPin.Create(Json.String(model["name"], "model name"), Json.String(model["digest"], "model digest"));
+            if (models.Any(other => other.Name == pin.Name))
             {
-                throw new BenchException(ExitCodes.Refused, $"model {name} needs a unique name:tag and a 64-hex digest");
+                throw new PeerException(ExitCodes.Refused, $"model {pin.Name} is listed twice");
             }
 
-            models.Add(new Candidate(name, digest));
+            models.Add(pin);
         }
 
         if (models.Count == 0)
         {
-            throw new BenchException(ExitCodes.Refused, "candidates has no models");
+            throw new PeerException(ExitCodes.Refused, "candidates has no models");
         }
 
         return models;
     }
-
-    [GeneratedRegex("^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")]
-    private static partial Regex NamePattern();
-
-    [GeneratedRegex("^[0-9a-f]{64}$")]
-    private static partial Regex DigestPattern();
 }

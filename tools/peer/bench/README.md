@@ -64,6 +64,10 @@ is dropped with them. For example, `num_ctx` 8192 gives `prompt_eval_count`
    `prompt_eval_count + eval_count ≤ num_ctx`. Any other reply is counted as
    `rejected`. A valid result has zero rejected items.
 
+The probe, the accept rule, the loopback-only client and the digest pins
+live in the shared [`../ollama`](../ollama/README.md) library, so
+`projectbuddy-advise` enforces exactly the same guards.
+
 ## Result
 
 The result (`projectbuddy/peer-bench-result@1`) records the Ollama version,
@@ -93,5 +97,12 @@ They are kept in the operator's private state log, not committed here.
    - triage extraction, then diagnosis;
    - median latency.
 
+   Rank on totals **pooled across both machines**. At temperature 0 with a
+   fixed seed, scores still differ between machines and Ollama versions; in
+   #217, `llama3.1:8b` extraction was 5/8 on one machine and 2/8 on the
+   other. Treat F1 differences under 0.05 as ties and move to the next
+   criterion.
+
 Record the choice and both machines' results on #217 before generating the
-identity Modelfile for the chosen base.
+identity Modelfile for the chosen base. The first choice was `qwen2.5:7b`,
+giving the identity `projectbuddy:0.1-qwen2.5-7b`.

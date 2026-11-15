@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using ProjectBuddy.PeerOllama;
 using Xunit;
 
 namespace ProjectBuddy.PeerBench.Tests;
@@ -30,14 +31,6 @@ public class ProgramTests
 
     [Fact]
     public void MainAnswersVersion() => Assert.Equal(0, Program.Main(["--version"]));
-
-    [Fact]
-    public void LoopbackHandlerIgnoresProxiesAndRedirects()
-    {
-        using var handler = Program.LoopbackHandler();
-        Assert.False(handler.UseProxy);
-        Assert.False(handler.AllowAutoRedirect);
-    }
 
     [Theory]
     [InlineData]
@@ -148,7 +141,7 @@ public class CorpusTests
     {
         var corpus = Fixtures.Corpus();
         mutate(corpus);
-        var error = Assert.Throws<BenchException>(() => Fixtures.Parse(corpus));
+        var error = Assert.Throws<PeerException>(() => Fixtures.Parse(corpus));
         Assert.Equal(ExitCodes.Refused, error.ExitCode);
         Assert.False(string.IsNullOrEmpty(label));
     }
@@ -159,7 +152,7 @@ public class CorpusTests
     [InlineData("[]")]
     [InlineData("""{"schema":"a","schema":"b"}""")]
     public void NonObjectCorpusIsRefused(string text) =>
-        Assert.Equal(ExitCodes.Refused, Assert.Throws<BenchException>(() => Corpus.Parse(System.Text.Encoding.UTF8.GetBytes(text))).ExitCode);
+        Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => Corpus.Parse(System.Text.Encoding.UTF8.GetBytes(text))).ExitCode);
 
     [Theory]
     [InlineData("""{"schema":"x@1","models":[]}""")]
@@ -169,47 +162,7 @@ public class CorpusTests
     [InlineData("""{"schema":"projectbuddy/peer-bench-candidates@1","models":[{"name":"a:1","digest":"845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e"},{"name":"a:1","digest":"845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e"}]}""")]
     [InlineData("""{"schema":"projectbuddy/peer-bench-candidates@1","models":[{"name":"a:1"}]}""")]
     public void InvalidCandidatesAreRefused(string text) =>
-        Assert.Equal(ExitCodes.Refused, Assert.Throws<BenchException>(() => Candidate.ParseAll(System.Text.Encoding.UTF8.GetBytes(text))).ExitCode);
+        Assert.Equal(ExitCodes.Refused, Assert.Throws<PeerException>(() => Candidate.ParseAll(System.Text.Encoding.UTF8.GetBytes(text))).ExitCode);
 
     private static JsonArray Items(JsonObject corpus) => corpus["items"]!.AsArray();
-}
-
-public class JsonTests
-{
-    [Theory]
-    [InlineData("{\"a\":{}}")]
-    [InlineData("{\"a\":1}")]
-    [InlineData("{\"a\":\"\"}")]
-    public void StringRefusesNonStringsAndEmpty(string text) =>
-        Assert.Throws<BenchException>(() => Json.String(JsonNode.Parse(text)!["a"], "a"));
-
-    [Theory]
-    [InlineData("{\"a\":{}}")]
-    [InlineData("{\"a\":1.5}")]
-    [InlineData("{\"a\":-1}")]
-    [InlineData("{\"a\":11}")]
-    public void IntegerRefusesOutOfRangeAndNonIntegers(string text) =>
-        Assert.Throws<BenchException>(() => Json.Integer(JsonNode.Parse(text)!["a"], "a", 0, 10));
-
-    [Fact]
-    public void ArrayAndKeysRefuseWrongShapes()
-    {
-        Assert.Throws<BenchException>(() => Json.Array(new JsonObject(), "a"));
-        Assert.Throws<BenchException>(() => Json.Keys(new JsonObject { ["a"] = 1, ["c"] = 2 }, "x", "a", "b"));
-    }
-
-    [Theory]
-    [InlineData("not json", false)]
-    [InlineData("[1]", false)]
-    [InlineData("""{"step":"a","step":"b"}""", false)]
-    [InlineData("{}", true)]
-    public void TryObjectNeverThrows(string text, bool isObject) => Assert.Equal(isObject, Json.TryObject(text) is not null);
-
-    [Fact]
-    public void TryStringReadsOnlyStrings()
-    {
-        Assert.Null(Json.TryString(new JsonObject()));
-        Assert.Null(Json.TryString(JsonValue.Create(3)));
-        Assert.Equal("x", Json.TryString(JsonValue.Create("x")));
-    }
 }

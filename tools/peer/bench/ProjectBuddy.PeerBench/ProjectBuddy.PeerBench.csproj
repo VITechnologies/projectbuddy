@@ -26,4 +26,8 @@
     <InternalsVisibleTo Include="ProjectBuddy.PeerBench.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../ollama/ProjectBuddy.PeerOllama/ProjectBuddy.PeerOllama.csproj" />
+  </ItemGroup>
+
 </Project>

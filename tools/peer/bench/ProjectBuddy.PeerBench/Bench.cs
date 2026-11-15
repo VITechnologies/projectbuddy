@@ -1,5 +1,5 @@
-using System.Text;
 using System.Text.Json.Nodes;
+using ProjectBuddy.PeerOllama;
 
 namespace ProjectBuddy.PeerBench;
 
@@ -21,17 +21,10 @@ public static class Bench
 {
     public const string ToolName = "ask_peer";
 
-    public static async Task<JsonObject> RunAsync(Corpus corpus, IReadOnlyList<Candidate> candidates, string machine, OllamaClient ollama, TextWriter log)
+    public static async Task<JsonObject> RunAsync(Corpus corpus, IReadOnlyList<ModelPin> candidates, string machine, OllamaClient ollama, TextWriter log)
     {
         var version = await ollama.VersionAsync();
-        var installed = await ollama.DigestsAsync();
-        foreach (var candidate in candidates)
-        {
-            if (!installed.TryGetValue(candidate.Name, out var digest) || digest != candidate.Digest)
-            {
-                throw new BenchException(ExitCodes.Refused, $"{candidate.Name} is not installed with the pinned digest");
-            }
-        }
+        await ModelPin.RequireInstalledAsync(ollama, candidates);
 
         var models = new JsonArray();
         foreach (var candidate in candidates)
@@ -53,15 +46,9 @@ public static class Bench
         };
     }
 
-    private static async Task<JsonObject> RunModelAsync(Corpus corpus, Candidate candidate, OllamaClient ollama, TextWriter log)
+    private static async Task<JsonObject> RunModelAsync(Corpus corpus, ModelPin candidate, OllamaClient ollama, TextWriter log)
     {
-        // Ollama keeps only the last num_ctx/2 tokens of an oversized prompt, silently. Prove the server
-        // still behaves that way before trusting the per-item guard below.
-        var probe = await ollama.ChatAsync(Request(corpus, candidate.Name, "", ProbeText(corpus.NumCtx), 1, null, null));
-        if (probe.PromptTokens < corpus.NumCtx / 2)
-        {
-            throw new BenchException(ExitCodes.GuardBroken, $"{candidate.Name}: truncation probe reported {probe.PromptTokens} prompt tokens; the guard cannot be trusted");
-        }
+        var probeTokens = await TruncationGuard.ProbeAsync(ollama, candidate.Name, corpus.NumCtx, corpus.Seed);
 
         var tally = new Tally();
         var items = new JsonArray();
@@ -72,14 +59,14 @@ public static class Bench
         foreach (var item in corpus.Items)
         {
             var (format, tools) = Shape(corpus, item.Kind);
-            var result = await ollama.ChatAsync(Request(corpus, candidate.Name, corpus.Prompts[item.Kind], item.Input, corpus.NumPredict, format, tools));
+            var result = await ollama.ChatAsync(OllamaClient.ChatRequest(candidate.Name, corpus.Prompts[item.Kind], item.Input, corpus.NumCtx, corpus.NumPredict, corpus.Seed, format, tools));
             if (!loaded)
             {
                 residency = await ollama.ResidencyAsync(candidate.Name);
                 loaded = true;
             }
 
-            var outcome = Fits(corpus, result) ? Score(corpus, item, result, tally) : Reject(tally);
+            var outcome = TruncationGuard.Fits(corpus.NumCtx, result) ? Score(corpus, item, result, tally) : Reject(tally);
             seconds.Add(result.Seconds);
             if (result.TokensPerSecond > 0)
             {
@@ -101,7 +88,7 @@ public static class Bench
         {
             ["name"] = candidate.Name,
             ["digest"] = candidate.Digest,
-            ["probePromptTokens"] = probe.PromptTokens,
+            ["probePromptTokens"] = probeTokens,
             ["vram"] = new JsonObject
             {
                 ["loaded"] = residency is not null,
@@ -121,52 +108,6 @@ public static class Bench
             },
             ["items"] = items,
         };
-    }
-
-    // Accept a reply only when the whole prompt provably fit: below half the context, where truncated prompts land.
-    internal static bool Fits(Corpus corpus, ChatResult result) =>
-        result.PromptTokens > 0 && result.PromptTokens < corpus.NumCtx / 2 && result.PromptTokens + result.OutputTokens <= corpus.NumCtx;
-
-    internal static string ProbeText(int numCtx)
-    {
-        var text = new StringBuilder();
-        for (var index = 0; index < numCtx * 2; index++)
-        {
-            text.Append("w").Append(index).Append(' ');
-        }
-
-        return text.ToString();
-    }
-
-    internal static JsonObject Request(Corpus corpus, string model, string system, string input, int numPredict, JsonObject? format, JsonArray? tools)
-    {
-        var request = new JsonObject
-        {
-            ["model"] = model,
-            ["stream"] = false,
-            ["keep_alive"] = "5m",
-            ["options"] = new JsonObject
-            {
-                ["num_ctx"] = corpus.NumCtx,
-                ["num_predict"] = numPredict,
-                ["temperature"] = 0,
-                ["seed"] = corpus.Seed,
-            },
-            ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "system", ["content"] = system },
-                new JsonObject { ["role"] = "user", ["content"] = input }),
-        };
-        if (format is not null)
-        {
-            request["format"] = format;
-        }
-
-        if (tools is not null)
-        {
-            request["tools"] = tools;
-        }
-
-        return request;
     }
 
     internal static (JsonObject? Format, JsonArray? Tools) Shape(Corpus corpus, ItemKind kind) => kind switch

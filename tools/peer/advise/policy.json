@@ -1,0 +1,24 @@
+{
+  "schema": "projectbuddy/advise-policy@1",
+  "model": {
+    "name": "qwen2.5:7b",
+    "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e"
+  },
+  "numCtx": 16384,
+  "numPredict": 256,
+  "seed": 42,
+  "maxInputBytes": 12000,
+  "triage": {
+    "prompt": "You triage one CI log excerpt. Reply with JSON only. step: the most specific name of the failing unit, meaning a gate, check or test name if the log names one, otherwise the CI job or step name. errorLine: the one line that states what actually went wrong, such as a FAIL line, an error or exception message, or a crash report, copied verbatim from the log. Never choose a generic line such as 'Process completed with exit code 1', a stack or script-location line, or a line that only repeats a command. class: the root-cause class. Classes: gate-failure (a policy, lint or verification gate reported a violation), test-failure (a test assertion failed), segfault (a process crashed on an invalid memory access), out-of-memory (a process was killed after exhausting memory), vm-state (a virtual machine or runner is in the wrong state), network (a host could not be resolved or reached), missing-secret (a required token or credential was not supplied), timeout (a job or step exceeded its time limit). Never invent text that is not in the log.",
+    "classes": [
+      "gate-failure",
+      "test-failure",
+      "segfault",
+      "out-of-memory",
+      "vm-state",
+      "network",
+      "missing-secret",
+      "timeout"
+    ]
+  }
+}
