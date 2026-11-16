@@ -10,10 +10,12 @@ namespace ProjectBuddy.Kpi;
 // (see Forge). A forked session's log begins with its own session.start and then repeats its parent's history; events
 // dated before that start belong to the parent and are skipped.
 //
-// The AIU are measured, not estimated: a cumulative session.usage_checkpoint counter in agent (SDK) sessions, or a
-// per-process session.shutdown total in CLI sessions. Each measured interval's AIU are shared among its calls by their
-// price-weighted tokens, so interval totals are exact and a call's share is an apportionment. Calls after the last
-// measurement have no AIU until a later ingest measures them.
+// The AIU are measured, not estimated. An agent (SDK) session's usage record carries its call's exact AIU
+// (copilotUsage.totalNanoAiu). The session's totals come from a cumulative session.usage_checkpoint counter, or in a
+// CLI session from each process's session.shutdown total. In each measured interval, what its calls' exact AIU do not
+// account for is shared among its calls without an exact value (every CLI call, and older records) by their
+// price-weighted tokens; the rest of it, such as helper-model calls the log records no usage for, stays in the
+// session's measured total.
 internal static partial class Ingest
 {
     public sealed record ModelCall(
@@ -121,10 +123,15 @@ internal static partial class Ingest
 
             if (at < floor)
             {
-                // The parent's cumulative AIU, which the fork's own checkpoints continue from.
+                // The fork's own checkpoints continue from the parent's running AIU at the fork: its last copied
+                // checkpoint plus the copied calls after it.
                 if (type == "session.usage_checkpoint" && Nano(data) is { } copied)
                 {
                     baseline = copied;
+                }
+                else if (type == "session.usage_record" && Exact(data.GetProperty("usage")) is { } spent)
+                {
+                    baseline += spent;
                 }
 
                 return;
@@ -187,8 +194,10 @@ internal static partial class Ingest
         return new Session(id, times[0], times[^1], times.Count, measured, tools, messages, spans, aiu);
     }
 
-    // Shares each measured interval's AIU among the calls in it. The intervals are the deltas of the cumulative
-    // checkpoints from the copied baseline (a decrease starts a new counter), or else each process's shutdown total.
+    // Gives each measured interval's AIU to the calls in it: a call with an exact value keeps it, and the rest of the
+    // interval is shared among the calls without one by weight (equally when they have none). The intervals are the
+    // deltas of the cumulative checkpoints from the baseline (a decrease starts a new counter), or else each process's
+    // shutdown total. The measured total adds the exact values of the calls after the last interval.
     public static (List<ModelCall> Calls, decimal? Aiu) Allocate(
         List<ModelCall> calls, List<(DateTimeOffset At, decimal Total)> checkpoints, List<(DateTimeOffset At, decimal Total)> shutdowns, decimal baseline)
     {
@@ -205,11 +214,6 @@ internal static partial class Ingest
             intervals.AddRange(shutdowns.OrderBy(shutdown => shutdown.At));
         }
 
-        if (intervals.Count == 0)
-        {
-            return (calls, null);
-        }
-
         var ordered = calls.OrderBy(call => call.At).ToList();
         var shared = new List<ModelCall>(ordered.Count);
         var next = 0;
@@ -221,15 +225,19 @@ internal static partial class Ingest
                 members.Add(ordered[next++]);
             }
 
-            var weight = members.Sum(call => call.Weight);
-            shared.AddRange(members.Select(call => call with
+            var open = members.Where(call => call.Aiu is null).ToList();
+            var rest = Math.Max(0, aiu - members.Sum(call => call.Aiu ?? 0));
+            var weight = open.Sum(call => call.Weight);
+            shared.AddRange(members.Select(call => call.Aiu is not null ? call : call with
             {
-                Aiu = Math.Round(weight > 0 ? aiu * call.Weight / weight : aiu / members.Count, 6),
+                Aiu = Math.Round(weight > 0 ? rest * call.Weight / weight : rest / open.Count, 6),
             }));
         }
 
-        shared.AddRange(ordered.Skip(next));
-        return (shared, intervals.Sum(interval => interval.Aiu));
+        var tail = ordered.Skip(next).ToList();
+        shared.AddRange(tail);
+        var exact = calls.Any(call => call.Aiu is not null);
+        return intervals.Count == 0 && !exact ? (shared, null) : (shared, intervals.Sum(interval => interval.Aiu) + tail.Sum(call => call.Aiu ?? 0));
     }
 
     // What a model call asked for, by the tools it requested.
@@ -245,7 +253,8 @@ internal static partial class Ingest
             _ => "explore",
         };
 
-    // An agent session's call, from its usage record. Its weight prices its tokens in the ratios Copilot's models share:
+    // An agent session's call, from its usage record, with its exact AIU when the record carries them. Its weight, which
+    // only shares an interval's AIU among calls without an exact value, prices its tokens in the ratios Copilot's models share:
     // uncached input 1, cache writes 1.25, cache reads 0.1, output 5. The input count includes the cached tokens.
     private static ModelCall Call(Guid id, DateTimeOffset at, JsonElement usage)
     {
@@ -256,8 +265,12 @@ internal static partial class Ingest
         return new(
             id, at, Text(usage, "initiator") ?? "unknown", Text(usage, "model") ?? "unknown",
             usage.TryGetProperty("cost", out var cost) && cost.ValueKind == JsonValueKind.Number ? cost.GetDecimal() : 0,
-            input, output, read, Category(tools), Math.Max(0, input - read - write) + (1.25m * write) + (0.1m * read) + (5m * output));
+            input, output, read, Category(tools), Math.Max(0, input - read - write) + (1.25m * write) + (0.1m * read) + (5m * output), Exact(usage));
     }
+
+    // A usage record's exact billed AIU.
+    private static decimal? Exact(JsonElement usage) =>
+        usage.TryGetProperty("copilotUsage", out var billed) && billed.ValueKind == JsonValueKind.Object ? Nano(billed) : null;
 
     // A CLI session's call, from its assistant message, which gives only the output tokens: they are its weight. A
     // sub-agent's messages name the tool call that started it.

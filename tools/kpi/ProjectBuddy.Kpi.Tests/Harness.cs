@@ -111,13 +111,14 @@ internal sealed class Log
         return this;
     }
 
-    public Log Call(double minutes, decimal cost, JsonNode? toolCounts, string initiator = "agent", string model = "claude-opus-5.5") =>
+    // A usage record; aiu writes the exact billed AIU that agent sessions record per call.
+    public Log Call(double minutes, decimal cost, JsonNode? toolCounts, string initiator = "agent", string model = "claude-opus-5.5", decimal? aiu = null) =>
         Event("session.usage_record", minutes, new JsonObject
         {
             ["usage"] = new JsonObject
             {
                 ["initiator"] = initiator, ["model"] = model, ["cost"] = cost, ["inputTokens"] = 100, ["outputTokens"] = 10,
-                ["cacheReadTokens"] = 90, ["toolCounts"] = toolCounts,
+                ["cacheReadTokens"] = 90, ["toolCounts"] = toolCounts, ["copilotUsage"] = aiu is null ? null : Total(aiu),
             },
         });
 

@@ -25,8 +25,8 @@ out/projectbuddy-kpi report --port 55432 --password-file ...
 - **AI:** AI cost is metered in **AI Units (AIU)**, the unit the account quota
   is billed in (#339). The calibration:
   - a Copilot CLI run that reported 6.93 AIU used 7.0 quota units;
-  - over a window of an agent session, the quota fell by 305.1, its apportioned
-    AIU were 318.2, and its nominal costs were 615.
+  - over a window of an agent session, the quota fell by 305.1. Its calls'
+    exact AIU summed to 305.1, and their nominal costs to 615.
 
   USD = AIU × `usd_per_unit` (0.04 per quota unit). A usage record's `cost`
   (15 per claude-opus-5.5 call) is nominal and is kept as `nominal_units`.
@@ -78,18 +78,25 @@ such as a malformed item, is a database error.
     `assistant.message`. A sub-agent's messages name the tool call that
     started it, and the nominal cost is 0.
 - **AIU:** measured, not estimated.
-  - **Agent sessions:** the deltas of the cumulative
+  - **Exact per call:** an agent session's usage record carries its call's
+    exact billed AIU (`copilotUsage.totalNanoAiu`).
+  - **Session totals, agent sessions:** the deltas of the cumulative
     `session.usage_checkpoint` `totalNanoAiu`. A decrease starts a new counter.
-    A fork's own AIU continue from the last checkpoint of its copied history.
-  - **CLI sessions:** each process's `session.shutdown` total.
-  - **Shares:** each measured interval's AIU are shared among its calls by
-    price-weighted tokens: uncached input 1, cache writes 1.25, cache reads
-    0.1 and output 5. CLI calls are weighted by output tokens alone, and calls
-    without tokens get equal shares. Interval totals are therefore exact, and
-    a call's share is an apportionment.
-  - **Unmeasured calls:** calls after a session's last measurement have no AIU
-    until a later ingest measures them. The report counts them by comparing
-    `measuredCalls` with `calls`.
+    A fork's counter continues from the parent's running total at the fork:
+    the last copied checkpoint plus the copied calls after it.
+  - **Session totals, CLI sessions:** each process's `session.shutdown` total.
+  - **Shares:** in each measured interval, what the calls' exact AIU don't
+    account for is shared among the calls without an exact value. That means
+    every CLI call, and older records. The weights are price-weighted tokens:
+    uncached input 1, cache writes 1.25, cache reads 0.1 and output 5. CLI
+    calls are weighted by output tokens alone, and calls without tokens get
+    equal shares.
+  - **Unattributed overhead:** what no call takes, such as helper-model calls
+    that the log records no usage for, stays in the session's measured total.
+    It is the difference between `measuredAiu` and `aiu`.
+  - **Unmeasured calls:** a call without an exact value after the session's last
+    measurement has no AIU until a later ingest measures it. The report counts
+    these calls by comparing `measuredCalls` with `calls`.
 - **Category:** what each call asked for, by the tools it requested:
   - `ask` (`ask_user`);
   - `edit` (`edit` or `create`);

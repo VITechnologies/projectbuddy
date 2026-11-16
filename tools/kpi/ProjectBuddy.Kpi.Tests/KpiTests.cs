@@ -184,26 +184,36 @@ public sealed class IngestTests : IDisposable
     [Fact]
     public void ApportionsMeasuredAiuAmongTheCalls()
     {
-        // An agent session forked from a parent whose copied checkpoint is 100 AIU. The 30 AIU measured at 3 minutes are
-        // shared by weight: 69 for the harness's tokens, 207 for 207 uncached input tokens. The counter then restarts at
-        // 10 AIU for the call at 4. The call at 6 is not measured yet. Assistant messages are not its calls.
+        // An agent session forked from a parent at 105 AIU: its copied checkpoint (100) plus the copied call after it (5).
+        // Between the fork and 3 minutes the counter rises 30 AIU: the call with an exact 4 keeps it, and the other 26 are
+        // shared by weight between the calls without one, 69 for the harness's tokens and 207 for 207 uncached input
+        // tokens. The counter then restarts at 10 AIU: the exact call at 4 keeps its 12, and nothing is left for anyone.
+        // At 5.5 the 3 AIU go to the call without an exact value. After the last checkpoint an exact call keeps its 2
+        // and adds them to the session's total; the call at 7 is unmeasured. Assistant messages are not its calls.
         var agent = new Log()
             .Event("session.start", 0, [])
+            .Call(-12, 15, Counts(), aiu: 50)
             .Checkpoint(-10, 100)
-            .Checkpoint(-9, null)
+            .Checkpoint(-9.8, null)
+            .Call(-9.5, 15, Counts(), aiu: 5)
+            .Call(-9, 15, Counts())
             .Event("assistant.message", 0.5, new JsonObject { ["model"] = "m", ["outputTokens"] = 5 })
-            .Call(1, 15, Counts("view"))
-            .Event("session.usage_record", 2, new JsonObject { ["usage"] = new JsonObject { ["model"] = "claude-opus-5.5", ["inputTokens"] = 207, ["cost"] = 15 } })
+            .Call(1, 15, Counts("view"), aiu: 4)
+            .Call(1.5, 15, Counts("view"))
+            .Event("session.usage_record", 2, new JsonObject { ["usage"] = new JsonObject { ["model"] = "claude-opus-5.5", ["inputTokens"] = 207, ["cost"] = 15, ["copilotUsage"] = 7 } })
             .Event("assistant.message", 2.5, new JsonObject { ["model"] = "m" })
-            .Checkpoint(3, 130)
+            .Checkpoint(3, 135)
             .Checkpoint(3.5, null)
-            .Call(4, 15, Counts("bash"))
+            .Call(4, 15, Counts("bash"), aiu: 12)
             .Checkpoint(5, 10)
-            .Shutdown(5.5, 999)
-            .Call(6, 15, Counts());
+            .Call(5.2, 15, Counts())
+            .Checkpoint(5.5, 13)
+            .Shutdown(5.6, 999)
+            .Call(6, 15, Counts(), aiu: 2)
+            .Call(7, 15, Counts());
         var session = Ingest.Read(A, agent.Reader(), TimeSpan.FromMinutes(30), "log")!;
-        Assert.Equal([7.5m, 22.5m, 10m, null], session.Calls.Select(call => call.Aiu));
-        Assert.Equal(40m, session.Aiu);
+        Assert.Equal([4m, 6.5m, 19.5m, 12m, 3m, 2m, null], session.Calls.Select(call => call.Aiu));
+        Assert.Equal(45m, session.Aiu);
 
         // A CLI session: calls are its assistant messages, a sub-agent's naming its tool call, and each process's
         // shutdown total is shared by output tokens, or equally when they have none.
