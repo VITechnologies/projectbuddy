@@ -76,9 +76,9 @@ public sealed class DatabaseTests : IDisposable
         var connection = server.NewDatabase();
         Assert.Contains("does not exist", Cli.Run(["migrate", .. connection]).Error);
         var first = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((true, "[\"0001_kpi_v1.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
+        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
         var again = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((false, "[\"0001_kpi_v1.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
+        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
         server.Execute(connection, "UPDATE public.kpi_schema_migrations SET sha256 = repeat('0', 64)");
         Assert.Contains("migration 0001_kpi_v1.sql changed after it was applied", Cli.Run(["migrate", .. connection]).Error);
     }
@@ -88,10 +88,10 @@ public sealed class DatabaseTests : IDisposable
     {
         var connection = server.NewDatabase();
         server.Execute([.. connection[..^1], "postgres"], $"CREATE DATABASE \"{connection[^1]}\"");
-        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 1 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
+        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 2 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
         var behind = server.Migrated();
         server.Execute(behind, "DELETE FROM public.kpi_schema_migrations");
-        Assert.Contains("has 0 of 1 migrations", Cli.Run(["report", .. behind]).Error);
+        Assert.Contains("has 0 of 2 migrations", Cli.Run(["report", .. behind]).Error);
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public sealed class IngestTests : IDisposable
             .Tool("open", "ask_user", 18)
             .Event("user.message", 19, [])
             .Raw("")
-            .Raw($$"""{"timestamp": "{{Log.Time(20)}}", "type": "assistant.turn_start", "data": {}, "id": "{{Guid.NewGuid()}}"}""")
+            .Raw($$"""{"type":"assistant.turn_start","data":{},"id":"{{Guid.NewGuid()}}","timestamp": "{{Log.Time(20)}}"}""")
             .Event("assistant.message", 90, []);
         var session = Ingest.Read(A, log.Reader(), TimeSpan.FromMinutes(30), "log")!;
 
@@ -177,6 +177,55 @@ public sealed class IngestTests : IDisposable
         Assert.Single(session.Messages);
         Assert.Equal([(Log.Start, Log.Start.AddMinutes(20)), (Log.Start.AddMinutes(90), Log.Start.AddMinutes(90))], session.Spans);
         Assert.Null(Ingest.Read(A, new StringReader(""), TimeSpan.FromMinutes(30), "log"));
+        Assert.Null(session.Aiu);
+        Assert.All(session.Calls, call => Assert.Null(call.Aiu));
+    }
+
+    [Fact]
+    public void ApportionsMeasuredAiuAmongTheCalls()
+    {
+        // An agent session forked from a parent whose copied checkpoint is 100 AIU. The 30 AIU measured at 3 minutes are
+        // shared by weight: 69 for the harness's tokens, 207 for 207 uncached input tokens. The counter then restarts at
+        // 10 AIU for the call at 4. The call at 6 is not measured yet. Assistant messages are not its calls.
+        var agent = new Log()
+            .Event("session.start", 0, [])
+            .Checkpoint(-10, 100)
+            .Checkpoint(-9, null)
+            .Event("assistant.message", 0.5, new JsonObject { ["model"] = "m", ["outputTokens"] = 5 })
+            .Call(1, 15, Counts("view"))
+            .Event("session.usage_record", 2, new JsonObject { ["usage"] = new JsonObject { ["model"] = "claude-opus-5.5", ["inputTokens"] = 207, ["cost"] = 15 } })
+            .Event("assistant.message", 2.5, new JsonObject { ["model"] = "m" })
+            .Checkpoint(3, 130)
+            .Checkpoint(3.5, null)
+            .Call(4, 15, Counts("bash"))
+            .Checkpoint(5, 10)
+            .Shutdown(5.5, 999)
+            .Call(6, 15, Counts());
+        var session = Ingest.Read(A, agent.Reader(), TimeSpan.FromMinutes(30), "log")!;
+        Assert.Equal([7.5m, 22.5m, 10m, null], session.Calls.Select(call => call.Aiu));
+        Assert.Equal(40m, session.Aiu);
+
+        // A CLI session: calls are its assistant messages, a sub-agent's naming its tool call, and each process's
+        // shutdown total is shared by output tokens, or equally when they have none.
+        var cli = new Log()
+            .Event("session.start", 0, [])
+            .Event("assistant.message", 1, new JsonObject
+            {
+                ["model"] = "claude-opus-5.5", ["outputTokens"] = 30, ["parentToolCallId"] = "t1",
+                ["toolRequests"] = new JsonArray(new JsonObject { ["name"] = "bash" }, new JsonObject { ["name"] = 7 }),
+            })
+            .Event("assistant.message", 2, new JsonObject { ["model"] = "claude-opus-5.5", ["outputTokens"] = 10, ["toolRequests"] = "none" })
+            .Shutdown(3, 8)
+            .Shutdown(3.5, null)
+            .Event("assistant.message", 4, new JsonObject { ["outputTokens"] = 0 })
+            .Event("assistant.message", 4.5, [])
+            .Shutdown(5, 5);
+        var run = Ingest.Read(B, cli.Reader(), TimeSpan.FromMinutes(30), "log")!;
+        Assert.Equal([6m, 2m, 2.5m, 2.5m], run.Calls.Select(call => call.Aiu));
+        Assert.Equal(13m, run.Aiu);
+        Assert.Equal(["sub-agent", "agent", "agent", "agent"], run.Calls.Select(call => call.Initiator));
+        Assert.Equal(["run", "respond", "respond", "respond"], run.Calls.Select(call => call.Category));
+        Assert.Equal(("claude-opus-5.5", "unknown", 0m), (run.Calls[0].Model, run.Calls[3].Model, run.Calls.Sum(call => call.Cost)));
     }
 
     [Fact]
@@ -201,10 +250,11 @@ public sealed class IngestTests : IDisposable
         var again = Cli.Json(["ingest", "--sessions", root, .. connection])["sessions"]!.AsArray().Single()!;
         Assert.Equal(0, (int)again["newModelCalls"]!);
 
-        new Log().Done("open", 25).Write(root, A);
+        new Log().Done("open", 25).Checkpoint(26, 15).Write(root, A);
         Cli.Json(["ingest", "--sessions", root, .. connection]);
         Assert.Equal(24.0, Convert.ToDouble(server.Scalar(connection, "SELECT extract(epoch FROM completed_at - started_at) / 60 FROM kpi_v1.tool_calls WHERE tool_call_id = 'open'")));
         Assert.Equal(1L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.active_spans"));
+        Assert.Equal("15 15", server.Scalar(connection, "SELECT c.aiu || ' ' || s.aiu FROM kpi_v1.model_calls AS c JOIN kpi_v1.sessions AS s USING (session_id)"));
 
         new Log().Raw("{broken").Write(root, A);
         Assert.Contains("is not a readable event", Cli.Run(["ingest", "--sessions", root, .. connection]).Error);
@@ -232,13 +282,16 @@ public sealed class ReportTests : IDisposable
         var empty = Cli.Json(["report", .. connection]);
         Assert.Equal((0m, (JsonNode?)null, 0), ((decimal)empty["totalUsd"]!, empty["explorationShare"], (int)empty["acceptedChanges"]!["count"]!));
 
-        // Session A: two changes. Calls at 1 and 2 minutes, accepted at 3; a call at 5, accepted at 6. An ask_user
+        // Session A: two changes. Calls at 1 and 2 minutes (30 AIU measured at 2.2), accepted at 3; a call at 5 (3 AIU,
+        // measured at 5.2), accepted at 6. Its nominal costs are the same, 15, 15 and 3. An ask_user
         // prompt answered after 20 minutes counts 10.
         new Log()
             .Call(1, 15, new JsonObject { ["view"] = 1 })
             .Call(2, 15, new JsonObject { ["edit"] = 1 })
+            .Checkpoint(2.2, 30)
             .Tool("m1", "bash", 2.5, "gh pr merge 1 --repo o/r").Done("m1", 3)
             .Call(5, 3, new JsonObject { ["bash"] = 1 }, initiator: "sub-agent")
+            .Checkpoint(5.2, 33)
             .Tool("m2", "bash", 5.5, "gh pr merge 2 --repo o/r").Done("m2", 6)
             .Tool("ask", "ask_user", 6).Done("ask", 26)
             .Write(root, A);
@@ -261,28 +314,29 @@ public sealed class ReportTests : IDisposable
         Cli.Json(["operator", "--tier", "T4", "--minutes", "30", "--activity", "technician", .. connection]);
 
         var report = Cli.Json(["report", .. connection]);
-        Assert.Equal((2, 3, 33m, 1.32m), ((int)report["sessions"]!, (int)report["ai"]!["calls"]!, (decimal)report["ai"]!["units"]!, (decimal)report["ai"]!["usd"]!));
+        Assert.Equal((2, 3, 33m, 1.32m), ((int)report["sessions"]!, (int)report["ai"]!["calls"]!, (decimal)report["ai"]!["aiu"]!, (decimal)report["ai"]!["usd"]!));
+        Assert.Equal((3, 33m, 33m), ((int)report["ai"]!["measuredCalls"]!, (decimal)report["ai"]!["nominalUnits"]!, (decimal)report["ai"]!["measuredAiu"]!));
         // Active time is the union of A (1 to 26 minutes) and B (1 to 8 minutes): 25 minutes at T1 (62.50 USD), plus 30
         // minutes at T4 (22.50 USD).
         Assert.Equal((0.42m, 0.5m, 85m, 1, 10.0m), ((decimal)report["operator"]!["activeHours"]!, (decimal)report["operator"]!["entryHours"]!,
             (decimal)report["operator"]!["usd"]!, (int)report["operator"]!["prompts"]!, (decimal)report["operator"]!["promptMinutesCapped"]!));
         Assert.Equal(86.32m, (decimal)report["totalUsd"]!);
-        Assert.Equal((30m, 3m), ((decimal)report["unitsByInitiator"]!["agent"]!, (decimal)report["unitsByInitiator"]!["sub-agent"]!));
-        Assert.Equal(33m, (decimal)report["unitsByModel"]!["claude-opus-5.5"]!);
-        Assert.Equal((15m, 15m, 3m), ((decimal)report["unitsByCategory"]!["explore"]!, (decimal)report["unitsByCategory"]!["edit"]!, (decimal)report["unitsByCategory"]!["run"]!));
+        Assert.Equal((30m, 3m), ((decimal)report["aiuByInitiator"]!["agent"]!, (decimal)report["aiuByInitiator"]!["sub-agent"]!));
+        Assert.Equal(33m, (decimal)report["aiuByModel"]!["claude-opus-5.5"]!);
+        Assert.Equal((15m, 15m, 3m), ((decimal)report["aiuByCategory"]!["explore"]!, (decimal)report["aiuByCategory"]!["edit"]!, (decimal)report["aiuByCategory"]!["run"]!));
         Assert.Equal(0.4545m, (decimal)report["explorationShare"]!);
         Assert.Equal((0, 3, 1), ((int)report["merges"]!["trackedRepositories"]!, (int)report["merges"]!["merged"]!, (int)report["merges"]!["outsideSessions"]!));
 
-        // o/r#1: calls at 1 and 2 (30 units), 3 minutes of A; o/r#2: the call at 5 (3 units), 3 minutes.
+        // o/r#1: calls at 1 and 2 (30 AIU), 3 minutes of A; o/r#2: the call at 5 (3 AIU), 3 minutes.
         Assert.Equal(2, (int)report["acceptedChanges"]!["count"]!);
         var recent = report["recentChanges"]!.AsArray();
         Assert.Equal(["o/r#2", "o/r#1"], recent.Select(change => (string)change!["change"]!));
-        Assert.Equal((1, 3m, 0.12m, 0.05m, 7.62m), ((int)recent[0]!["calls"]!, (decimal)recent[0]!["units"]!, (decimal)recent[0]!["aiUsd"]!,
+        Assert.Equal((1, 3m, 0.12m, 0.05m, 7.62m), ((int)recent[0]!["calls"]!, (decimal)recent[0]!["aiu"]!, (decimal)recent[0]!["aiUsd"]!,
             (decimal)recent[0]!["operatorHours"]!, (decimal)recent[0]!["totalUsd"]!));
-        Assert.Equal((2, 30m, 1.2m), ((int)recent[1]!["calls"]!, (decimal)recent[1]!["units"]!, (decimal)recent[1]!["aiUsd"]!));
+        Assert.Equal((2, 30m, 1.2m), ((int)recent[1]!["calls"]!, (decimal)recent[1]!["aiu"]!, (decimal)recent[1]!["aiUsd"]!));
 
-        // Items: o/r#1 costs 1.20 USD for 2 requirements; its rework is the call after its first review (15 units).
-        Assert.Equal((0.6m, 0.5m, 15m), ((decimal)report["costPerRequirementUsd"]!, (decimal)report["firstPassYield"]!, (decimal)report["reworkUnits"]!));
+        // Items: o/r#1 costs 1.20 USD for 2 requirements; its rework is the call after its first review (15 AIU).
+        Assert.Equal((0.6m, 0.5m, 15m), ((decimal)report["costPerRequirementUsd"]!, (decimal)report["firstPassYield"]!, (decimal)report["reworkAiu"]!));
         Assert.Equal((1, 0.5m), ((int)report["specGaps"]!["count"]!, (decimal)report["specGaps"]!["perAcceptedChange"]!));
     }
 }

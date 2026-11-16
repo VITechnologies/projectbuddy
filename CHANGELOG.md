@@ -17,6 +17,11 @@ release's notes for the exact pinned commit.
     active when it merged.
   - It records work markers, spec gaps, reviews, requirement counts and
     operator time by tier.
+  - AI cost is metered in AI Units, the unit the quota is billed in (#339).
+    Agent sessions are measured by their cumulative usage checkpoints and CLI
+    sessions by their shutdown totals. Each measured interval is shared among
+    its calls by price-weighted tokens, and nominal per-call costs are kept as
+    a secondary column.
   - It reports six KPIs in premium units and USD: cost per accepted change,
     cost per requirement, first-pass yield, rework, spec-gap rate and
     exploration share.

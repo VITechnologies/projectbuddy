@@ -22,9 +22,14 @@ out/projectbuddy-kpi report --port 55432 --password-file ...
 
 ## Cost model
 
-- **AI:** every model call is billed. Its `cost` comes from
-  `session.usage_record` and is counted in premium units; the account quota
-  reconciles the total. USD = units × `usd_per_unit` (0.04).
+- **AI:** AI cost is metered in **AI Units (AIU)**, the unit the account quota
+  is billed in (#339). The calibration:
+  - a Copilot CLI run that reported 6.93 AIU used 7.0 quota units;
+  - over a window of an agent session, the quota fell by 305.1, its apportioned
+    AIU were 318.2, and its nominal costs were 615.
+
+  USD = AIU × `usd_per_unit` (0.04 per quota unit). A usage record's `cost`
+  (15 per claude-opus-5.5 call) is nominal and is kept as `nominal_units`.
 - **Operator:** active time is the union of all sessions' spans, where a gap
   over `idle_gap_minutes` (30) ends a span. It is priced at the T1 rate.
   Recorded operator entries add time at their own tier's rate.
@@ -66,9 +71,26 @@ such as a malformed item, is a database error.
 
 ## What is read from a log
 
-- **Model calls:** one per `session.usage_record`, with its initiator (user,
-  agent or sub-agent), model, cost and tokens. Its **category** is what the
-  call asked for, by the tools it requested:
+- **Model calls:**
+  - **Agent (SDK) sessions:** one call per `session.usage_record`, with its
+    initiator (user, agent or sub-agent), model, nominal cost and tokens.
+  - **Copilot CLI sessions,** which have no usage records: one call per
+    `assistant.message`. A sub-agent's messages name the tool call that
+    started it, and the nominal cost is 0.
+- **AIU:** measured, not estimated.
+  - **Agent sessions:** the deltas of the cumulative
+    `session.usage_checkpoint` `totalNanoAiu`. A decrease starts a new counter.
+    A fork's own AIU continue from the last checkpoint of its copied history.
+  - **CLI sessions:** each process's `session.shutdown` total.
+  - **Shares:** each measured interval's AIU are shared among its calls by
+    price-weighted tokens: uncached input 1, cache writes 1.25, cache reads
+    0.1 and output 5. CLI calls are weighted by output tokens alone, and calls
+    without tokens get equal shares. Interval totals are therefore exact, and
+    a call's share is an apportionment.
+  - **Unmeasured calls:** calls after a session's last measurement have no AIU
+    until a later ingest measures them. The report counts them by comparing
+    `measuredCalls` with `calls`.
+- **Category:** what each call asked for, by the tools it requested:
   - `ask` (`ask_user`);
   - `edit` (`edit` or `create`);
   - `delegate` (`task` or `write_agent`);
@@ -108,11 +130,11 @@ accepted at that merge time.
 | Cost per accepted change | What the change's session spent after its previous accepted change, or the session's start, up to the acceptance: model calls plus that session's active time at T1. The report gives the count, mean and median, and the ten most recent changes. |
 | Cost per requirement | The AI cost of marked work items, divided by their recorded requirement counts. |
 | First-pass yield | The share of first review rounds with zero findings. |
-| Rework | The units a marked work item spent after its first review. |
+| Rework | The AIU a marked work item spent after its first review. |
 | Spec-gap rate | Recorded spec gaps per accepted change. |
-| Exploration share | The share of units spent on `explore` calls. Exploration done through `bash` counts as `run`. |
+| Exploration share | The share of AIU spent on `explore` calls. Exploration done through `bash` counts as `run`. |
 
-The report also gives units by initiator, model and category. Under `merges`
+The report also gives AIU by initiator, model and category, the nominal units, and the sessions' measured AIU. Under `merges`
 it gives the tracked repositories, the merges listed, and the merges outside
 sessions.
 

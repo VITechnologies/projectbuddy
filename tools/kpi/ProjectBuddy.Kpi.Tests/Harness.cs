@@ -130,6 +130,11 @@ internal sealed class Log
     public Log Done(string id, double minutes, bool success = true, string content = "ok") =>
         Event("tool.execution_complete", minutes, new JsonObject { ["toolCallId"] = id, ["success"] = success, ["result"] = new JsonObject { ["content"] = content } });
 
+    // A cumulative agent-session checkpoint, or a CLI process's shutdown total; null writes one without a total.
+    public Log Checkpoint(double minutes, decimal? aiu) => Event("session.usage_checkpoint", minutes, Total(aiu));
+
+    public Log Shutdown(double minutes, decimal? aiu) => Event("session.shutdown", minutes, Total(aiu));
+
     public Log Raw(string line)
     {
         lines.Add(line);
@@ -145,4 +150,6 @@ internal sealed class Log
     }
 
     public TextReader Reader() => new StringReader(string.Join('\n', lines));
+
+    private static JsonObject Total(decimal? aiu) => aiu is { } value ? new JsonObject { ["totalNanoAiu"] = value * 1_000_000_000m } : [];
 }
