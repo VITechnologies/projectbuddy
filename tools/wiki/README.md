@@ -40,6 +40,22 @@ out/projectbuddy-wiki project --port 55432 --password-file ...
 out/projectbuddy-wiki export-registry --approval <approval record> --importer-password-file <path> --port 55432 --password-file ...
 ```
 
+## Standard
+
+`projectbuddy-wiki` is the reference checker of the ecosystem wiki standard,
+`rsr/ecosystem-wiki-standard@1`. That standard ships in repo-standards-review
+`v0.5.0` (`0cab380`), as `docs/architecture/ecosystem-wiki-standard.md`
+(VITechnologies/projectbuddy#318, #319, #320).
+
+The pin is in
+[`Standard.cs`](ProjectBuddy.Wiki/Standard.cs): the standard ID, the RSR
+release and commit, and the ordered finding catalogues copied from that
+release.
+- `project` reports the pin under `standard`.
+- A test reads the installed projection functions after every migration. It
+  fails when any catalogue's findings, or their order, differ from the pin.
+- Moving to a newer standard is a deliberate change to that file.
+
 ## Commands
 
 Every command prints one JSON object on standard output. Every command but

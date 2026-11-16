@@ -109,7 +109,12 @@ internal static class Commands
     public static (JsonObject Result, bool NotExportable) Project(Database database, string? commit)
     {
         var (snapshot, recorded) = Recorded(database, commit);
-        var result = new JsonObject { ["commit"] = recorded, ["snapshot"] = snapshot.ToString() };
+        var result = new JsonObject
+        {
+            ["commit"] = recorded,
+            ["snapshot"] = snapshot.ToString(),
+            ["standard"] = new JsonObject { ["id"] = Standard.Id, ["rsrRelease"] = Standard.RsrRelease, ["rsrCommit"] = Standard.RsrCommit },
+        };
         foreach (var (name, value) in database.ProjectionReport(snapshot))
         {
             result[name] = value!.DeepClone();
