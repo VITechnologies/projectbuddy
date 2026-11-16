@@ -379,6 +379,8 @@ public class RedactorTests
     [InlineData("", "[DB_PASSWORD, x")]
     [InlineData("", "setx DB_PASSWORD a ")]
     [InlineData("", "[x] DB_PASSWORD=a\n")]
+    [InlineData("", "Set-Item env:DB_PASSWORD a ")]
+    [InlineData("", "macaddress1=\"080027A1B2C3\" ")]
     [Trait("Category", "Performance")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
@@ -523,10 +525,12 @@ public class RedactorTests
     [InlineData(@"{""Ke", @"{""Ke")]
     [InlineData(@"[] ""x", @"[] ""x")]
     [InlineData(@"{""Key"":""DB\qPASSWORD"",""Value"":""x""}", @"{""Key"":""DB\qPASSWORD"",""Value"":""<secret>""}")]
-    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":123}", @"{""Key"":""DB_PASSWORD"",""Value"":""<secret>""}")]
+    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":123}", @"{""Key"":""DB_PASSWORD"",""Value"":123}")]
+    [InlineData(@"{""Key"":""DB_PASSWORD"",""Value"":x9}", @"{""Key"":""DB_PASSWORD"",""Value"":""<secret>""}")]
     [InlineData(@"{""Arguments"":[""-P"",""x"",""--password"",""y""]}", @"{""Arguments"":[""-P"",""x"",""--password"",""<secret>""]}")]
     [InlineData(@"[{""Key"":""DB_PASSWORD"",""Value"":""Sup3r""", @"[{""Key"":""DB_PASSWORD"",""Value"":""<secret>""")]
-    [InlineData(@"""Credential"": {""UserName"": null, ""Password"": null}", @"""Credential"": {""UserName"": null, ""Password"": ""<secret>""}")]
+    [InlineData(@"""Credential"": {""UserName"": null, ""Password"": null}", @"""Credential"": {""UserName"": null, ""Password"": null}")]
+    [InlineData(@"{""Password"": x9}", @"{""Password"": ""<secret>""}")]
     [InlineData(@"{ code: [1, 2] } ] and [x] and {""a"":1}", @"{ code: [1, 2] } ] and [x] and {""a"":1}")]
     public void JsonLayoutsAreReadAtEveryDepth(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 

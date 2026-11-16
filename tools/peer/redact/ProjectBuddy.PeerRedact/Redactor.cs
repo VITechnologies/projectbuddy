@@ -229,6 +229,7 @@ public sealed partial class Redactor
         result = Apply(result, "path", PosixDrive(), match => Cut(match.Value));
         result = Apply(result, "path", PosixHome(), match => match.Groups["root"].Value + "<user>" + (match.Groups["rest"].Value.Length > 1 ? "/<path>" : match.Groups["rest"].Value));
         result = Apply(result, "mac", Mac(), _ => "<mac>");
+        result = Apply(result, "mac", MacAddressKey(), match => match.Groups["head"].Value + "<mac>");
         result = Apply(result, "ip", IPv4(), match => AllowedIPv4(match.Value) ? match.Value : "<ip>");
         result = Apply(result, "ip", IPv6(), match => IPAddress.TryParse(match.Value, out var address) && address.AddressFamily == AddressFamily.InterNetworkV6
             && !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.IPv6Any) ? "<ip>" : match.Value);
@@ -609,7 +610,8 @@ public sealed partial class Redactor
         bool Is(JsonValue value, string[] fields) => fields.Contains(value.Name!, StringComparer.OrdinalIgnoreCase);
         if (frame.Values.Any(value => value.IsString && Is(value, NameFields) && SecretName().IsMatch(StringText(text, value))))
         {
-            foreach (var value in frame.Values.Where(value => Is(value, ValueFields) && !(value.IsString && Redacted(StringText(text, value)))))
+            foreach (var value in frame.Values.Where(value => Is(value, ValueFields) && !(value.IsString && Redacted(StringText(text, value)))
+                && !(value is { IsString: false, Child: null } && JsonLiteral().IsMatch(text[value.Start..value.End]))))
             {
                 edits[value.Start] = (value.End, "\"<secret>\"");
             }
@@ -913,9 +915,16 @@ public sealed partial class Redactor
             return match.Value;
         }
 
-        // A bare JSON value after a quoted key ("token": null) is written as a string, so the JSON still parses.
+        // After a quoted key, a JSON number, boolean or null is data ("secret": 0, "hasToken": true), and any other bare
+        // value is written as a string, so the JSON still parses.
         var key = match.Groups["key"].Value;
-        quote ??= QuoteSpellings.FirstOrDefault(spelling => key.EndsWith(spelling, StringComparison.Ordinal));
+        var jsonKey = QuoteSpellings.FirstOrDefault(spelling => key.EndsWith(spelling, StringComparison.Ordinal));
+        if (quote is null && jsonKey is not null && JsonLiteral().IsMatch(value))
+        {
+            return match.Value;
+        }
+
+        quote ??= jsonKey;
         return key + match.Groups["separator"].Value + quote + "<secret>" + quote;
     }
 
@@ -1179,7 +1188,7 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + ")" + SecretKey + @"(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|(?<![^A-Za-z0-9](?:pw|pass|pat)|^(?:pw|pass|pat))[ \t]{2,}(?=\S)(?![:=]|REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @"|[{\[])(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + ")" + SecretKey + @"(?:\](?=[ \t]*=))?(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|(?<![^A-Za-z0-9](?:pw|pass|pat)|^(?:pw|pass|pat))[ \t]{2,}(?=\S)(?![:=]|REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @"|[{\[])(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
@@ -1337,8 +1346,15 @@ public sealed partial class Redactor
     [GeneratedRegex(@"^(?:System|Microsoft)(?:\.[A-Za-z_][\w`]*)+(?:\[[^\]]*\])?$")]
     private static partial Regex TypeName();
 
+    // VirtualBox's machine-readable MAC has no separators: macaddress1="080027A1B2C3".
+    [GeneratedRegex(@"(?<head>\bmacaddress[0-9]{0,2}""?[ \t]*[=:][ \t]*""?)[0-9A-Fa-f]{12}\b", RegexOptions.IgnoreCase)]
+    private static partial Regex MacAddressKey();
+
     [GeneratedRegex(@"^\s*(?:true|false)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex Flag();
+
+    [GeneratedRegex(@"^(?:true|false|null|-?(?:0|[1-9][0-9]{0,30})(?:\.[0-9]{1,30})?(?:[eE][+-]?[0-9]{1,5})?)$")]
+    private static partial Regex JsonLiteral();
 
     // A tag's attributes, with any Name/N/Key attribute captured as "named"; bounded, so an unclosed tag ("count<limit")
     // never makes the scan run on to the end of the text.
@@ -1368,8 +1384,9 @@ public sealed partial class Redactor
 
     // Tools that set a secret by name: setx NAME value, [Environment]::SetEnvironmentVariable("NAME", "value"),
     // Set-Item env:NAME value, New-Item -Path env:NAME -Value x, gh secret set NAME --body x,
-    // az keyvault secret set ... --value x.
-    [GeneratedRegex(@"(?<head>\bsetx(?:\.exe)?[ \t]+(?:""|')?" + SecretKey + @"(?:""|')?[ \t]+|\bSetEnvironmentVariable[ \t]*\([ \t]*[""']" + SecretKey + @"[""'][ \t]*,[ \t]*|\benv:" + SecretKey + @"(?:[ \t]+-Value)?[ \t]+|\bgh[ \t]+secret[ \t]+set\b[^\r\n]{0,200}?[ \t](?:--body|-b)(?:[ \t]+|=)|\baz[ \t]+keyvault[ \t]+secret[ \t]+set\b[^\r\n]{0,400}?[ \t]--value(?:[ \t]+|=))(?!-|" + Placeholder + @")(?<value>""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;)]+)", RegexOptions.IgnoreCase)]
+    // az keyvault secret set ... --value x. A value never starts with "=" or "|" ($env:X = "y" is an assignment, and
+    // Get-Item env:X | ... a pipeline) and never takes the quote that closes a JSON string.
+    [GeneratedRegex(@"(?<head>\bsetx(?:\.exe)?[ \t]+(?:""|')?" + SecretKey + @"(?:""|')?[ \t]+|\bSetEnvironmentVariable[ \t]*\([ \t]*[""']" + SecretKey + @"[""'][ \t]*,[ \t]*|\b(?:Set-Item|New-Item|Set-Content|Add-Content|si|ni)(?:[ \t]+-(?:Path|LiteralPath))?[ \t]+env:" + SecretKey + @"(?:[ \t]+-Value)?[ \t]+|\bgh[ \t]+secret[ \t]+set\b[^\r\n]{0,200}?[ \t](?:--body|-b)(?:[ \t]+|=)|\baz[ \t]+keyvault[ \t]+secret[ \t]+set\b[^\r\n]{0,400}?[ \t]--value(?:[ \t]+|=))(?![-=|]|" + Placeholder + ")" + NotClosing + @"(?<value>""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;)|]+)", RegexOptions.IgnoreCase)]
     private static partial Regex ToolSecret();
 
     [GeneratedRegex(@"@\{[^{}\r\n]*\}", RegexOptions.NonBacktracking)]

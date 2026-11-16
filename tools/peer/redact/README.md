@@ -191,13 +191,22 @@ Other value rules:
   `[Environment]::SetEnvironmentVariable("NAME", "value", …)`,
   `Set-Item env:NAME value`, `New-Item -Path env:NAME -Value …`,
   `gh secret set NAME --body …` and `az keyvault secret set … --value …`.
+  - The value never starts with `=` or `|`: `$env:X = "y"` is an assignment
+    (the assignment rules take it), and `Get-Item env:X | …` is a pipeline.
+  - The value never takes the quote that closes a JSON string.
 - **Quoted keys:** a secret key that opens a quoted string takes the value to the
   closing quote of the same spelling. Examples are `"GPG_PASSPHRASE=a b c"` in
   `docker inspect`'s `Env`, `docker run -e "X=a b"`, and `\"X=a b\"` or `'X=a b'`.
 - **Object and array values:** an assignment never takes a value that starts
   with `{` or `[`; nested JSON is the scanner's.
-- **Bare JSON values:** after a quoted key (`"token": null`), the value is written
-  as a string (`"<secret>"`), so the JSON still parses.
+- **JSON data, not secrets:** after a quoted key, a JSON number, boolean or `null`
+  is data and stays: `"secret": 0` (a redaction count), `"hasToken": true`,
+  `"token": null`, and a Name/Value object's numeric `Value` (an event count under
+  a provider named `…TokenBroker…`). Any other bare value is written as a string
+  (`"<secret>"`), so the JSON still parses.
+- **VirtualBox machine-readable keys:** a secret key in brackets before `=`
+  (`vrdeproperty[VNCPassword]="…"`), and an unseparated MAC
+  (`macaddress1="080027A1B2C3"` → `<mac>`).
 
 ## JSON evidence
 

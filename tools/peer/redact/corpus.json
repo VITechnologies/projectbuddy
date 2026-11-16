@@ -1092,7 +1092,7 @@
         "GPG_PASSPHRASE=<secret>",
         "export DB_PASSWORD=<secret>",
         "Password     : <secret>",
-        "\"token\": \"<secret>\",",
+        "\"token\": null,",
         "Pass: 9",
         "Credential : System.Management.Automation.PSCredential"
       ]
@@ -1298,6 +1298,37 @@
         "\"pass=12 fail=0 skip=1\"",
         " PASS  src/App.test.js (5.2 s)",
         "[PATH, /usr/bin], [DB_PASSWORD, <secret>]"
+      ]
+    },
+    {
+      "id": "env-assignments-and-tool-json",
+      "input": "$env:DB_PASSWORD = \"Sup3rA\"\n$env:API_TOKEN = 'Sup3rB'\nGet-Item env:DB_PASSWORD | Format-List\nSet-Item -Path env:DB_PASSWORD -Value \"Sup3rC\"\n[\"setx DB_PASSWORD \",\"x\"]\n{\"msg\":\"Removing env:API_TOKEN \",\"ok\":true}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "$env:DB_PASSWORD = \"<secret>\"",
+        "$env:API_TOKEN = '<secret>'",
+        "Get-Item env:DB_PASSWORD | Format-List",
+        "-Value \"<secret>\"",
+        "[\"setx DB_PASSWORD \",\"x\"]",
+        "{\"msg\":\"Removing env:API_TOKEN \",\"ok\":true}"
+      ]
+    },
+    {
+      "id": "p4-tool-result-shapes",
+      "input": "{\"schema\":\"projectbuddy/peer-tool-result@1\",\"tool\":\"event-errors\",\"truncated\":false,\"redaction\":{\"ip\":2,\"secret\":0},\"hasToken\":true,\"token\":null,\"groups\":[{\"Key\":\"Microsoft-Windows-TokenBroker/1098\",\"Value\":2},{\"provider\":\"Kerberos-Key-Distribution-Center\",\"id\":7,\"count\":3}]}\nvrdeproperty[VNCPassword]=\"Sup3rVnc\"\nmacaddress1=\"080027A1B2C3\"",
+      "mustNotContain": [
+        "Sup3r",
+        "080027A1B2C3"
+      ],
+      "mustContain": [
+        "\"redaction\":{\"ip\":2,\"secret\":0}",
+        "\"hasToken\":true,\"token\":null",
+        "\"Value\":2",
+        "\"count\":3",
+        "vrdeproperty[VNCPassword]=\"<secret>\"",
+        "macaddress1=\"<mac>\""
       ]
     }
   ]
