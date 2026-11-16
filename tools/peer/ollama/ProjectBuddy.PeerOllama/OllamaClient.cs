@@ -10,6 +10,9 @@ public sealed record ChatResult(string Content, IReadOnlyList<ToolCall> ToolCall
 
 public sealed record Residency(long SizeBytes, long SizeVramBytes);
 
+// A model held in memory (/api/ps); a missing digest reads as empty and a missing counter as zero.
+public sealed record LoadedModel(string Name, string Digest, long SizeBytes, long SizeVramBytes, long ContextLength);
+
 // Talks only to an Ollama bound to a loopback IP literal (#210 D2); any server or transport fault is "unreachable".
 public sealed class OllamaClient(HttpMessageHandler handler, Uri baseUri, TimeSpan timeout) : IDisposable
 {
@@ -119,6 +122,19 @@ public sealed class OllamaClient(HttpMessageHandler handler, Uri baseUri, TimeSp
         }
 
         return null;
+    }
+
+    public async Task<IReadOnlyList<LoadedModel>> LoadedAsync()
+    {
+        var loaded = new List<LoadedModel>();
+        foreach (var node in Json.Array((await SendAsync(HttpMethod.Get, "api/ps", null))["models"], "Ollama ps", ExitCodes.Unreachable))
+        {
+            var entry = Json.Object(node, "Ollama ps entry", ExitCodes.Unreachable);
+            loaded.Add(new LoadedModel(Json.String(entry["name"], "ps name", ExitCodes.Unreachable), Json.TryString(entry["digest"]) ?? "",
+                Count(entry, "size"), Count(entry, "size_vram"), Count(entry, "context_length")));
+        }
+
+        return loaded;
     }
 
     public Task UnloadAsync(string model) =>

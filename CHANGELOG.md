@@ -6,6 +6,23 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `tools/peer/probes` (`projectbuddy-probes`, #292, #290 slice 2): the
+  closed list of read-only tools the P4 diagnostics agent may call on the
+  peer.
+  - The six tools are `network-link`, `disk`, `ollama`, `vm-states`,
+    `services` and `event-errors` (`hours` 1 to 72).
+  - Unknown tools and out-of-spec arguments are refused before anything runs.
+  - Programs run without a shell and never from `PATH`.
+  - `showvminfo` keys, services and tasks are read from allow-lists. Events
+    are reduced to provider, ID and level counts.
+  - Every result is redacted with the deny list and the host's own names,
+    capped per list and at 16 KiB, and marked `truncated` when anything was
+    cut. Results that cannot be made safe become a fixed failure envelope.
+  - `run-all` adds a SHA-256 per result for the live proof. The shared Ollama
+    client gains `LoadedAsync` (`/api/ps` size, VRAM and context length).
+  - CI adds it to the `Peer Tool Tests` matrix at 100% coverage and publishes
+    the trimmed win-x64 binary.
+
 - Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
   deterministic and idempotent redaction that peer evidence passes through
   before a local model sees it and before it leaves the peer.
