@@ -152,6 +152,70 @@ public class AskTests
         Assert.Equal(ExitCodes.Protocol, code);
         Assert.Contains("exceeds the output limit", error);
     }
+
+    private static string Diagnosis(string data) => $$"""{"schema":"projectbuddy/peer-ask@1","tool":"0.3.0","verb":"diagnose","data":{{data}}}""";
+
+    private const string Grounded = """{"question":"disk-full","advice":true,"report":{"schema":"projectbuddy/peer-diagnosis@1","verified":["citations","class"]}}""";
+
+    [Fact]
+    public void Asks_one_diagnose_question_and_waits_for_the_model()
+    {
+        var options = PeerAsk.Ask.Parse(["diagnose", "disk-full", .. Required], "/usr/bin/ssh", _ => true, out var problem)!;
+        Assert.Equal("", problem);
+        Assert.Equal("disk-full", options.Question);
+        Assert.Equal(["-l", "peer", "--", "10.0.0.2", "diagnose", "disk-full"], PeerAsk.Ask.SshArguments(options).TakeLast(6));
+
+        var runner = new FakeRunner();
+        runner.On($"{options.Ssh} {string.Join(' ', PeerAsk.Ask.SshArguments(options))}", FakeRunner.Ok(Diagnosis(Grounded)));
+        var stdout = new StringWriter();
+        var code = PeerAsk.Ask.Execute(["diagnose", "disk-full", .. Required], runner, "/usr/bin/ssh", _ => true, stdout, new StringWriter());
+        Assert.Equal(0, code);
+        Assert.Equal(Diagnosis(Grounded) + Environment.NewLine, stdout.ToString());
+        Assert.Equal(TimeSpan.FromSeconds(5) + PeerAsk.Ask.DiagnoseAllowance, runner.Calls[0].Timeout);
+        Assert.True(PeerAsk.Ask.DiagnoseAllowance > PeerAsk.Serve.DiagnoseTimeout);
+    }
+
+    [Theory]
+    [InlineData("diagnose")]
+    [InlineData("diagnose", "Disk")]
+    [InlineData("diagnose", "-x")]
+    [InlineData("diagnose", "--host", "10.0.0.2")]
+    public void Rejects_a_diagnose_without_a_question(params string[] args)
+    {
+        const string problem = "diagnose needs a question id: a letter or digit, then [a-z0-9-], at most 64 characters";
+        AssertRejected([.. args, .. Required], problem, "/usr/bin/ssh");
+        AssertRejected(["diagnose"], problem, "/usr/bin/ssh");
+    }
+
+    public static TheoryData<string, int> DiagnoseAnswers() => new()
+    {
+        { Grounded, 0 },
+        { """{"question":"disk-full","advice":false,"reason":"the citation does not match"}""", 0 },
+        { """{"question":"disk-low","advice":true,"report":{"schema":"projectbuddy/peer-diagnosis@1","verified":["citations"]}}""", ExitCodes.Protocol },
+        { """{"question":1,"advice":true}""", ExitCodes.Protocol },
+        { """{"advice":true}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":"yes"}""", ExitCodes.Protocol },
+        { """{"question":"disk-full"}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":[]}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"verified":["citations"]}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"schema":1,"verified":["citations"]}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"schema":"projectbuddy/peer-ask@1","verified":["citations"]}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"schema":"projectbuddy/peer-diagnosis@1"}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"schema":"projectbuddy/peer-diagnosis@1","verified":"citations"}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":true,"report":{"schema":"projectbuddy/peer-diagnosis@1","verified":[1,"class"]}}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":false}""", ExitCodes.Protocol },
+        { """{"question":"disk-full","advice":false,"reason":1}""", ExitCodes.Protocol },
+    };
+
+    [Theory]
+    [MemberData(nameof(DiagnoseAnswers))]
+    public void Checks_the_shape_of_a_diagnose_answer(string data, int expected)
+    {
+        var (code, message) = PeerAsk.Ask.Classify(FakeRunner.Ok(Diagnosis(data)), "diagnose", "disk-full");
+        Assert.Equal(expected, code);
+        Assert.Equal(expected == 0 ? "" : "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb", message);
+    }
 }
 
 public class ProgramTests

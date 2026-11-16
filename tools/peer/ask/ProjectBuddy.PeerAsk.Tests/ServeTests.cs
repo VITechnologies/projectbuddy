@@ -34,6 +34,9 @@ internal sealed class FakeFacts : IHostFacts
     public string OllamaPath => "ollama";
     public string LbabusPath => "lbabus";
     public string SshPath => "/usr/bin/ssh";
+    public string DiagnosePath => "diagnose.exe";
+    public string DiagnosePolicyPath => "policy.json";
+    public string DenyListPath => "deny.json";
     public List<Volume> Volumes { get; } = [new("C:\\", 100, 200)];
     public Exception? VolumesError { get; set; }
     public IReadOnlyList<Volume> FixedVolumes() => VolumesError is null ? Volumes : throw VolumesError;
@@ -247,5 +250,107 @@ public class ServeTests
         Assert.Equal(ExitCodes.OutputLimit, code);
         Assert.Equal("", output);
         Assert.Equal(PeerAsk.Serve.OutputLimitMessage + Environment.NewLine, error);
+    }
+
+    private const string Diagnose = "diagnose.exe --policy policy.json --question disk-full --deny-list deny.json";
+
+    private const string Report = """{"schema":"projectbuddy/peer-diagnosis@1","verified":["citations","class"],"answer":{"class":"disk-low"}}""";
+
+    [Fact]
+    public void DiagnoseCarriesTheGroundedReport()
+    {
+        var runner = new FakeRunner().On(Diagnose, FakeRunner.Ok(Report + "\n"));
+        var (code, output, error) = Serve("diagnose disk-full", runner);
+        Assert.Equal(0, code);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("diagnose", document.RootElement.GetProperty("verb").GetString());
+        var data = Data(output);
+        Assert.Equal("disk-full", data.GetProperty("question").GetString());
+        Assert.True(data.GetProperty("advice").GetBoolean());
+        Assert.Equal(Report, data.GetProperty("report").GetRawText());
+        Assert.Equal(PeerAsk.Serve.DiagnoseTimeout, Assert.Single(runner.Calls).Timeout);
+    }
+
+    [Theory]
+    [InlineData("projectbuddy-diagnose: the citation \"disk\" \"/x\" = 1 matches no result\nsecond line", "the citation \"disk\" \"/x\" = 1 matches no result")]
+    [InlineData("  plain reason  ", "plain reason")]
+    public void DiagnoseSaysWhyThereIsNoAdvice(string stderr, string reason)
+    {
+        var runner = new FakeRunner().On(Diagnose, new ProcessResult(true, false, 6, "", stderr));
+        var (code, output, _) = Serve("diagnose disk-full", runner);
+        Assert.Equal(0, code);
+        var data = Data(output);
+        Assert.False(data.GetProperty("advice").GetBoolean());
+        Assert.Equal(reason, data.GetProperty("reason").GetString());
+        Assert.False(data.TryGetProperty("report", out _));
+
+        var long_ = new FakeRunner().On(Diagnose, new ProcessResult(true, false, 6, "", new string('x', 1000)));
+        Assert.Equal(PeerAsk.Serve.MaxReasonChars, Data(Serve("diagnose disk-full", long_).Out).GetProperty("reason").GetString()!.Length);
+    }
+
+    [Fact]
+    public void DiagnoseRefusesWhatTheDiagnosticsAgentRefuses()
+    {
+        var runner = new FakeRunner().On(Diagnose, new ProcessResult(true, false, 3, "", "projectbuddy-diagnose: unknown question 'disk-full'"));
+        var (code, output, error) = Serve("diagnose disk-full", runner);
+        Assert.Equal(ExitCodes.Refused, code);
+        Assert.Empty(output);
+        Assert.Equal(PeerAsk.Serve.RefusedMessage + Environment.NewLine, error);
+    }
+
+    [Theory]
+    [InlineData(true, false, 4, "")]
+    [InlineData(true, false, 5, "")]
+    [InlineData(true, true, 0, "")]
+    [InlineData(false, false, -1, "")]
+    [InlineData(true, false, 0, "not json")]
+    public void DiagnoseFailuresAreInternal(bool started, bool timedOut, int exitCode, string stdout)
+    {
+        var runner = new FakeRunner().On(Diagnose, new ProcessResult(started, timedOut, exitCode, stdout, "secret detail"));
+        var (code, output, error) = Serve("diagnose disk-full", runner);
+        Assert.Equal(ExitCodes.Internal, code);
+        Assert.Empty(output);
+        Assert.Equal(PeerAsk.Serve.InternalMessage + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public void DiagnoseKeepsToTheOutputLimit()
+    {
+        var big = $$"""{"schema":"projectbuddy/peer-diagnosis@1","verified":["citations"],"pad":"{{new string('x', PeerAsk.Serve.MaxOutputBytes)}}"}""";
+        var (code, output, error) = Serve("diagnose disk-full", new FakeRunner().On(Diagnose, FakeRunner.Ok(big)));
+        Assert.Equal(ExitCodes.OutputLimit, code);
+        Assert.Empty(output);
+        Assert.Equal(PeerAsk.Serve.OutputLimitMessage + Environment.NewLine, error);
+    }
+
+    [Theory]
+    [InlineData("diagnose")]
+    [InlineData("diagnose ")]
+    [InlineData("diagnose Disk-Full")]
+    [InlineData("diagnose disk-full extra")]
+    [InlineData("diagnose disk;whoami")]
+    [InlineData("diagnose  disk-full")]
+    [InlineData("diagnose disk-full\n")]
+    [InlineData("diagnose -disk")]
+    [InlineData("diagnose --policy")]
+    public void DiagnoseRefusesMalformedQuestions(string command)
+    {
+        var runner = new FakeRunner();
+        var (code, _, error) = Serve(command, runner);
+        Assert.Equal(ExitCodes.Refused, code);
+        Assert.Equal(PeerAsk.Serve.RefusedMessage + Environment.NewLine, error);
+        Assert.Empty(runner.Calls);
+        Assert.Null(PeerAsk.Serve.Question(command));
+    }
+
+    [Fact]
+    public void NamesOnlyWellFormedQuestions()
+    {
+        Assert.Equal("github-unreachable", PeerAsk.Serve.Question("diagnose github-unreachable"));
+        Assert.Equal(new string('a', 64), PeerAsk.Serve.Question("diagnose " + new string('a', 64)));
+        Assert.Null(PeerAsk.Serve.Question("diagnose " + new string('a', 65)));
+        Assert.Null(PeerAsk.Serve.Question(null));
+        Assert.Null(PeerAsk.Serve.Question("identity"));
     }
 }

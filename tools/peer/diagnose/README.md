@@ -167,6 +167,40 @@ decides the class.
 `--vboxmanage` must be a fully qualified path. `vm-states` sees only the VMs
 registered to the account that runs the tool.
 
+## Asking from the workstation (`projectbuddy-ask diagnose`, #298)
+
+The cloud agent reaches the peer's diagnostics agent through the existing
+`projectbuddy-ask` forced-command channel, which is the same key and audit
+trail as the other verbs.
+
+```bash
+projectbuddy-ask ask diagnose disk-full --host <peer> --user <account> --identity <key> --known-hosts <file>
+```
+
+- **Question ID:** a letter or digit, then `[a-z0-9-]`, at most 64
+  characters. It cannot start with `-` and cannot carry a trailing newline.
+  Only the peer's pinned policy decides whether the question exists; an
+  unknown question is refused (exit 64 on the peer, 3 on the client).
+- **Paths on the peer (`serve`):** `projectbuddy-diagnose` runs from fixed
+  paths, with no shell, and has 180 s.
+  - The program and `policy.json` are in
+    `%ProgramData%\ProjectBuddy\peer-ask\diagnose\`.
+  - The deny list is
+    `%ProgramData%\ProjectBuddy\peer-link\redaction-denylist.json`.
+- **Answer:** the `projectbuddy/peer-ask@1` envelope.
+  - A grounded answer is `{"question", "advice": true, "report"}`.
+  - No advice is a normal answer, `{"question", "advice": false, "reason"}`.
+    The cloud agent then looks for itself; it is not an error.
+- **Client checks:** the client waits 200 s and checks the answer's question,
+  its `advice`, and either the report's schema and verified citations or the
+  reason.
+- **Account:** the agent runs as the SSH account, so `vm-states` sees only
+  that account's VMs.
+
+The verb list in [`../README.md`](../README.md) is pinned content of the
+`projectbuddy` identity (`identity/identity.json`). It gains `diagnose` at the
+identity's next version.
+
 ## Tests
 
 ```bash

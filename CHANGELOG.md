@@ -6,6 +6,17 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-ask` 0.3.0 adds the `diagnose <question-id>` verb (#298, #290
+  slice 4).
+  - The peer's forced command runs the deployed `projectbuddy-diagnose`, with
+    its pinned policy and the deny list, from fixed paths with no shell, and
+    allows 180 s.
+  - It returns the grounded report, or no advice with its reason, in the
+    `projectbuddy/peer-ask@1` envelope. An unknown question is refused.
+  - The workstation client waits longer for `diagnose` and checks the
+    answer's shape, including the report's schema and verified citations.
+  - The question ID cannot start with `-` or carry a trailing newline.
+
 - `projectbuddy-diagnose` verifies the answer's class (#299, #302). The policy
   (`projectbuddy/diagnose-policy@2`) gives each question ordered,
   machine-checkable rules.
