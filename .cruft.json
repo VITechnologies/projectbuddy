@@ -1,0 +1,28 @@
+{
+  "template": "https://github.com/svelderrainruiz/repo-standards-review-consumer-kit",
+  "commit": "82d39ee3f4378ef1e7cea881a45de6c179328bda",
+  "checkout": "v0.5.0",
+  "context": {
+    "cookiecutter": {
+      "repo_name": "projectbuddy",
+      "forge": "github",
+      "github_runs_on": "ubuntu-latest",
+      "default_branches": "main,develop",
+      "gitlab_stage": "test",
+      "script_dirs": "vm,docker,scripts,.github/scripts",
+      "lf_paths": "Run-Pipeline.sh",
+      "exempt_paths": "vm/windows-labview/unattended-template.xml",
+      "rsr_tag": "v0.5.0",
+      "rsr_commit": "0cab3803284aafc66f786d7a1114d58fc04fc5e6",
+      "workbench_image": "registry.gitlab.com/svelderrainruiz/repo-standards-review/assurance-workbench@sha256:9a3df3828762471af67848f7b92ced4103bd4e3618668f185785895d9e66fc04",
+      "__kit_dir": "projectbuddy",
+      "_copy_without_render": [
+        ".repo-standards-review/check_consumer.py"
+      ],
+      "_gitattributes": ".gitattributes",
+      "_template": "https://github.com/svelderrainruiz/repo-standards-review-consumer-kit",
+      "_commit": "82d39ee3f4378ef1e7cea881a45de6c179328bda"
+    }
+  },
+  "directory": null
+}

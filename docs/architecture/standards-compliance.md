@@ -6,15 +6,47 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.2.23 sha=ba72187ce5f745a1ffea93536cf83982b747819a -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.5.0 sha=0cab3803284aafc66f786d7a1114d58fc04fc5e6 -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.2.23` |
-| Version (commit SHA) | `ba72187ce5f745a1ffea93536cf83982b747819a` |
-| Assessed | 2026-11-07 |
+| Version (tag) | `v0.5.0` |
+| Version (commit SHA) | `0cab3803284aafc66f786d7a1114d58fc04fc5e6` |
+| Assessed | 2026-11-16 |
 | Profile | `release-gate` |
+
+`v0.5.0` adds the ecosystem wiki standard, `rsr/ecosystem-wiki-standard@1`.
+`projectbuddy-wiki` is its reference checker (#318, #319, #320), and this
+repository's wiki conforms to it with zero findings. The
+`release-gate` scoring changed between `v0.2.23` and `v0.5.0`: RSR added the
+`scripts-not-lf-pinned` contradiction, which flags executable scripts that do
+not check out with LF. This repository satisfies it through the consumer kit's
+line-ending rules, adopted with this re-certification.
+
+Re-certification against `v0.5.0` on 2026-11-16 found no regression in the 5
+required gates. All still `PASS` at High confidence (99-100%), and DoD remains
+the optional `FAIL`.
+
+The re-certification ran the exact steps of
+`.github/workflows/standards-assurance-scan.yml` locally against the pinned
+`v0.5.0` commit:
+- strict wiki assembly;
+- the four assembled specifications;
+- `run_assurance.py --profile release-gate --mode evidence-pack`.
+
+It first required two wiki fixes, because `Assemble-WikiSpec.py --strict`
+had refused the wiki:
+- The Software Requirements Specification hub was 17,035 bytes against its
+  16,384-byte budget, a breach that began at wiki `b59758d`. Its Glossary
+  moved, unchanged, into a child page, and every assembled specification
+  stayed byte-identical.
+- `Ecosystem.md` became a note.
+
+The workflow itself re-runs on the fork's `standards-review-local` runner
+after the next fork-main sync.
+
+## Semantic-audit history (assessed at `v0.2.23`)
 
 `v0.2.23` added a canonical multi-model semantic-audit mode
 (`scripts/semantic_audit.py`), which extracts real standards clause text
@@ -139,7 +171,7 @@ maturity), and tag the wiki repository at each release boundary going
 forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
 `CHANGELOG.md` entry for the full, per-issue resolution detail.
 
-## Current gate status (as of the version above)
+## Current gate status (as of the stamped `v0.5.0`)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
@@ -164,11 +196,11 @@ re-run the gates.
 | Gate | Status | Confidence | Tracking |
 |---|---|---|---|
 | CM (incl. GitFlow branch governance) | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#6` (closed) |
-| Coverage | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#8` (closed) |
-| REQ | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#9` (closed) |
+| Coverage | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#8` (closed) |
+| REQ | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#9` (closed) |
 | ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
 | DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
-| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (90%) | not tracked |
+| DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (88%) | not tracked |
 
 Overall confidence: High (100%); 0 contradictions.
 
