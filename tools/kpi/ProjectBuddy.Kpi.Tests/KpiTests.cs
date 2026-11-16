@@ -291,6 +291,7 @@ public sealed class ForgeTests : IDisposable
 {
     private const string A = "aaaaaaaa-0000-4000-8000-000000000001";
     private const string B = "bbbbbbbb-0000-4000-8000-000000000002";
+    private const string C = "cccccccc-0000-4000-8000-000000000003";
 
     private readonly Server server = new();
     private readonly string root = Directory.CreateTempSubdirectory("pbk-forge-").FullName;
@@ -337,6 +338,7 @@ public sealed class ForgeTests : IDisposable
         var sessions = Directory.CreateDirectory(Path.Combine(root, "sessions")).FullName;
         new Log().Event("session.start", 0, []).Tool("a1", "bash", 2).Done("a1", 3).Tool("a2", "bash", 6).Done("a2", 6.2).Event("x", 10, []).Write(sessions, A);
         new Log().Event("session.start", 5, []).Tool("b1", "bash", 7).Done("b1", 8).Event("x", 12, []).Write(sessions, B);
+        new Log().Event("session.start", 200, []).Tool("c1", "bash", 201).Done("c1", 201).Write(sessions, C);
         Cli.Json(["ingest", "--sessions", sessions, .. connection]);
         foreach (var (repository, forge) in new[] { ("o/r", "github"), ("g/s/p", "gitlab"), ("o/missing", "github"), ("o/bad", "github") })
         {
@@ -344,14 +346,20 @@ public sealed class ForgeTests : IDisposable
         }
 
         // o/r, page 1 (full): #1 merged while only A was active; #2 while both were, after B's latest tool call; #3 closed
-        // unmerged; #4 while no session was active. Page 2 (full) reaches updates older than the first session, so
-        // listing stops: #102 merged within the skew of A's span but after B's tool call; #101 merged before any session.
-        var first = new JsonArray(Request("number", 1, 2.9, 2.9), Request("number", 2, 7.5, 7.5), Request("number", 3, null, 8), Request("number", 4, 50, 50));
+        // unmerged; #4 while no session was active; #5 within the skew before C's first event. Page 2 (full) reaches
+        // updates older than the first session, so listing stops there (a third page would fail): #102 merged within the
+        // skew of A's span but after B's tool call; #101 merged before any session.
+        var first = new JsonArray(Request("number", 1, 2.9, 2.9), Request("number", 2, 7.5, 7.5), Request("number", 3, null, 8),
+            Request("number", 4, 50, 50), Request("number", 5, 199, 199));
         var second = new JsonArray(Request("number", 102, 11, 11), Request("number", 101, -10, -10));
-        for (var n = 5; n <= 100; n++)
+        for (var n = 6; n <= 100; n++)
         {
             first.Add(Request("number", n, null, 9));
-            second.Add(Request("number", 100 + n, null, 9));
+        }
+
+        for (var n = 103; n <= 200; n++)
+        {
+            second.Add(Request("number", n, null, 9));
         }
 
         Answer(GitHub("o/r", 1), first);
@@ -363,21 +371,22 @@ public sealed class ForgeTests : IDisposable
 
         var resolved = Cli.Json(["resolve", "--gh", fake, "--glab", fake, .. connection]);
         Assert.Equal(Log.Start, (DateTimeOffset)resolved["since"]!);
-        Assert.Equal("""[{"repository":"g/s/p","merged":1},{"repository":"o/r","merged":4}]""", resolved["repositories"]!.ToJsonString());
+        Assert.Equal("""[{"repository":"g/s/p","merged":1},{"repository":"o/r","merged":5}]""", resolved["repositories"]!.ToJsonString());
         var unresolved = resolved["unresolved"]!.AsArray();
         Assert.Equal(["o/bad", "o/missing"], unresolved.Select(entry => (string)entry!["repository"]!));
         Assert.StartsWith("unexpected answer: ", (string)unresolved[0]!["reason"]!);
         Assert.Equal("forge exited 1: HTTP 404: Not Found", (string)unresolved[1]!["reason"]!);
-        Assert.Equal("g/s/p!7=a o/r#1=a o/r#102=b o/r#2=b", server.Scalar(connection,
+        Assert.Equal("g/s/p!7=a o/r#1=a o/r#102=b o/r#2=b o/r#5=c", server.Scalar(connection,
             "SELECT string_agg(change_ref || '=' || left(session_id, 1), ' ' ORDER BY change_ref COLLATE \"C\") FROM kpi_v1.accepted_changes"));
         var merges = Cli.Json(["report", .. connection])["merges"]!;
-        Assert.Equal((4, 5, 1), ((int)merges["trackedRepositories"]!, (int)merges["merged"]!, (int)merges["outsideSessions"]!));
+        Assert.Equal((4, 6, 1), ((int)merges["trackedRepositories"]!, (int)merges["merged"]!, (int)merges["outsideSessions"]!));
+        Assert.Equal("0 0", server.Scalar(connection, "SELECT calls || ' ' || operator_hours FROM kpi_v1.change_costs WHERE change_ref = 'o/r#5'"));
 
         // Listing again changes nothing; a forge tool that cannot run leaves its repositories for the next run.
         var again = Cli.Json(["resolve", "--gh", "/nonexistent/gh", "--glab", fake, .. connection]);
         Assert.Equal("""[{"repository":"g/s/p","merged":1}]""", again["repositories"]!.ToJsonString());
         Assert.Equal(["o/bad", "o/missing", "o/r"], again["unresolved"]!.AsArray().Select(entry => (string)entry!["repository"]!));
         Assert.All(again["unresolved"]!.AsArray(), entry => Assert.StartsWith("cannot run /nonexistent/gh: ", (string)entry!["reason"]!));
-        Assert.Equal(5L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.forge_changes"));
+        Assert.Equal(6L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.forge_changes"));
     }
 }

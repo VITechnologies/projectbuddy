@@ -160,7 +160,8 @@ CREATE VIEW kpi_v1.accepted_changes AS
 CREATE VIEW kpi_v1.change_costs AS
     WITH intervals AS (
         SELECT a.session_id, a.change_ref, a.at AS accepted_at,
-               coalesce(lag(a.at) OVER (PARTITION BY a.session_id ORDER BY a.at, a.change_ref), s.first_at - interval '1 microsecond') AS since
+               -- A merge accepted within the skew before the session's first event costs nothing.
+               least(coalesce(lag(a.at) OVER (PARTITION BY a.session_id ORDER BY a.at, a.change_ref), s.first_at - interval '1 microsecond'), a.at) AS since
         FROM kpi_v1.accepted_changes AS a JOIN kpi_v1.sessions AS s USING (session_id)
     )
     SELECT i.session_id, i.change_ref, i.since, i.accepted_at,
