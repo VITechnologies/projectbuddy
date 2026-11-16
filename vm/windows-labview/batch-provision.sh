@@ -144,6 +144,7 @@ wait_for_first_boot_winrm() {
   local start_epoch; start_epoch="$(date +%s)"
   local next_heartbeat=300
   local venv="/tmp/batch-provision-winrm-venv"
+  local probe_status
   if [[ ! -x "$venv/bin/python3" ]]; then
     python3 -m venv "$venv"
     "$venv/bin/pip" install --quiet pywinrm
@@ -170,6 +171,12 @@ wait_for_first_boot_winrm() {
           --port "$port" --password-file "$WINRM_PASSWORD_FILE" wait-ready >/dev/null 2>&1; then
         log "$vm_name WinRM is ready after ${elapsed}s."
         return 0
+      else
+        probe_status=$?
+        if [[ "$probe_status" -eq 3 ]]; then
+          log "ERROR: $vm_name WinRM rejected guest credentials; preserving it for credential correction."
+          return 3
+        fi
       fi
     fi
     elapsed=$(( $(date +%s) - start_epoch ))
@@ -185,26 +192,89 @@ wait_for_first_boot_winrm() {
   return 1
 }
 
-# Tear down whatever a failed attempt left behind so the next retry's
-# create-vm (which refuses to proceed if a VM by that name already exists)
-# starts clean. Safe to call even if the VM was never created (e.g. a
-# create-vm dispatch itself failed) -- each step no-ops harmlessly then.
+# Tear down a failed/poisoned attempt before a retry or after the last failed
+# attempt. Preserve shared installer media and refuse ambiguous VM identities.
 cleanup_vm_for_retry() {
   local vm_name="$1"
   if [[ "$DRY_RUN" == "1" ]]; then
-    log "[dry-run] would power off/unregister $vm_name before retrying"
+    log "[dry-run] would discard poisoned VM $vm_name before retrying or exiting"
     return 0
   fi
-  if VBoxManage list vms 2>/dev/null | grep -Fq "\"$vm_name\""; then
-    local state; state="$(VBoxManage showvminfo "$vm_name" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p')"
-    if [[ "$state" != "poweroff" && -n "$state" ]]; then
-      log "$vm_name: powering off before retry (was: $state)"
-      VBoxManage controlvm "$vm_name" poweroff >/dev/null 2>&1 || true
-      sleep 2
-    fi
-    log "$vm_name: unregistering and deleting before retry"
-    VBoxManage unregistervm "$vm_name" --delete >/dev/null 2>&1 || true
+  local matches uuid info actual_name cfg_file expected_dir expected_cfg state details disk_paths disk_path actual_disk
+  local storage_root
+  [[ "$vm_name" =~ ^[A-Za-z0-9._-]+$ && "$vm_name" != "." && "$vm_name" != ".." ]] || { log "ERROR: refusing teardown for invalid VM name '$vm_name'."; return 1; }
+  [[ "$STORAGE_ROOT" == /* && -d "$STORAGE_ROOT" ]] || { log "ERROR: STORAGE_ROOT must be an existing absolute directory."; return 1; }
+  storage_root="$(realpath -e "$STORAGE_ROOT")"
+  local storage_device; storage_device="$(findmnt -n -o SOURCE --target "$storage_root")"
+  [[ "$storage_device" == /dev/nvme* ]] || { log "ERROR: refusing teardown outside internal NVMe (STORAGE_ROOT device: $storage_device)."; return 1; }
+  matches="$(VBoxManage list vms 2>/dev/null | awk -v expected="\"$vm_name\"" '$1 == expected { gsub(/[{}]/, "", $2); print $2 }')"
+  [[ -n "$matches" ]] || { log "$vm_name: no registered VM remains to discard."; return 0; }
+  [[ "$(printf '%s\n' "$matches" | wc -l)" -eq 1 ]] || { log "ERROR: multiple VirtualBox registrations match $vm_name; refusing teardown."; return 1; }
+  uuid="$matches"
+  info="$(VBoxManage showvminfo "$uuid" --machinereadable 2>/dev/null)" || { log "ERROR: could not inspect VM $vm_name ($uuid); refusing teardown."; return 1; }
+  actual_name="$(printf '%s\n' "$info" | sed -n 's/^name="\(.*\)"$/\1/p')"
+  cfg_file="$(printf '%s\n' "$info" | sed -n 's/^CfgFile="\(.*\)"$/\1/p')"
+  local requested_dir="$storage_root/$vm_name"
+  [[ ! -L "$requested_dir" ]] || { log "ERROR: refusing teardown through a symlinked VM directory: $requested_dir"; return 1; }
+  expected_dir="$(realpath -m "$requested_dir")"
+  [[ "$(dirname "$expected_dir")" == "$storage_root" ]] || { log "ERROR: VM directory escapes STORAGE_ROOT: $expected_dir"; return 1; }
+  expected_cfg="$expected_dir/$vm_name.vbox"
+  actual_cfg="$(realpath -m "$cfg_file")"
+  [[ "$actual_name" == "$vm_name" && "$actual_cfg" == "$expected_cfg" ]] || {
+    log "ERROR: VM identity/config path does not match $STORAGE_ROOT/$vm_name; refusing teardown."
+    return 1
+  }
+  state="$(printf '%s\n' "$info" | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+  case "$state" in
+    livesnapshotting|onlinesnapshotting)
+      log "ERROR: $vm_name is snapshotting ($state); refusing to interrupt it."
+      return 1
+      ;;
+    running|paused)
+      log "$vm_name ($uuid): powering off poisoned attempt (state=$state)."
+      VBoxManage controlvm "$uuid" poweroff >/dev/null 2>&1 || { log "ERROR: could not power off $vm_name ($uuid)."; return 1; }
+      state="$(VBoxManage showvminfo "$uuid" --machinereadable 2>/dev/null | sed -n 's/^VMState="\(.*\)"$/\1/p')"
+      [[ "$state" == "poweroff" || "$state" == "aborted" ]] || { log "ERROR: $vm_name did not reach a deletable state (VMState=$state)."; return 1; }
+      ;;
+    saved)
+      VBoxManage discardstate "$uuid" >/dev/null 2>&1 || { log "ERROR: could not discard saved state for $vm_name ($uuid)."; return 1; }
+      ;;
+    poweroff|aborted) ;;
+    *)
+      log "ERROR: refusing teardown in unexpected VM state '$state' for $vm_name ($uuid)."
+      return 1
+      ;;
+  esac
+
+  details="$(VBoxManage showvminfo "$uuid" --details 2>/dev/null)" || { log "ERROR: could not inspect VM storage for $vm_name ($uuid)."; return 1; }
+  disk_paths="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*Location: "\(.*\)"$/\1/p' | grep -Ei '\.(vdi|vmdk|vhd)$' || true)"
+  while IFS= read -r disk_path; do
+    [[ -n "$disk_path" ]] || continue
+    actual_disk="$(realpath -m "$disk_path")"
+    [[ "$actual_disk" == "$expected_dir"/* ]] || { log "ERROR: attached virtual disk is outside the VM directory ($disk_path); refusing delete."; return 1; }
+  done <<< "$disk_paths"
+
+  local slot controller port device
+  for slot in "IDE 0 0" "IDE 1 0" "IDE 1 1" "SATA 1 0" "SATA 2 0"; do
+    read -r controller port device <<< "$slot"
+    VBoxManage storageattach "$uuid" --storagectl "$controller" --port "$port" --device "$device" --type dvddrive --medium none >/dev/null 2>&1 || true
+  done
+  details="$(VBoxManage showvminfo "$uuid" --details 2>/dev/null)" || { log "ERROR: could not recheck detached media for $vm_name ($uuid)."; return 1; }
+  if printf '%s\n' "$details" | grep -Eiq 'Location: ".*\.(iso|viso)"'; then
+    log "ERROR: an optical image remains attached to $vm_name ($uuid); refusing unregister."
+    return 1
   fi
+  log "$vm_name ($uuid): unregistering and deleting the poisoned VM storage."
+  VBoxManage unregistervm "$uuid" --delete >/dev/null 2>&1 || { log "ERROR: VBoxManage unregistervm failed for $vm_name ($uuid)."; return 1; }
+  if VBoxManage list vms 2>/dev/null | grep -Fq "{$uuid}"; then
+    log "ERROR: VM $vm_name ($uuid) remains registered after teardown."
+    return 1
+  fi
+  if [[ -d "$expected_dir" && ! -L "$expected_dir" ]]; then
+    [[ "$(realpath -m "$expected_dir")" == "$expected_dir" ]] || { log "ERROR: refusing to remove a redirected VM directory: $expected_dir"; return 1; }
+    rm -rf -- "$expected_dir"
+  fi
+  log "$vm_name ($uuid): poisoned VM discarded."
 }
 
 # Derives a safe, batch-unique fallback guest hostname when
@@ -256,8 +326,17 @@ provision_vm_once() {
     FAILURE_REASON="create-vm: $conclusion"; return 1
   fi
 
-  if ! wait_for_first_boot_winrm "$port" "$vm_name"; then
-    FAILURE_REASON="first-boot WinRM never became ready"; return 1
+  if wait_for_first_boot_winrm "$port" "$vm_name"; then
+    :
+  else
+    local winrm_status=$?
+    if [[ "$winrm_status" -eq 3 ]]; then
+      FAILURE_RETRYABLE=0
+      FAILURE_REASON="first-boot WinRM rejected guest credentials"
+    else
+      FAILURE_REASON="first-boot WinRM never became ready"
+    fi
+    return 1
   fi
 
   conclusion="$(dispatch_and_wait install-vipm \
@@ -311,20 +390,35 @@ for vm_name in "${QUEUED[@]}"; do
   succeeded=0
   FAILURE_REASON=""
   for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+    FAILURE_RETRYABLE=1
     log "=== Building $vm_name (attempt $attempt of $MAX_ATTEMPTS; target repo: $repo, WinRM port: $port) ==="
     if provision_vm_once "$vm_name" "$port" "$repo" "$runner_name" "$runner_labels" "$service_account" "$guest_hostname" "$guest_full_name"; then
       succeeded=1
       break
     fi
     log "$vm_name attempt $attempt of $MAX_ATTEMPTS FAILED ($FAILURE_REASON)"
+    if [[ "$FAILURE_RETRYABLE" == "0" ]]; then
+      log "$vm_name: preserving the VM because the guest credential was rejected; correct WINRM_PASSWORD_FILE before retrying."
+      break
+    fi
+    if ! cleanup_vm_for_retry "$vm_name"; then
+      FAILURE_REASON="$FAILURE_REASON; automatic poisoned-VM teardown failed"
+      FAILURE_RETRYABLE=0
+      break
+    fi
     if (( attempt < MAX_ATTEMPTS )); then
-      cleanup_vm_for_retry "$vm_name"
+      log "$vm_name: failed VM discarded; retrying from a fresh VM shell."
     fi
   done
 
   if [[ "$succeeded" != "1" ]]; then
-    log "FAILED: $vm_name exhausted all $MAX_ATTEMPTS attempts (last failure: $FAILURE_REASON)"
-    set_status "$vm_name" "failed" "exhausted $MAX_ATTEMPTS attempts; last failure: $FAILURE_REASON"
+    if [[ "$FAILURE_RETRYABLE" == "0" ]]; then
+      log "FAILED: $vm_name stopped without another attempt (last failure: $FAILURE_REASON)"
+      set_status "$vm_name" "failed" "$FAILURE_REASON"
+    else
+      log "FAILED: $vm_name exhausted all $MAX_ATTEMPTS attempts (last failure: $FAILURE_REASON); poisoned VM was discarded."
+      set_status "$vm_name" "failed" "exhausted $MAX_ATTEMPTS attempts; last failure: $FAILURE_REASON; poisoned VM discarded"
+    fi
     FAILURES+=("$vm_name")
     continue
   fi

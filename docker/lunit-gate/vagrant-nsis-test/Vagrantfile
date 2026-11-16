@@ -1,0 +1,83 @@
+# Fast-iteration test harness for the LUnit gate's package-deployment NSIS
+# installer (docker/lunit-gate/Install-LUnitPackages.nsi, ADR-0003/REQ-034,
+# tracked in #87). Mirrors vm/windows-labview/vagrant-nsis-test/Vagrantfile's
+# established pattern exactly (same golden box, same credentials, same
+# upload-then-run-on-demand shape) -- see that file's own header comment
+# for the full rationale (avoids a ~15-20 minute GitHub Actions Docker-build
+# cycle for every single iteration on the installer logic).
+#
+# This is NOT part of the production CI pipeline
+# (.github/workflows/lunit-gate-windows.yml) -- its only purpose is to
+# validate the NSIS installer's deployment logic (SHA-256 verification,
+# extraction to vi.lib\Astemes\..., no MAX_PATH/mount-boundary surprises)
+# against a real Windows+LabVIEW environment, fast, before baking the
+# validated installer into windows.Dockerfile.
+#
+# Usage:
+#   cd docker/lunit-gate/vagrant-nsis-test
+#   vagrant up
+#   vagrant provision --provision-with run-installer
+#   vagrant winrm -c 'Get-Content C:\lunit-gate\install.log' -e
+#   vagrant destroy -f
+
+Vagrant.configure("2") do |config|
+  config.vm.box = ENV.fetch("VIHS_NSIS_TEST_BOX", "actor/win11-labview2026")
+  config.vm.hostname = "lunit-nsis-test"
+  config.vm.communicator = "winrm"
+
+  # Matches vm/windows-labview/vagrant-nsis-test/Vagrantfile's documented
+  # credentials for this exact box (disposable, local-only VM; not a
+  # secret). Leaving unset falls back to Vagrant's built-in vagrant/vagrant,
+  # which does NOT match this box and can lock the guest account after
+  # repeated failed WinRM logons.
+  config.winrm.username = ENV.fetch("VIHS_NSIS_TEST_WINRM_USER", "vagrant")
+  config.winrm.password = ENV.fetch("VIHS_NSIS_TEST_WINRM_PASSWORD", "Vagrant1234!")
+  config.winrm.timeout = 1800
+
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false
+    vb.memory = ENV.fetch("VIHS_NSIS_TEST_MEM", "4096")
+    vb.cpus = ENV.fetch("VIHS_NSIS_TEST_CPUS", "2")
+    vb.name = "vm-lunit-gate-nsis-test"
+  end
+
+  # Upload the freshly-compiled installer every "vagrant up"/"vagrant
+  # provision" so re-running after an .nsi edit + recompile always tests
+  # the latest build, not a stale copy from a previous iteration.
+  config.vm.provision "upload-installer", type: "file",
+    source: "../Install-LUnitPackages.exe",
+    destination: "C:/Windows/Temp/Install-LUnitPackages.exe"
+
+  # Separate, on-demand step (not auto-run) so "vagrant up" alone doesn't
+  # also execute the installer -- lets you upload+inspect without running
+  # it, or re-run it repeatedly without a full "vagrant up" each time via
+  #   vagrant provision --provision-with run-installer
+  config.vm.provision "run-installer", type: "shell", run: "never", privileged: true, inline: <<-'PS1'
+    $ErrorActionPreference = 'Continue'
+    Write-Host "Running Install-LUnitPackages.exe ..."
+    & "C:\Windows\Temp\Install-LUnitPackages.exe" /S
+    Write-Host "Exit code: $LASTEXITCODE"
+    Write-Host "---- C:\lunit-gate\install.log ----"
+    if (Test-Path 'C:\lunit-gate\install.log') {
+      Get-Content 'C:\lunit-gate\install.log'
+    } else {
+      Write-Host "LOG FILE NOT FOUND -- installer did not reach FileOpen, or CreateDirectory/FileOpen itself failed."
+    }
+  PS1
+
+  # On-demand: probe the real environment (LabVIEW install path, whether
+  # LabVIEWCLI exists, what account/permissions we have) so the installer
+  # is grounded in verified facts, not assumptions.
+  config.vm.provision "probe-environment", type: "shell", run: "never", privileged: false, inline: <<-'PS1'
+    Write-Host "---- whoami ----"
+    whoami
+    Write-Host "---- LabVIEW install dirs under Program Files ----"
+    Get-ChildItem 'C:\Program Files\National Instruments' -ErrorAction SilentlyContinue | Select-Object Name
+    Write-Host "---- LabVIEWCLI ----"
+    Test-Path 'C:\Program Files (x86)\National Instruments\Shared\LabVIEW CLI\LabVIEWCLI.exe'
+    Write-Host "---- vi.lib\Astemes (pre-existing?) ----"
+    Get-ChildItem 'C:\Program Files\National Instruments\LabVIEW 2026\vi.lib\Astemes' -ErrorAction SilentlyContinue
+  PS1
+end

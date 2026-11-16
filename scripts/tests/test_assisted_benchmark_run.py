@@ -1,0 +1,498 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+import struct
+import sys
+import zlib
+from pathlib import Path
+
+import pytest
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+CONTRACT_PATH = REPOSITORY / "tools" / "assisted-benchmark" / "lba-mcp-contract.json"
+SCRIPTS = REPOSITORY / "scripts"
+VM_UUID = "afc966a5-f120-4d3e-9760-69fd6344a03f"
+ACTOR_VERSION = "1.4.14"
+ACTOR_REVISION = "7f65a2215b952e1f31bc3677087f14c8b528d789"
+MODEL = {
+    "tag": "projectbuddy:0.1-qwen2.5-7b",
+    "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+}
+
+sys.path.insert(0, str(SCRIPTS))
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load test module from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def get_contract():
+    return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+
+def authorization():
+    return {
+        "schema": "projectbuddy/assisted-benchmark-authorization@1",
+        "runId": "run-0001",
+        "workload": "labview-launch",
+        "sourceRevision": ACTOR_REVISION,
+        "approvedBy": "operator",
+        "approvedAt": "2026-11-10T12:00:00Z",
+        "approvedCalls": [
+            {"tool": "get_host_capabilities", "arguments": {}},
+            {"tool": "get_benchmark_series", "arguments": {}},
+        ],
+        "targetVmUuids": [],
+        "ollamaModel": dict(MODEL),
+        "reviewExecution": {"schema": "projectbuddy/ollama-execution@1", "modelDigest": MODEL["digest"], "mode": "cpu-only", "threads": 1},
+        "reviewLifecycle": {"schema": "projectbuddy/ollama-lifecycle@1", "totalSeconds": 300, "requestSeconds": 90,
+                    "maxRequests": 16, "maxRetries": 0, "backoffSeconds": 0, "residencySeconds": 30, "maxImageCount": 3},
+        "reviewPrivacy": {"schema": "projectbuddy/ollama-privacy@1", "imageMode": "full-frame", "frames": [],
+                  "retainModelText": False, "expiresAt": "2099-01-01T00:00:00Z"},
+        "reviewBudget": {"schema": "projectbuddy/ollama-budget@1", "accounting": "utf8-byte-plus-approved-media@1",
+                 "modelDigest": MODEL["digest"], "contextTokens": 16384, "outputTokens": 512,
+                 "templateReserveTokens": 1024, "imageTokensPerImage": 2048,
+                 "maxTextBytes": 65536, "maxImageBytes": 8 * 1024 * 1024, "maxImagesPerRequest": 1},
+        "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
+            "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "frameImages", "benchmarkResult"],
+        "allowVmLifecycle": False,
+        "teardownOnNativePplFailure": False,
+    }
+
+
+def make_capture(root: Path):
+    module = load_module("capture_fixture_for_run", SCRIPTS / "assisted_benchmark_capture.py")
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de"
+        "0000000d49444154789c63606060f80f0001040100a899cd1d0000000049454e44ae426082"
+    )
+    root.mkdir()
+    (root / "frame-00001.png").write_bytes(png)
+    (root / "capture-meta.json").write_text(json.dumps({
+        "workload": "labview-launch", "plane": "LINUX", "source": "ffmpeg-x11grab",
+    }), encoding="utf-8")
+    (root / "capture-status.json").write_text(json.dumps({
+        "schema": "labview-benchmark-actor/capture-status@1", "state": "stopped",
+        "runDir": str(root.resolve()), "startedAt": "2026-11-10T12:00:00Z",
+        "stoppedAt": "2026-11-10T12:00:01Z", "frameCount": 1,
+        "durationMs": 0, "samples": 1, "captureJsonReady": True,
+    }), encoding="utf-8")
+    (root / "capture.json").write_text(json.dumps({
+        "schema": "labview-benchmark-actor/launch-capture@1", "workload": "labview-launch",
+        "plane": "LINUX", "source": "ffmpeg-x11grab", "frameCount": 1, "durationMs": 0,
+        "screen": None, "frames": [{"index": 0, "tMs": 0, "image": "frame-00001.png", "imageBytes": len(png), "dhashHex": None}],
+    }), encoding="utf-8")
+    (root / "resources.jsonl").write_text(json.dumps({"ms": 1, "cpuPct": 20, "ramMb": 1024, "diskPct": 2}) + "\n", encoding="utf-8")
+    evidence = module.validate_capture(root, ACTOR_VERSION, ACTOR_REVISION)
+    return evidence
+
+
+def ppl_proof():
+    source = {"repo": "ni/labview-icon-editor", "repoHead": "9545c483f2b947c71de68c7f70aedefaedadabf7", "project": "lv_icon_editor.lvproj"}
+    build = {"target": "My Computer", "buildSpec": "Editor Packed Library"}
+    result_identity = {
+        "project": source["project"], "target": build["target"],
+        "buildSpec": build["buildSpec"], "generatedArtifact": "lv_icon.lvlibp",
+        "operationSucceeded": True,
+    }
+    result_hash = hashlib.sha256(json.dumps(result_identity, separators=(",", ":")).encode()).hexdigest()
+    proof = {
+        "schema": "labview-benchmark-actor/ppl-build-benchmark@1",
+        "plane": "linux-container", "source": source,
+        "operation": "LabVIEWCLI -OperationName ExecuteBuildSpec", "build": build,
+        "generatedArtifact": "lv_icon.lvlibp", "operationSucceeded": True,
+        "timing": {"buildSeconds": 59}, "artifactSizeBytes": 2948583,
+        "resultHash": result_hash,
+        "verdict": {"benchmarkOk": True, "reason": "verified fixture"},
+    }
+    digest_identity = {
+        "schema": proof["schema"], "project": source["project"],
+        "target": build["target"], "buildSpec": build["buildSpec"],
+        "generatedArtifact": "lv_icon.lvlibp", "operationSucceeded": True,
+        "resultHash": result_hash, "verdict": {"benchmarkOk": True},
+    }
+    proof["digest"] = hashlib.sha256(json.dumps(digest_identity, separators=(",", ":")).encode()).hexdigest()
+    return proof
+
+
+def mcp_snapshot(contract):
+    tools = []
+    for group in contract["toolGroups"].values():
+        tools.extend({"name": item["name"], "description": "fixture", "inputSchema": copy.deepcopy(item["inputSchema"])} for item in group["tools"])
+    return {
+        "protocolVersion": contract["source"]["protocolVersion"],
+        "serverInfo": {"name": contract["source"]["serverName"], "version": contract["source"]["serverVersion"]},
+        "tools": tools,
+    }
+
+
+class FakeMcp:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.calls = []
+
+    def initialize_and_list_tools(self):
+        return self.snapshot
+
+    def call(self, tool, arguments):
+        self.calls.append((tool, arguments))
+        return {"content": [{"type": "text", "text": json.dumps({"result": tool})}]}
+
+
+class FakeOllama:
+    def __init__(self):
+        self.tag_calls = 0
+        self.payload = None
+
+    def tags(self):
+        self.tag_calls += 1
+        return {"models": [{"name": MODEL["tag"], "digest": MODEL["digest"]}]}
+
+    def show(self, model):
+        return {"capabilities": ["completion", "vision"], "template": "", "system": "",
+            "model_info": {"general.architecture": "fixture", "fixture.context_length": 32768,
+                       "tokenizer.ggml.model": "gpt2"}}
+
+    def chat(self, payload):
+        self.payload = payload
+        return {
+            "model": MODEL["tag"], "done": True, "done_reason": "stop", "prompt_eval_count": 64, "eval_count": 16,
+            "message": {"content": json.dumps({
+                "decision": "pass", "findings": [], "uncertainties": [],
+                "recommendation": "retain the verified receipts",
+            })},
+        }
+
+
+def refusal_cli_fixture(tmp_path, monkeypatch, mode):
+    module = load_module("assisted_run_observation_cli_" + mode, SCRIPTS / "assisted_benchmark_run.py")
+    import assisted_benchmark_review as review
+
+    capture = tmp_path / "run-0001"
+    make_capture(capture)
+    auth_path = tmp_path / "authorization.json"
+    auth_path.write_text(json.dumps(authorization()))
+    proof_path = tmp_path / "proof.json"
+    proof_path.write_text(json.dumps(ppl_proof()))
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "success.json"
+    refusal = private / "refusal.json"
+    canary = "PRIVATE_CANARY_8471 /private/not-retained"
+
+    class FixtureMcp(FakeMcp):
+        def __init__(self, _command):
+            super().__init__(mcp_snapshot(get_contract()))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_error):
+            pass
+
+    class FixtureModel(FakeOllama):
+        def chat(self, payload):
+            if mode == "deadline":
+                raise review.ReviewDeadlineError(canary)
+            if mode == "cancelled":
+                raise KeyboardInterrupt(canary)
+            return super().chat(payload)
+
+    monkeypatch.setattr(module, "McpStdioClient", FixtureMcp)
+    monkeypatch.setattr(module, "LocalOllama", lambda _endpoint: FixtureModel())
+    if mode == "finalization":
+        def fail_finalization(*_args):
+            raise OSError(canary)
+
+        monkeypatch.setattr(module, "write_private_receipt", fail_finalization)
+    args = ["--authorization", str(auth_path), "--capture-directory", str(capture), "--ppl-proof", str(proof_path),
+            "--contract", str(CONTRACT_PATH), "--ollama-url", "http://127.0.0.1:11434", "--output", str(output),
+            "--failure-observation", str(refusal), "--mcp-command", "must-not-run"]
+    return module, args, output, refusal
+
+
+@pytest.mark.parametrize("mode, exit_code, phase", [("deadline", 2, "inference"), ("cancelled", 130, "inference"), ("finalization", 2, "finalization")])
+def test_cli_refusal_observation_preserves_original_outcome_without_canaries(tmp_path, monkeypatch, capsys, mode, exit_code, phase):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, mode)
+    assert module.main(args) == exit_code
+    captured = capsys.readouterr()
+    observed = json.loads(refusal.read_text())
+    assert observed["schema"] == "projectbuddy/assisted-review-refusal@1"
+    assert observed["phase"] == phase
+    assert observed["exitCode"] == exit_code
+    assert observed["complete"] is False
+    assert "PRIVATE_CANARY_8471" not in refusal.read_text() + captured.out + captured.err
+    assert "/private/not-retained" not in refusal.read_text() + captured.out + captured.err
+    assert refusal.stat().st_mode & 0o777 == 0o600
+    assert not output.exists()
+    writer = load_module("assisted_run_refusal_real_writer_" + mode, SCRIPTS / "assisted_benchmark_run.py")
+    with pytest.raises(writer.RunError, match="partial checkpoint"):
+        writer.write_private_receipt(output, observed)
+
+
+def test_failed_refusal_persistence_does_not_replace_primary_deadline(tmp_path, monkeypatch, capsys):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, "deadline")
+
+    def fail_write(*_args):
+        raise OSError("PRIVATE_CANARY_8471 observation writer failed")
+
+    monkeypatch.setattr(module, "write_private_observation", fail_write)
+    assert module.main(args) == 2
+    captured = capsys.readouterr()
+    assert "ReviewDeadlineError" in captured.err
+    assert "original outcome preserved" in captured.err
+    assert "PRIVATE_CANARY_8471" not in captured.err + captured.out
+    assert not refusal.exists() and not output.exists()
+
+
+def test_success_does_not_write_a_refusal_observation(tmp_path, monkeypatch):
+    module, args, output, refusal = refusal_cli_fixture(tmp_path, monkeypatch, "success")
+    assert module.main(args) == 0
+    assert output.exists()
+    assert not refusal.exists()
+
+
+def test_refusal_writer_is_private_non_overwriting_and_rejects_unsafe_data(tmp_path, monkeypatch):
+    import assisted_benchmark_observation as observations
+
+    record = observations.RefusalObserver().snapshot(OSError("PRIVATE_CANARY_8471"), 2)
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    path = private / "refusal.json"
+    observations.write_private_observation(path, record)
+    assert path.stat().st_mode & 0o777 == 0o600
+    before = path.read_bytes()
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(path, record)
+    assert path.read_bytes() == before
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(private / "unknown.json", {**record, "rawException": "PRIVATE_CANARY_8471"})
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(public / "refusal.json", record)
+    alias = tmp_path / "alias"
+    alias.symlink_to(private, target_is_directory=True)
+    with pytest.raises(observations.ObservationError):
+        observations.write_private_observation(alias / "refusal2.json", record)
+
+    def fail_link(*_args, **_kwargs):
+        raise OSError("fixture atomic commit failure")
+
+    monkeypatch.setattr(observations.os, "link", fail_link)
+    with pytest.raises(OSError):
+        observations.write_private_observation(private / "failure.json", record)
+    assert not (private / "failure.json").exists()
+    assert list(private.glob(".review-refusal-*")) == []
+
+
+def test_orchestrator_binds_mcp_capture_model_and_ppl_receipts(tmp_path: Path):
+    module = load_module("assisted_benchmark_run_test", SCRIPTS / "assisted_benchmark_run.py")
+    contract = get_contract()
+    capture = make_capture(tmp_path / "run-0001")
+    mcp = FakeMcp(mcp_snapshot(contract))
+    ollama = FakeOllama()
+
+    receipt = module.orchestrate(
+        authorization(), contract, capture, ppl_proof(), mcp, ollama, tmp_path / "run-0001"
+    )
+
+    assert receipt["schema"] == "projectbuddy/assisted-benchmark-run@1"
+    assert receipt["runId"] == "run-0001"
+    assert receipt["pplProof"]["artifact"] == "lv_icon.lvlibp"
+    assert receipt["approvedReviewModel"] == MODEL
+    assert receipt["reviewModel"] == MODEL
+    assert receipt["reviewExecution"]["threads"] == 1
+    assert receipt["reviewPrivacy"]["retainModelText"] is False
+    assert receipt["reviewSampling"]["coverageScope"] == "submitted-frames-only"
+    assert receipt["reviewAggregation"] == {
+        "policyVersion": "projectbuddy/assessment-aggregation@1",
+        "requiredInputCount": 1,
+        "completedInputCount": 1,
+        "omittedNonBlockingFindingCount": 0,
+        "omittedUncertaintyCount": 0,
+        "omittedRecommendationCount": 0,
+    }
+    assert [item["tool"] for item in receipt["mcp"]["calls"]] == ["get_host_capabilities", "get_benchmark_series"]
+    assert all("resultSha256" in item and "text" not in item for item in receipt["mcp"]["calls"])
+    assert receipt["assessment"]["decision"] == "pass"
+    assert receipt["reviewModel"]["tag"] == MODEL["tag"]
+    assert receipt["reviewedFrameCount"] == 1
+    assert receipt["advisoryOnly"] is True
+    assert receipt["receiptSha256"] == hashlib.sha256(module.canonical_json({key: value for key, value in receipt.items() if key != "receiptSha256"})).hexdigest()
+    assert ollama.tag_calls == 2
+    assert str(tmp_path) not in json.dumps(receipt)
+
+
+def test_orchestrator_rejects_bad_ppl_proof_before_mcp_calls(tmp_path: Path):
+    module = load_module("assisted_benchmark_run_bad_proof", SCRIPTS / "assisted_benchmark_run.py")
+    contract = get_contract()
+    capture = make_capture(tmp_path / "run-0001")
+    mcp = FakeMcp(mcp_snapshot(contract))
+    proof = ppl_proof()
+    proof["generatedArtifact"] = "dependencies.lvlibp"
+    with pytest.raises(module.RunError, match="approved lv_icon.lvlibp"):
+        module.orchestrate(authorization(), contract, capture, proof, mcp, FakeOllama(), tmp_path / "run-0001")
+    assert mcp.calls == []
+
+
+def test_orchestrator_rejects_capture_and_authorization_run_mismatch(tmp_path: Path):
+    module = load_module("assisted_benchmark_run_run_mismatch", SCRIPTS / "assisted_benchmark_run.py")
+    contract = get_contract()
+    capture = make_capture(tmp_path / "run-0001")
+    auth = authorization()
+    auth["runId"] = "other-run"
+    mcp = FakeMcp(mcp_snapshot(contract))
+    with pytest.raises(module.RunError, match="does not match"):
+        module.orchestrate(auth, contract, capture, ppl_proof(), mcp, FakeOllama(), tmp_path / "run-0001")
+    assert mcp.calls == []
+
+
+def test_stdio_mcp_client_performs_handshake_and_serial_calls():
+    module = load_module("assisted_benchmark_run_stdio", SCRIPTS / "assisted_benchmark_run.py")
+    contract = get_contract()
+    snapshot = mcp_snapshot(contract)
+    server = r'''import json,sys
+snapshot = ''' + repr(snapshot) + r'''
+for line in sys.stdin:
+    msg=json.loads(line)
+    method=msg.get("method")
+    if method == "notifications/initialized":
+        continue
+    if method == "initialize":
+        result={"protocolVersion":snapshot["protocolVersion"],"serverInfo":snapshot["serverInfo"],"capabilities":{"tools":{}}}
+    elif method == "tools/list":
+        result={"tools":snapshot["tools"]}
+    elif method == "tools/call":
+        result={"content":[{"type":"text","text":msg["params"]["name"]}]}
+    else:
+        result={}
+    print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":result}), flush=True)
+'''
+    with module.McpStdioClient([sys.executable, "-u", "-c", server]) as client:
+        discovered = client.initialize_and_list_tools()
+        listed = module.validate_snapshot(discovered, contract)
+        result = client.call("get_benchmark_series", {})
+    assert listed["toolCount"] == 13
+    assert result["content"][0]["text"] == "get_benchmark_series"
+
+
+def test_entrypoint_does_not_echo_private_paths_in_errors(tmp_path, capsys):
+    module = load_module("assisted_run_private_error", SCRIPTS / "assisted_benchmark_run.py")
+    canary = "PRIVATE_CANARY_8471"
+    missing = str(tmp_path / canary)
+    result = module.main(["--authorization", missing, "--capture-directory", missing, "--ppl-proof", missing,
+                          "--contract", missing, "--ollama-url", "http://127.0.0.1:11434", "--output", missing,
+                          "--mcp-command", "node", "fixture.js"])
+    captured = capsys.readouterr()
+    assert result == 2
+    assert canary not in captured.err + captured.out
+
+
+def test_plan_only_cli_uses_no_mcp_ollama_or_output_side_effects(tmp_path, monkeypatch, capsys):
+    module = load_module("assisted_run_offline_plan_cli", SCRIPTS / "assisted_benchmark_run.py")
+    capture = tmp_path / "run-0001"
+    make_capture(capture)
+    authorization_path = tmp_path / "authorization.json"
+    authorization_path.write_text(json.dumps(authorization()), encoding="utf-8")
+    proof_path = tmp_path / "proof.json"
+    proof_path.write_text(json.dumps(ppl_proof()), encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("plan-only mode attempted to construct an external client")
+
+    monkeypatch.setattr(module, "McpStdioClient", forbidden)
+    monkeypatch.setattr(module, "LocalOllama", forbidden)
+    result = module.main(["--plan-only", "--authorization", str(authorization_path),
+                          "--capture-directory", str(capture), "--ppl-proof", str(proof_path),
+                          "--contract", str(CONTRACT_PATH)])
+    captured = capsys.readouterr()
+    plan = json.loads(captured.out)
+    assert result == 0
+    assert plan["status"] == "plan-only" and plan["complete"] is False
+    assert plan["inferencePerformed"] is False and plan["serverCompletion"] == "not-started"
+    assert "PRIVATE_CANARY" not in captured.out + captured.err
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["authorization.json", "proof.json", "run-0001"]
+
+
+def test_plan_only_cli_rejects_live_options_without_refusal_output(tmp_path, monkeypatch, capsys):
+    module = load_module("assisted_run_plan_reject_live_options", SCRIPTS / "assisted_benchmark_run.py")
+    missing = str(tmp_path / "not-read.json")
+    monkeypatch.setattr(module, "McpStdioClient", lambda *_args: pytest.fail("MCP client started"))
+    result = module.main(["--plan-only", "--authorization", missing, "--capture-directory", missing,
+                          "--ppl-proof", missing, "--contract", missing, "--failure-observation", missing])
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "no external calls made" in captured.err
+    assert not Path(missing).exists()
+
+
+def test_plan_only_cancellation_does_not_claim_unknown_server_completion(monkeypatch, capsys):
+    module = load_module("assisted_run_plan_cancelled", SCRIPTS / "assisted_benchmark_run.py")
+
+    def cancel(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(module, "load_contract", cancel)
+    result = module.main(["--plan-only", "--authorization", "auth.json", "--capture-directory", "capture",
+                          "--ppl-proof", "proof.json", "--contract", "contract.json"])
+    captured = capsys.readouterr()
+    assert result == 130
+    assert "plan cancelled; no external calls made" in captured.err
+    assert "server completion" not in captured.err
+
+
+def test_receipt_writer_is_private_atomic_and_does_not_overwrite(tmp_path: Path):
+    module = load_module("assisted_benchmark_run_receipt_writer", SCRIPTS / "assisted_benchmark_run.py")
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    private.chmod(0o700)
+    output = private / "receipt.json"
+    receipt = {"schema": "projectbuddy/assisted-benchmark-run@1", "runId": "run-0001"}
+
+    module.write_private_receipt(output, receipt)
+
+    assert output.read_text(encoding="utf-8") == json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+    assert output.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(module.RunError, match="new absolute file path"):
+        module.write_private_receipt(output, receipt)
+
+
+def test_receipt_writer_refuses_a_public_directory(tmp_path: Path):
+    module = load_module("assisted_benchmark_run_public_receipt", SCRIPTS / "assisted_benchmark_run.py")
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(module.RunError, match="must be private"):
+        module.write_private_receipt(public / "receipt.json", {"runId": "run-0001"})
+
+
+@pytest.mark.parametrize("schema", ["projectbuddy/assisted-review-checkpoint@1", "projectbuddy/assisted-benchmark-run@1"])
+def test_partial_checkpoint_cannot_masquerade_as_final_receipt(tmp_path, schema):
+    module = load_module("assisted_run_checkpoint_is_not_success", SCRIPTS / "assisted_benchmark_run.py")
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "receipt.json"
+    with pytest.raises(module.RunError, match="partial checkpoint"):
+        module.write_private_receipt(output, {"schema": schema, "complete": False, "records": []})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("problem", ["missing-checkpoint", "same-output"])
+def test_invalid_checkpoint_cli_options_fail_before_external_work(tmp_path, capsys, problem):
+    module = load_module("assisted_run_invalid_resume_options", SCRIPTS / "assisted_benchmark_run.py")
+    missing = str(tmp_path / "not-read.json")
+    args = ["--authorization", missing, "--capture-directory", missing, "--ppl-proof", missing,
+            "--contract", missing, "--ollama-url", "http://127.0.0.1:11434", "--output", missing]
+    args += ["--resume"] if problem == "missing-checkpoint" else ["--checkpoint", missing]
+    assert module.main(args + ["--mcp-command", "must-not-run"]) == 2
+    assert "RunError" in capsys.readouterr().err

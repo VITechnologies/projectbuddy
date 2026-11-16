@@ -29,7 +29,11 @@ jobs:
 
       - name: Install Test Dependencies
         shell: bash
-        run: python -m pip install --upgrade pip==26.3 pytest==9.2.0 pytest-cov==7.1.0 pyyaml==6.0.3
+        run: python -m pip install --upgrade pip==26.3 pytest==9.2.0 pytest-cov==7.1.0 pyyaml==6.0.3 pillow==12.1.1 httpx==0.28.1
+
+      - name: Install Hash-Locked Synthetic UI MCP SDK
+        shell: bash
+        run: python -m pip install --require-hashes -r tools/assisted-benchmark/requirements-synthetic-ui.txt
 
       - name: Run Tests With Coverage
         shell: bash
@@ -69,17 +73,245 @@ jobs:
           name: coverage-evidence
           path: coverage.xml
 
+  peer-ask:
+    # tools/peer/ask (projectbuddy-ask, #211): unit tests with a 100% line and branch gate.
+    name: Peer Ask Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/peer/ask/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/peer/ask
+        run: |
+          dotnet restore ProjectBuddy.PeerAsk.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.PeerAsk.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-ask-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/peer-ask-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-ask coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-ask coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-ask coverage must be 100% line and branch")
+          PY
+
+  peer-tools:
+    # tools/peer/{ollama,redact,bench,advise,probes,diagnose} (#217, #284, #290, #292, #295): the shared Ollama guard library and the tools built on it.
+    # Each runs its own tests with a 100% line and branch gate on its own assembly; the tools also publish
+    # the trimmed single-file win-x64 binary the peer runs.
+    name: Peer Tool Tests (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: ollama
+            tests: ProjectBuddy.PeerOllama.Tests
+            publish: ""
+          - dir: redact
+            tests: ProjectBuddy.PeerRedact.Tests
+            publish: ""
+          - dir: bench
+            tests: ProjectBuddy.PeerBench.Tests
+            publish: ProjectBuddy.PeerBench
+          - dir: advise
+            tests: ProjectBuddy.PeerAdvise.Tests
+            publish: ProjectBuddy.PeerAdvise
+          - dir: probes
+            tests: ProjectBuddy.PeerProbes.Tests
+            publish: ProjectBuddy.PeerProbes
+          - dir: diagnose
+            tests: ProjectBuddy.PeerDiagnose.Tests
+            publish: ProjectBuddy.PeerDiagnose
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/peer/${{ matrix.dir }}/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/peer/${{ matrix.dir }}
+        env:
+          TESTS: ${{ matrix.tests }}
+        run: |
+          dotnet restore "$TESTS" --locked-mode --nologo
+          dotnet test "$TESTS" --no-restore --nologo --settings coverage.runsettings --filter "Category!=Performance" \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        env:
+          TOOL: ${{ matrix.dir }}
+        run: |
+          python3 - "$RUNNER_TEMP/peer-coverage" <<'PY'
+          import os
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          tool = os.environ["TOOL"]
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit(f"no {tool} coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          packages = [package.attrib["name"] for package in root.iter("package")]
+          if len(packages) != 1:
+              raise SystemExit(f"{tool} coverage must measure exactly its own assembly, got {packages}")
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"{tool} ({packages[0]}) coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit(f"{tool} coverage must be 100% line and branch")
+          PY
+
+      # Input-size and linear-time tests run at the real caps in Release, outside the instrumented coverage run.
+      - name: Performance Tests
+        if: matrix.dir == 'redact'
+        shell: bash
+        working-directory: tools/peer/${{ matrix.dir }}
+        env:
+          TESTS: ${{ matrix.tests }}
+        run: dotnet test "$TESTS" -c Release --nologo --filter "Category=Performance"
+
+      - name: Publish Trimmed win-x64
+        if: matrix.publish != ''
+        shell: bash
+        working-directory: tools/peer/${{ matrix.dir }}
+        env:
+          PROJECT: ${{ matrix.publish }}
+        run: |
+          dotnet publish "$PROJECT" -c Release -r win-x64 -o "$RUNNER_TEMP/publish" --nologo
+          ls "$RUNNER_TEMP"/publish/*.exe
+
+  wiki-tool:
+    # tools/wiki (#307, #308): the wiki working-copy database and its CLI. The tests run against the same
+    # PostgreSQL image the workstation uses, one throwaway database per test, with a 100% line and branch gate.
+    name: Wiki Tool Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The password of a throwaway service container that only this job can reach; it protects nothing.
+      PBW_CI_PASSWORD: wiki-ci-ephemeral
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+        env:
+          POSTGRES_PASSWORD: wiki-ci-ephemeral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/wiki/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/wiki
+        run: |
+          umask 077
+          printf '%s\n' "$PBW_CI_PASSWORD" > "$RUNNER_TEMP/pbw-password"
+          export PBW_TEST_HOST=127.0.0.1 PBW_TEST_PORT=5432 PBW_TEST_USER=postgres PBW_TEST_PASSWORD_FILE="$RUNNER_TEMP/pbw-password"
+          # RSR is private, so the registry export tests run against the contract stub of its ingest procedure.
+          export PBW_TEST_REGISTRY_MIGRATIONS="$PWD/ProjectBuddy.Wiki.Tests/RegistryContract"
+          dotnet restore ProjectBuddy.Wiki.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.Wiki.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/wiki-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/wiki-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-wiki coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          packages = [package.attrib["name"] for package in root.iter("package")]
+          if packages != ["projectbuddy-wiki"]:
+              raise SystemExit(f"wiki coverage must measure exactly projectbuddy-wiki, got {packages}")
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-wiki coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-wiki coverage must be 100% line and branch")
+          PY
+
+  source-config:
+    name: Source Configuration Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/source-config/global.json
+
+      - name: Test With Locked Dependencies
+        working-directory: tools/source-config
+        run: |
+          dotnet restore ProjectBuddy.SourceConfig.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.SourceConfig.Tests --no-restore --nologo
+
   toolchain-smoke-test:
     # Calls this repo's own reusable toolchain-smoke-test.yml against
     # itself (REQ-008): proves scripts/Test-ToolchainPresence.ps1's real
     # CI-dispatch path actually runs in this repo's own CI, not just in a
     # hypothetical consumer's. `projectbuddy-ref: ${{ github.sha }}`
-    # resolves dynamically to the exact commit under test on every run,
-    # so this never needs a hardcoded SHA to keep up to date.
+    # resolves to the PR head (or pushed commit) in the repository under test,
+    # so the reusable workflow can check out fork-only commits too.
     name: Toolchain Smoke Test (self-check)
     uses: ./.github/workflows/toolchain-smoke-test.yml
     with:
-      projectbuddy-ref: ${{ github.sha }}
+      projectbuddy-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      projectbuddy-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       tool-names: "git,pwsh,python3,jq"
       runs-on-json: '"ubuntu-latest"'
 
@@ -88,7 +320,13 @@ jobs:
     # covering all 3 documented failure classes (integrity/build, policy,
     # reporting) plus the success path -- see
     # scripts/tests/Test-SbomArtifact.Tests.ps1's own header comment.
-    name: Pester Tests (Test-SbomArtifact.ps1, Install-VerifiedNugetPackage.ps1)
+    # REQ-034/REQ-036 (ADR-0003): Get-VerifiedLUnitPackageStaging.Tests.ps1 and
+    # Invoke-LUnitTests.Tests.ps1 cover the LUnit gate's pure, offline-
+    # testable logic (SHA-256 package-integrity verification; the named-
+    # waiver-only JUnit acceptance policy) -- not the real LabVIEW
+    # execution, which `lunit-gate-windows.yml` live-dispatch-proves on
+    # windows-2022.
+    name: Pester Tests (Test-SbomArtifact.ps1, Install-VerifiedNugetPackage.ps1, LUnit gate)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -105,7 +343,8 @@ jobs:
         run: |
           Import-Module Pester -RequiredVersion 6.2.0
           $config = New-PesterConfiguration
-          $config.Run.Path = @('scripts/tests/Test-SbomArtifact.Tests.ps1', 'scripts/tests/Install-VerifiedNugetPackage.Tests.ps1')
+          $config.Run.Path = @('scripts/tests/Test-SbomArtifact.Tests.ps1', 'scripts/tests/Install-VerifiedNugetPackage.Tests.ps1', 'scripts/tests/Get-VerifiedLUnitPackageStaging.Tests.ps1', 'scripts/tests/Invoke-LUnitTests.Tests.ps1')
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
+

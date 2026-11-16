@@ -10,12 +10,19 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
+
+from lane_box.common import LaneBoxError  # noqa: E402
+from vagrant_clone import core, guest  # noqa: E402
 
 ACTIVATED_SNAPSHOT_NAME = "labview2026-q3-pro-activated-ready"
 PACKAGE_SNAPSHOT_NAME = "labview2026-q3-pro-package-ready"
 NAME_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
+FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+SESSION_PREFIX = "projectbuddy-package-scan-"
 ACTIVATION_CAPTURES = {
     "knownAnswerCapture": "activation-known-answer-capture.json",
     "runtimeState": "sandbox-runtime-state.json",
@@ -160,6 +167,8 @@ def main() -> int:
     parser.add_argument("--temp-dir", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--receipt-out", type=pathlib.Path, required=True)
+    parser.add_argument("--ssh-port", type=int, required=True)
+    parser.add_argument("--guest-password-file", type=pathlib.Path, required=True)
     parser.add_argument("--vboxmanage")
     parser.add_argument("--vagrant")
     parser.add_argument("--run", action="store_true")
@@ -174,6 +183,11 @@ def main() -> int:
         expected_vm_uuid = str(uuid.UUID(arguments.vm_uuid))
         activated_snapshot_uuid = str(uuid.UUID(arguments.activated_snapshot_uuid))
         package_snapshot_uuid = str(uuid.UUID(arguments.package_snapshot_uuid)) if arguments.package_snapshot_uuid else None
+        if arguments.ssh_port not in core.PORT_RANGE:
+            raise ValueError("SSH port must be from 1024 through 65535")
+        password_file = arguments.guest_password_file
+        if not password_file.is_absolute() or not password_file.is_file() or password_file.stat().st_mode & 0o077:
+            raise ValueError("guest password file must be an existing absolute path with mode 600 or stricter")
         require_private_storage(arguments.evidence_dir)
         require_private_storage(arguments.vagrant_home)
         require_private_storage(arguments.vagrant_home / "boxes")
@@ -217,6 +231,11 @@ def main() -> int:
         for path in files.values():
             if not path.is_file():
                 raise ValueError(f"required input is missing: {path.name}")
+        base = json.loads(files["baseReceiptSha256"].read_text(encoding="utf-8"))
+        host_key = base.get("sshHostKey") if isinstance(base, dict) else None
+        fingerprint = host_key.get("fingerprint") if isinstance(host_key, dict) else None
+        if not isinstance(fingerprint, str) or not FINGERPRINT.fullmatch(fingerprint):
+            raise ValueError("base receipt SSH fingerprint is invalid")
         activation = json.loads(files["activationReceiptSha256"].read_text(encoding="utf-8"))
         public_appliance = json.loads(files["publicApplianceReceiptSha256"].read_text(encoding="utf-8"))
         manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -283,8 +302,12 @@ def main() -> int:
         return fail("cannot read VM identity")
     if vm_info.get("UUID") != expected_vm_uuid:
         return fail("registered VM UUID does not match expected identity")
-    if vm_info.get("VMState") != "poweroff":
-        return fail("source VM must be powered off")
+    if vm_info.get("VMState") != "running":
+        return fail("source VM must be running for the runner scan")
+    try:
+        core.check_ssh_forward(vm_info, arguments.ssh_port, "source VM")
+    except LaneBoxError as error:
+        return fail(str(error))
     current_snapshot_name = vm_info.get("CurrentSnapshotName")
     current_snapshot_uuid = vm_info.get("CurrentSnapshotUUID")
     if current_snapshot_name == ACTIVATED_SNAPSHOT_NAME:
@@ -316,13 +339,49 @@ def main() -> int:
         vagrant, "package", "--base", expected_vm_uuid,
         "--output", str(arguments.output), "--vagrantfile", str(embedded_vagrantfile),
     ]
-    if not arguments.run:
-        print("Vagrant box packaging: PLAN")
-        print("command=" + " ".join(command))
-        print(f"source_vm_uuid={expected_vm_uuid}")
-        print(f"activated_snapshot_uuid={activated_snapshot_uuid}")
-        print(f"package_snapshot={'create' if package_snapshot_uuid is None else package_snapshot_uuid}")
-        return 0
+    # REQ-105: scan the boot that gets packaged. The packager starts nothing in the guest between the scan and its
+    # own power-off; the scan cannot see what a process already running in the guest writes before shutdown ends.
+    target = guest.Guest(uuid=expected_vm_uuid, ssh_port=arguments.ssh_port, fingerprint=fingerprint,
+                         password_file=arguments.guest_password_file, vboxmanage=vboxmanage)
+    try:
+        session_root = pathlib.Path(tempfile.mkdtemp(prefix=SESSION_PREFIX, dir=os.environ.get("XDG_RUNTIME_DIR")))
+    except OSError as error:
+        return fail(f"cannot create the guest session directory: {error}")
+    try:
+        try:
+            session = guest.Session(target, session_root, guest.run_command)
+            guest.enroll(target, session, guest.run_command, time.sleep)
+            runner_scan = guest.scan_runner(session)
+        except (LaneBoxError, OSError) as error:
+            return fail(f"runner scan failed: {error}")
+        findings = runner_scan["runnerUnits"] + runner_scan["runnerConfigurations"]
+        if findings:
+            return fail("REQ-105: the source VM carries an Actions runner: " + ", ".join(findings))
+        if not arguments.run:
+            print("Vagrant box packaging: PLAN")
+            print("command=" + " ".join(command))
+            print(f"source_vm_uuid={expected_vm_uuid}")
+            print(f"activated_snapshot_uuid={activated_snapshot_uuid}")
+            print(f"package_snapshot={'create' if package_snapshot_uuid is None else package_snapshot_uuid}")
+            print(f"runner_scan=clean boot_id={runner_scan['bootId']}")
+            return 0
+        try:
+            powered_off = guest.power_off(target, session, guest.run_command, time.sleep)
+        except OSError:
+            powered_off = False
+    finally:
+        shutil.rmtree(session_root, ignore_errors=True)
+    if not powered_off:
+        return fail("source VM did not power off after the runner scan", 1)
+    stopped = subprocess.run(
+        [vboxmanage, "showvminfo", expected_vm_uuid, "--machinereadable"],
+        check=False, capture_output=True, text=True,
+    )
+    stopped_info = parse_vm_info(stopped.stdout)
+    if stopped.returncode != 0 or stopped_info.get("UUID") != expected_vm_uuid or (
+        stopped_info.get("VMState"), stopped_info.get("CurrentSnapshotName"), stopped_info.get("CurrentSnapshotUUID"),
+    ) != ("poweroff", current_snapshot_name, current_snapshot_uuid):
+        return fail("source VM is not powered off at the scanned snapshot", 1)
 
     environment = os.environ.copy()
     environment.update({"VAGRANT_HOME": str(arguments.vagrant_home), "TMPDIR": str(arguments.temp_dir)})
@@ -347,7 +406,7 @@ def main() -> int:
         if arguments.output.stat().st_mode & 0o777 != 0o600:
             raise RuntimeError("Vagrant box output mode is not 600")
         receipt = {
-            "schema": "projectbuddy/ubuntu-vagrant-box@1",
+            "schema": "projectbuddy/ubuntu-vagrant-box@2",
             "source": {
                 "vm": {"name": arguments.vm_name, "uuid": expected_vm_uuid},
                 "activatedSnapshot": {"name": ACTIVATED_SNAPSHOT_NAME, "uuid": activated_snapshot_uuid},
@@ -367,6 +426,7 @@ def main() -> int:
                 "vipmVersion": manifest_data["vipm"]["version"],
                 "vipmArtifactSha256": manifest_data["vipm"]["sha256"],
             },
+            "runnerScan": runner_scan,
             "failures": [],
             "outcome": "PASS",
         }
@@ -386,7 +446,7 @@ def main() -> int:
             "--package-snapshot-uuid", package_snapshot_uuid,
             "--hash-out", str(receipt_hash_out),
         ], "Vagrant box receipt verification failed")
-    except (KeyError, OSError, RuntimeError) as error:
+    except (KeyError, OSError, RuntimeError, ValueError) as error:
         arguments.output.unlink(missing_ok=True)
         arguments.receipt_out.unlink(missing_ok=True)
         receipt_hash_out.unlink(missing_ok=True)

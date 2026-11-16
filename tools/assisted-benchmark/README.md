@@ -1,0 +1,512 @@
+# Assisted benchmark contract
+
+`lba-mcp-contract.json` pins the ProjectBuddy-facing LBA MCP boundary to the
+actor protocol and tool schemas verified from
+`svelderrainruiz/labview-benchmark-actor` revision
+`7f65a2215b952e1f31bc3677087f14c8b528d789` (package 1.4.14), protocol
+`2025-06-18`.
+The four core tools are required. The optional ACG grid tools must be either
+all present with the pinned schemas or all absent; an unknown or partial set
+fails closed.
+
+`scripts/assisted_benchmark_contract.py` validates a normalized MCP snapshot
+and per-run authorization records. Each approval binds exact tool names and
+arguments, the actor revision, local Ollama tag/digest, evidence fields, and
+target VM UUIDs. Unknown tools, partial optional groups, schema drift, and
+unapproved calls fail closed. `plan-only` tools return commands for review;
+ProjectBuddy must never execute command text returned by a tool.
+
+Example snapshot shape, derived from MCP `initialize` and `tools/list` results:
+
+```json
+{
+  "protocolVersion": "2025-06-18",
+  "serverInfo": {"name": "labview-benchmark-actor", "version": "1.4.14"},
+  "tools": []
+}
+```
+
+Validate an exported snapshot with:
+
+```bash
+python3 scripts/assisted_benchmark_contract.py validate-snapshot /path/to/snapshot.json
+```
+
+The snapshot must contain the actual `tools/list` array; the empty array above
+is only a shape illustration and will be rejected because required tools are
+missing.
+
+## Live Run Policy Primitives
+
+`scripts/assisted_benchmark_live_policy.py` contains offline policy/compiler and
+broker primitives for the follow-on live-agent design in ProjectBuddy #250.
+`validate_live_policy` checks a versioned policy against a caller-pinned digest
+and the pinned LBA contract, including a host identity digest derived from the
+local OS `/etc/machine-id` with the `projectbuddy/host-identity@1` domain
+separator. The raw machine-id is not retained or emitted. This catches
+accidental cross-host replay, but it is not hardware attestation and a cloned
+machine-id can impersonate the host. `compile_provision_permit` scopes one create
+request; `claim_provision_permit_once` durably consumes it; `bind_created_vm`
+requires before/after inventory plus the provisioner-returned UUID and the
+private claim before sealing the run grant. `LiveRunBroker` checks exact ordered
+tool/argument pairs against that grant and consumes it once from a private
+ledger; `teardown_target` returns only the bound UUID, once.
+
+`dispatch_provision_once` admits only the exact compiled request, writes a
+durable dispatch marker before invoking the caller-injected provisioner adapter,
+and rechecks expiry immediately before that call. A timeout/lost response burns
+the dispatch: it is never retried with that run ID; the caller must reconcile
+host inventory before another run. This module supplies no real provisioner
+adapter; tests inject only a fake.
+
+These are not a live coordinator or CLI: this module does not itself call
+VirtualBox, MCP, Ollama, download, guest bootstrap, VIPM, or teardown. The caller
+must pin the trusted policy digest in reviewed runner configuration and pass the
+same active `ProvisioningLock` to permit creation, claim, one-shot dispatch, and
+UUID binding. The compiler/binder reject an absent or released lock and a claim
+ledger outside its private lock directory. Hold the lock from inventory snapshot
+through UUID sealing, independently verify the provisioner result and host
+inventory, and
+route teardown through a separately tested identity-checking adapter. The
+lock, permits and run-grant claims use one fixed persistent host ledger at
+`~/.local/state/projectbuddy/live-run-ledger`; callers cannot select a fresh
+ledger to replay a permit. The ledger requires current-user POSIX custody
+(0700 directory/0600 files); unsupported custody fails closed. Self-hashes and
+the ledger detect accidental tampering/replay, but are not signatures or
+protection against a malicious same-user process deleting/replacing local
+state. Do not treat successful fixture tests or constructed grants as live
+authorization, VM proof, or permission to start a run. P0 #251 is tracked under
+epic #250 and excludes SBOM and native Windows PPL work.
+
+## Synthetic UI P1 Fixture
+
+P1 #253 adds a standalone Windows 11 decision UI, deterministic seeded workload,
+and a separate harness-only oracle. The browser surface serves only `GET /` and
+`GET /api/view`; HTTP writes are refused. The `projectbuddy-synthetic-ui` MCP
+server exposes one closed-schema `click_target` action and returns only a
+task/event acknowledgement. The policy seals exactly two task-bound candidates
+(`approve` or `hold`); the model may select one, and that choice becomes terminal
+on success or failure with no retry. It does not expose oracle state, and the UI
+action does not grade itself. The multi-server grant binds server ID, source
+identity, contract digest, tool, exact arguments, call order, run, and VM; the
+router checks the server capability snapshot, one-of choice, expiry and immutable
+grant before dispatch. The existing LBA contract remains a separate server.
+
+Install the official MCP SDK and transitive dependencies from the hash-locked
+file before running the server or its integration test:
+
+```bash
+python3 -m pip install --require-hashes -r tools/assisted-benchmark/requirements-synthetic-ui.txt
+python3 scripts/assisted_benchmark_synthetic_ui_server.py --seed 99
+python3 scripts/assisted_benchmark_synthetic_ui_mcp_server.py --seed 99
+```
+
+The first command serves a read-only browser preview at `127.0.0.1:8765`; the
+stdio MCP server runs a task instance and its UI together. These commands do not
+start LBA capture, Ollama inference, VM provisioning, or teardown. The fixture
+oracle scores a structured model state claim separately from the actual action
+and task outcome. `scripts/assisted_benchmark_calibration.py` summarizes
+non-qualifying calibration records with mode-specific latency percentiles,
+bootstrap uncertainty, grounding, and task-success rates. It never sets or
+infers numeric qualification thresholds. No live calibration data or frozen
+thresholds exist yet.
+
+## Active Capture P2 Candidate
+
+`active-capture-pin.json` separately pins the published Actor desktop-capture
+candidate `b408dd706fc8f85b478e4a49f9156e47ec65b6cd` (package 1.5.0). Actor PRs
+#46 and #47 passed Linux/Windows CI in the personal repository. The manifest
+remains `local-candidate-only`: it does not change the default legacy contract
+or declare Windows/live qualification.
+
+`load_active_capture_contract` validates the base-contract digest and the
+explicit candidate source/resource identity. `McpResourceClient` adapts an
+official SDK session; `ActiveCaptureConsumer` admits only exact run/VM-bound,
+ordered, bounded resources. A server-set caller supplies an explicit Actor
+server ID. Desktop callers explicitly select `capture_workload="desktop-capture"`;
+the legacy default remains `labview-launch`. The Actor desktop command skips
+LabVIEW discovery/launch and uses a bounded 1..120-second interval (default 60).
+
+`LiveCaptureSession` supports on-demand, periodic, and continuous streaming
+with one deadline, bounded queues and requests, CPU/model/privacy checks, and
+no retries. Its default is advisory. An explicit `LiveChoiceDispatcher` can
+consume one existing sealed broker grant while capture is active; model output
+never creates authority. Unknown or contradictory acknowledgements terminate
+the grant without retry. Results retain action-applied/unknown status without
+pretending an attempted action was undone. Numerical reading/limit claims go
+to the independent oracle separately from action/task success.
+
+SDK/Actor/mock-model and sealed-action fixtures are available with
+`PROJECTBUDDY_ACTOR_FIXTURE_SERVER` set to the explicitly selected compiled
+Actor stdio entry. They are not real VM or inference proof. Native Windows
+provisioning currently fails in Vagrant's post-import VirtualBox shared-lock
+inspection (`E_ACCESSDENIED`), tracked in VITechnologies/projectbuddy#257.
+Spent dispatches are not replayed; no live calibration or frozen thresholds
+are claimed. The stopped-capture/PPL coordinator below is a separate legacy
+flow, not the live coordinator for epic #250.
+
+## Capture and review
+
+The capture reader accepts only a finalized `stopped` run with a ready
+`capture.json`. It verifies run identity, status/manifest counts, resource JSONL,
+relative frame names, PNG headers/dimensions, and each frame's byte count. It
+computes SHA-256 per frame and a deterministic identity hash without copying the
+images or video into the evidence bundle:
+
+```bash
+python3 scripts/assisted_benchmark_capture.py <capture-run-directory> \
+  --actor-version 1.4.14 \
+  --actor-revision 7f65a2215b952e1f31bc3677087f14c8b528d789
+```
+
+The run coordinator starts the MCP command without a shell, performs the
+initialize/tools-list handshake, validates the pinned surface, and calls only
+the exact per-run-approved MCP calls. Tool results are hashed; their raw
+payloads are not placed in the receipt. It then verifies the `lv_icon.lvlibp`
+benchmark receipt and obtains an Ollama assessment:
+
+```bash
+umask 077
+python3 scripts/assisted_benchmark_run.py \
+  --authorization <protected-run-authorization.json> \
+  --capture-directory <capture-run-directory> \
+  --ppl-proof <verified-lv-icon-ppl-receipt.json> \
+  --contract tools/assisted-benchmark/lba-mcp-contract.json \
+  --ollama-url http://127.0.0.1:11434 \
+  --output "${XDG_RUNTIME_DIR:?}/assisted-benchmark/<run-id>.json" \
+  --mcp-command node <actor-extension>/out/mcp/runBenchmarkActorMcpServer.js
+```
+
+The authorization must use schema `projectbuddy/assisted-benchmark-authorization@1`.
+It names exact approved calls and JSON arguments, the full actor source revision,
+Ollama model tag/digest, evidence fields, and lifecycle/cleanup authority. The
+receipt writer requires a new output file under a private POSIX directory,
+writes atomically with mode `0600`, and prints only completion and receipt hash.
+
+To inspect the same authorized evidence and canonical request costs without
+starting either client, use plan-only mode:
+
+```bash
+python3 scripts/assisted_benchmark_run.py \
+  --plan-only \
+  --authorization <protected-run-authorization.json> \
+  --capture-directory <capture-run-directory> \
+  --ppl-proof <verified-lv-icon-ppl-receipt.json> \
+  --contract tools/assisted-benchmark/lba-mcp-contract.json
+```
+
+The minimized JSON is written to stdout; prompts, images, paths and source text
+are not included. It reports per-request and aggregate conservative byte/token
+bounds, context/output limits, image and sampled-evidence counts, and canonical
+request/policy hashes. Model metadata compatibility is not queried, latency is
+not estimated, and server completion is `not-started`. This is a workload plan,
+not an assessment, latency prediction, success receipt or build proof. In
+`--plan-only` mode, endpoint, MCP, receipt, checkpoint/resume and refusal-output
+options are rejected; no external client, network request, or output file is
+created. The plan is reproducible only for identical canonical inputs and
+policies, and its hashes do not attest to model identity or runtime conditions.
+
+For a read-only capture assessment, an authorization has this shape (replace
+the example run/model values with the actual stopped run and locally verified
+model tag/digest):
+
+```json
+{
+  "schema": "projectbuddy/assisted-benchmark-authorization@1",
+  "runId": "run-<capture-folder-id>",
+  "workload": "labview-launch",
+  "sourceRevision": "7f65a2215b952e1f31bc3677087f14c8b528d789",
+  "approvedBy": "operator",
+  "approvedAt": "<ISO-8601 timestamp with timezone>",
+  "approvedCalls": [
+    {"tool": "get_host_capabilities", "arguments": {}},
+    {"tool": "get_benchmark_series", "arguments": {}}
+  ],
+  "targetVmUuids": [],
+  "ollamaModel": {"tag": "projectbuddy:...", "digest": "<64 hex characters>"},
+  "reviewExecution": {
+    "schema": "projectbuddy/ollama-execution@1",
+    "modelDigest": "<same full lowercase model digest>",
+    "mode": "cpu-only",
+    "threads": 1
+  },
+  "reviewBudget": {
+    "schema": "projectbuddy/ollama-budget@1",
+    "accounting": "utf8-byte-plus-approved-media@1",
+    "modelDigest": "<same full lowercase model digest>",
+    "contextTokens": 16384,
+    "outputTokens": 512,
+    "templateReserveTokens": 1024,
+    "imageTokensPerImage": 0,
+    "maxTextBytes": 65536,
+    "maxImageBytes": 0,
+    "maxImagesPerRequest": 0
+  },
+  "reviewPrivacy": {
+    "schema": "projectbuddy/ollama-privacy@1",
+    "imageMode": "none",
+    "frames": [],
+    "retainModelText": false,
+    "expiresAt": "<future ISO-8601 timestamp with timezone>"
+  },
+  "reviewLifecycle": {
+    "schema": "projectbuddy/ollama-lifecycle@1",
+    "totalSeconds": 300,
+    "requestSeconds": 90,
+    "maxRequests": 16,
+    "maxRetries": 0,
+    "backoffSeconds": 0,
+    "residencySeconds": 30,
+    "maxImageCount": 0
+  },
+  "evidenceFields": ["captureMetadata", "frameHashes", "resourceSamples", "benchmarkResult"],
+  "allowVmLifecycle": false,
+  "teardownOnNativePplFailure": false
+}
+```
+
+`approvedCalls` is an exact tool-plus-arguments allow-list, not a set of tool
+names. This legacy pinned tool contract does not expose active-capture
+resources, so its stopped-run directory remains an explicit local input. The
+separate Actor #45/P2 resource contract above does not silently alter that flow.
+
+When `frameImages` is approved, the reviewer samples at most the first, middle,
+and last frame, verifies each against the recorded SHA-256, and sends one image
+per request to a local Ollama model advertising the `vision` capability. Raw
+frame/video bytes are not sent to remote services or included in the receipt.
+The `projectbuddy:0.1-qwen2.5vl-3b` identity is vision-capable; its tag and
+digest must still match the per-run authorization.
+
+The approved tag and full lowercase SHA-256 digest are required inputs, never
+adopted automatically from inventory discovery. Missing, malformed, duplicate,
+or conflicting inventory entries block inference; a postflight identity error
+blocks receipt completion. Assessment and run receipts retain approved model
+identity separately from the verified review identity (`approvedModel` / `model`
+and `approvedReviewModel` / `reviewModel`). This is the `REQ-109` / `TEST-111`
+contract in ProjectBuddy issue #230, not attestation of an untrusted local daemon.
+
+## Aggregation
+
+The host validates every required per-input response and revalidates the final
+aggregate. A failing input remains failing; only all-pass inputs without any
+uncertainties can produce a passing aggregate. Other complete combinations are
+inconclusive. Missing, malformed, or contradictory inputs are errors, not passes.
+
+Findings are deduplicated by their complete validated content, with evidence
+field order normalized. Different supporting evidence is never collapsed merely
+because claim text matches. Ordering is stable: blocking, warning, then info;
+within a severity, first occurrence in input order wins. The 32-finding output
+bound never drops a blocker: more than 32 distinct blockers causes an incomplete
+review error. Optional detail may be bounded, but omission counts are disclosed
+in `aggregation` on assessment receipts and `reviewAggregation` on run receipts,
+with policy version and required/completed input counts. Uncertainties are
+deduplicated and bounded to 32; multiple distinct recommendations use an explicit
+combined-review recommendation and report how many original recommendations
+were omitted. This is the `REQ-110` / `TEST-112` contract for issue #231.
+Image-based findings additionally retain frame-specific references as described
+below; category references alone are not presented as image attribution.
+
+## Frame Attribution And Coverage
+
+Every submitted image has a host-generated `frameId` binding run identity,
+manifest index, known/unknown timestamp, verified source-image hash, exact
+submitted-image hash, and privacy-policy hash. Each image request exposes only
+its own frame ID in the finding schema. Image findings must cite that ID using
+`frameRefs`; missing, duplicate, foreign-run, unreviewed, or substituted references
+are rejected. Findings retain these references through aggregation and prose
+minimization. Identical claims about different frames remain distinct.
+
+The recorded `projectbuddy/first-middle-last@1` policy selects at most three
+frames deterministically. Assessment `sampling` and run `reviewSampling` record
+selected IDs/indices/hashes/timestamps, available/reviewed/unreviewed counts,
+unknown timestamp count, and known time range. Missing timestamps remain null.
+Coverage is always `submitted-frames-only` for image review (or `metadata-only`
+without images), never a continuous-capture conclusion. Even
+`allManifestFramesReviewed: true` means only that every manifest frame was
+submitted, not that every interval/event was observed. A passing model decision
+applies only to its reviewed sample and is not absence-of-event or build proof.
+This is the `REQ-112` / `TEST-114` contract for issue #233; prompt version 2
+introduces the frame-reference response schema.
+
+## Inference Budget
+
+Model review requires an explicit `reviewBudget` bound into run authorization;
+authorization used only for planning MCP calls does not implicitly grant one.
+The example above is text-only. Image review additionally requires a reviewed,
+digest-specific `imageTokensPerImage` upper bound, nonzero `maxImageBytes`, and
+`maxImagesPerRequest: 1`; unknown image cost means no image inference. Fixture
+image costs are synthetic, not a live-model sizing recommendation.
+
+Only the declared `utf8-byte-plus-approved-media@1` accounting for a model
+reporting the `gpt2` byte-level tokenizer is supported. Model metadata must
+provide its architecture/context limit and template/system. Template/system
+UTF-8 bytes plus 256 framing tokens must fit the approved reserve. The host
+counts prompt/schema UTF-8 bytes conservatively, adds that reserve and the
+approved media bound, and reserves output tokens before any request is sent.
+All requests are prechecked; nothing is silently truncated or summarized.
+Completion counts must be positive and within bounds, in addition to existing
+identity, JSON-schema, evidence, and completion checks. Unsupported metadata or
+an input that cannot be shown to fit is rejected, not submitted optimistically.
+
+Assessment and run receipts retain the complete approved budget, per-request
+policy/request hashes, input upper bounds, and no-truncation coverage, plus the
+observed tokenizer/context and template hash. They do not retain raw prompts or
+image data in budget metadata. These checks trust local daemon metadata and the
+caller-reviewed template/media bounds; they do not prove model reasoning,
+authenticate weights, or establish GPU capacity. The policy implements the
+`REQ-111` / `TEST-113` contract for issue #232.
+
+## Disclosure And Retention
+
+Model review requires an explicit expiring `reviewPrivacy` policy in addition
+to approved evidence fields and budget. `imageMode: none` permits no images;
+`full-frame` explicitly grants the host-selected complete frames; `regions`
+requires one policy entry for each selected frame. Model output cannot change
+that policy. A region entry has this shape:
+
+```json
+{"index": 0, "crop": [0, 0, 600, 400], "redactions": [[10, 10, 100, 30]]}
+```
+
+Boxes are integer `[left, top, width, height]` coordinates in the original
+image, with positive sizes and no out-of-bounds area. Redactions are solid
+black and applied before cropping. Pillow 12.1.1 performs bounded PNG decoding,
+alpha compositing onto black, redaction/crop, and deterministic metadata-free
+PNG encoding without modifying captures. Install the pinned dependency with
+`python -m pip install Pillow==12.1.1` for image review; absent support refuses
+image inference. Source and submitted-image hashes plus policy hashes bind
+exact disclosure. Unknown or missing regions do not fall back to a desktop.
+
+`retainModelText` currently supports only `false`. Returned model prose is
+replaced by fixed host summaries; original validated assessment/finding hashes
+retain audit identity, not text. Expiry is rechecked before requests and final
+retention; it blocks reuse and reports explicit cleanup needs without deleting
+operator assets. Receipts stay private; entry-point errors do not echo private
+paths or raw model output. Synthetic canary tests verify these defined pixel,
+metadata, text, and failure paths, not detection of every unknown secret.
+This is the `REQ-113` / `TEST-115` contract for issue #234.
+
+## Review Lifecycle
+
+Actual model review also requires the explicit `reviewExecution` policy shown
+above. Only `cpu-only` mode and an integer thread count from 1 through 8 are
+supported, bound to the approved model digest. Missing/unknown/substituted controls
+are rejected before inference; planning MCP calls alone does not grant execution
+authority. The canonical request contains `num_gpu: 0` and exact `num_thread`
+before request hashing. Authorization, assessment/run provenance and checkpoint
+binding retain the policy, so changed execution conditions refuse checkpoint
+reuse rather than silently overriding transport options or server defaults.
+The concrete transport also refuses requests without supported CPU options.
+
+Requested CPU/thread options are not OS hard-limit or GPU-absence attestation;
+any separately approved residency observation is recorded as a separate fact.
+No service reconfiguration or model download is part of selecting this policy.
+This is the `REQ-118` / `TEST-119` follow-up for issue #244.
+
+Actual model review requires the explicit `reviewLifecycle` policy above.
+Overall and per-request deadlines use a monotonic clock and include preflight,
+inference, retry backoff and postflight. HTTP requests include header/body time,
+bounded streamed responses and cancellation; metadata and retry attempts consume
+the request count. Exhaustion cannot skip postflight or produce a success record.
+Image review additionally needs an approved `maxImageCount` up to three; requests
+remain sequential. The host checks cancellation/deadlines again before I/O.
+
+Only declared transient transport/status errors may retry, at most three times,
+using the same approved payload and bounded backoff. Format/identity/privacy
+errors and ambiguous client timeouts do not trigger weaker or unbounded retries.
+Cancellation stops further scheduling; pending client operations are cancelled
+and closed before returning. Ctrl+C returns cancellation rather than success.
+Timeout/cancellation does not prove server computation stopped, so failure
+diagnostics preserve that uncertainty and never force daemon/model teardown.
+
+Every request uses the approved finite residency TTL (1..300 seconds), not
+`keep_alive: 0`; this does not assert exclusive ownership of a shared model.
+Assessment/run receipts record lifecycle policy, counts, consumed time and
+completion outcome. No daemon reconfiguration, model deletion, or unowned unload
+is performed. Unsupported resource controls are rejected, not represented as
+enforced. Synchronous review requires a non-async caller.
+
+Python uses pinned httpx 0.28.1 with proxies/redirects disabled and no compressed
+response fallback. An isolated local setup is:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install httpx==0.28.1
+.venv/bin/python -m pytest scripts/tests/ -q --tb=short
+```
+
+Install Pillow 12.1.1 too when it is not already available and images are used.
+The contract is `REQ-114` / `TEST-116` for issue #235. These client-side limits
+are not GPU sizing, OS CPU preemption, or server-computation attestation.
+
+## Private Non-Success Observations
+
+Optionally add `--failure-observation /absolute/private/refusal.json` before
+`--mcp-command`. This requests a distinct, non-overwriting
+`projectbuddy/assisted-review-refusal@1` record on refusal or cancellation;
+success writes no observation. Keep its path separate from inputs, the capture
+tree, checkpoints and the final receipt. POSIX custody requires a current-user
+0700 directory and creates a 0600 file atomically; unsafe or unsupported custody
+fails closed. No existing operator file is replaced.
+
+The closed record contains `complete: false`, the original exit code, fixed
+failure-kind/outcome/phase enums, validated lifecycle limits, bounded
+request/retry/reserved counters, finite elapsed time when available, possible
+in-flight state and the last request hash when available. Model phases distinguish
+identity preflight, model metadata, inference and identity postflight. No prompt,
+response, model prose, private path, tool result or exception message is retained.
+`serverCompletion` is `unknown` after a model request, otherwise `not-started`;
+neither an observation nor absence of residency proves server work finished.
+
+Observation persistence is best effort: failure emits only a fixed safe secondary
+diagnostic and preserves the original refusal/cancellation exit. Recording it
+does not check an expired deadline again, retry work, call another tool or expand
+authority. It is not a successful receipt, resumable checkpoint, model verdict or
+build proof. This is the `REQ-119` / `TEST-120` contract for issue #246.
+
+## Private Checkpoints And Resume
+
+Add `--checkpoint /absolute/private/review.json` to a new run to retain partial
+review work; add `--resume` with the same path and identical inputs to recover.
+The checkpoint path must differ from the final `--output` receipt path. A new
+run refuses an existing checkpoint unless resume is explicit. No raw image,
+prompt, response or unrestricted model prose is saved. The checkpoint retains
+only validated minimized per-input results, original-result/finding digests,
+model/template limits and consumed lifecycle budget.
+
+The `projectbuddy/assisted-review-checkpoint@1` binding hash covers the complete
+authorization, evidence, selected/transformed frame identities, ordered request
+hashes/options, model digest, prompt/schema versions, sampling, budget, privacy
+and residency policies. Changed inputs/approval or unsafe/corrupt state are
+refused without replacing the old checkpoint. Expired disclosure cannot be
+reused. Every reuse performs fresh model preflight and final postflight; newly
+checkpointed inputs also receive an identity check before persistence. Complete
+required coverage and final aggregation remain necessary for a distinct final
+receipt. A checkpoint always has `complete: false`, even when every per-input
+result is present, and cannot be written as a final run receipt.
+
+Custody is currently POSIX-only: a current-user 0700 directory, regular singly
+linked 0600 files, no symlinked path components, an exclusive nonblocking process
+lock, bounded JSON and a canonical self-hash. Unsupported platforms fail closed
+rather than weakening Windows ACLs. Temporary files are private, fsynced and
+atomically committed; failure preserves the last valid state. Locks are released
+on process exit; the harmless 0600 lock file remains for safe reuse. No operator
+assets or checkpoints are automatically deleted. Self-hashes detect inconsistent
+state, not malicious same-user rewriting or model attestation.
+
+Resume restores consumed request/retry/time budget instead of resetting it. An
+uncertain in-flight marker reserves worst-case remaining request attempts and
+their time budget; receipts expose `reservedUnknownRequestCount` and
+`priorServerCompletionUnknown`. This is conservative accounting, not proof that
+old server computation stopped. Exhausted budget blocks reuse. Raw assessment
+audit identity uses `modelAssessmentHashPolicy: ordered-input-digests@1`, so
+fresh and resumed runs derive the same result/finding hashes without storing
+model prose. Existing minimized views and scoped frame references are preserved.
+The contract is `REQ-115` / `TEST-117`, with partial-state separation exercised
+by `TEST-118`, for issue #236. Checkpoints are not release/build qualification.
+
+This prototype does **not** start, stop, create, delete, activate, or register a
+VM, and does not execute the PPL build; it validates an existing
+`lv_icon.lvlibp` proof. Native build failures and exact-VM poison teardown remain
+behind the separately approved lifecycle workflow. Do not treat an
+`inconclusive` model assessment as a passing benchmark.

@@ -30,7 +30,16 @@ Usage:
 
 Optional: SSH_HOST, SSH_PORT, GUEST_USER. VM_NAME is required (no default --
 this script is a generic engine shared by any fork).
-Run only after the operator has activated LabVIEW Professional in the guest.
+No prior human-interactive LabVIEW activation is needed (confirmed via
+real workflow_dispatch proof, #62): this NI Linux LabVIEW distribution
+needs no separate license-activation dialog -- VIPM activation (run here
+automatically) is the only activation this script performs or needs.
+Before the first run against a given appliance, ensure the guest's Guest
+Additions match the host's VirtualBox version and VIPM Desktop's
+installed-package database has been initialized at least once (see
+docs/vm-provisioning/procedure.md's "Interactive console access"
+section) -- a stale appliance fails with a null VRDE framebuffer or a
+LabViewVersionNotFound error respectively, not a licensing error.
 EOF
 }
 

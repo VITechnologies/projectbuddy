@@ -58,6 +58,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+PROGRESS_HEARTBEAT_SECONDS = 60.0
+
 
 def log(message: str) -> None:
     print(f"[vnc-bootstrap] {message}", file=sys.stderr, flush=True)
@@ -94,12 +96,22 @@ def get_vm_state(vm_name: str) -> str:
 def wait_for_marker_count(log_path: Path, marker: str, min_count: int, timeout: float, poll_interval: float = 10.0) -> bool:
     """Block until `marker` appears at least `min_count` times in `log_path`,
     or `timeout` seconds elapse. Returns whether the count was reached."""
-    deadline = time.monotonic() + timeout
+    start_time = time.monotonic()
+    deadline = start_time + timeout
+    next_heartbeat = start_time + PROGRESS_HEARTBEAT_SECONDS
+    marker_count = 0
     while time.monotonic() < deadline:
         if log_path.is_file():
-            count = log_path.read_text(errors="replace").count(marker)
-            if count >= min_count:
+            marker_count = log_path.read_text(errors="replace").count(marker)
+            if marker_count >= min_count:
                 return True
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            elapsed = now - start_time
+            remaining = max(0.0, deadline - now)
+            log(f"still waiting for marker {marker!r} ({marker_count}/{min_count}; "
+                f"{elapsed:.0f}s elapsed, {remaining:.0f}s remaining)")
+            next_heartbeat = now + PROGRESS_HEARTBEAT_SECONDS
         time.sleep(poll_interval)
     return False
 
@@ -277,7 +289,9 @@ def poll_winrm_ready(winrm_host: str, winrm_port: int, timeout: float, poll_inte
     live. This needs no guest credentials and works whether or not the
     installer's own shell has visibly finished."""
     url = f"http://{winrm_host}:{winrm_port}/wsman"
-    deadline = time.monotonic() + timeout
+    start_time = time.monotonic()
+    deadline = start_time + timeout
+    next_heartbeat = start_time + PROGRESS_HEARTBEAT_SECONDS
     while time.monotonic() < deadline:
         try:
             urllib.request.urlopen(url, timeout=5)
@@ -288,6 +302,13 @@ def poll_winrm_ready(winrm_host: str, winrm_port: int, timeout: float, poll_inte
             return True
         except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError):
             pass
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            elapsed = now - start_time
+            remaining = max(0.0, deadline - now)
+            log(f"still waiting for WinRM at {winrm_host}:{winrm_port} "
+                f"({elapsed:.0f}s elapsed, {remaining:.0f}s remaining)")
+            next_heartbeat = now + PROGRESS_HEARTBEAT_SECONDS
         time.sleep(poll_interval)
     return False
 

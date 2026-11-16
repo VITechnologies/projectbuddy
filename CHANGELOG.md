@@ -4,6 +4,289 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.4.0
+
+- Adopt the repo-standards-review consumer kit at RSR v0.5.0 (#277), and
+  re-certify the compliance stamp against v0.5.0.
+  - Executable scripts under `vm`, `docker`, `scripts` and
+    `.github/scripts`, and `Run-Pipeline.sh`, check out with LF on every
+    platform. The CRLF Windows unattended template stays byte-exact.
+  - The kit's check runs in CI and pins RSR to its published release
+    manifest.
+  - `standards-assurance-scan.yml` and
+    `docs/architecture/standards-compliance.md` move together from v0.2.23 to
+    v0.5.0. All 5 required gates `PASS`.
+
+- `projectbuddy-wiki` pins the ecosystem wiki standard it implements:
+  `rsr/ecosystem-wiki-standard@1` from repo-standards-review `v0.5.0` (#320).
+  - `project` reports the pin.
+  - A test compares the installed projection functions with the pinned
+    catalogues, each one and in order, and fails when they differ.
+
+- `projectbuddy-wiki project` also projects the Architecture Packet (#315).
+  - Migration `0004` gives `Architecture-Packet.md` and `architecture/*.md`
+    one canonical layout, `# title`, a blank line, then the body, and parses
+    hub index blocks into their children.
+  - Pages render back byte for byte. Problems are listed apart and never keep
+    the wiki out of the registry.
+
+- `projectbuddy-wiki export-registry` exports the wiki's governed pages to the
+  RSR registry (#309, slice 2 of #307).
+  - It ingests one snapshot per scope, in the order software, system, test,
+    into `registry_v1`.
+  - It reads the source identity from an operator-approved record.
+  - It reuses a snapshot whose content key exists. Re-exporting unchanged
+    content, even from a later commit, changes nothing.
+  - CI tests the export against a stub of RSR's ingest contract, because RSR
+    is private. The same tests pass against RSR `v0.4.2`'s own migrations.
+
+- `projectbuddy-wiki project` projects the wiki's requirement and test pages
+  for the RSR registry (#309, slice 2 of #307).
+  - Migration `0003` parses each governed page in exactly one canonical
+    layout, and renders it back byte for byte.
+  - It derives the `verifies`, `allocates` and `supersedes` edges from wiki
+    links.
+  - `wiki_v1.registry_envelope` builds the `rsr/registry-snapshot@1` envelope
+    of each scope, with node texts byte-identical to RSR's.
+  - Any page or link that cannot be exported is listed by `project` (exit 1),
+    and refuses every envelope.
+  - Exit code 1 is now named `Findings`; it covers drift and projection
+    problems.
+  - Migration `0002` makes `seed` linear in the number of files. Seeding
+    10,001 files took 25 s, because the check that no file shares its name
+    with a directory was planned as a nested loop.
+
+- `projectbuddy-wiki` keeps a local working copy of the GitHub wiki in
+  PostgreSQL (#308, slice 1 of #307).
+  - `seed` records the wiki clone's committed bytes as an append-only
+    snapshot in schema `wiki_v1`. Each content is stored once, and a commit
+    already recorded changes nothing.
+  - `render` writes a recorded state back byte for byte. It writes only into
+    a missing or empty directory, or into the top of a clone at a recorded
+    commit (never its `.git` or a subdirectory). It refuses symbolic links.
+  - `check` proves the latest state matches the clone's `HEAD`, and exits 1 on
+    drift.
+  - CI runs the tests against the pinned `postgres:16-alpine` image as
+    `Wiki Tool Tests`, at 100% line and branch coverage.
+
+- `projectbuddy-diagnose` raises the answer yield (#304).
+  - When the rules decide, the answer prompt lists the facts they rest on,
+    or, if they rest on none, the rule itself, so the model cites exact
+    pointers.
+  - An empty list or object can be cited as `"[]"` or `"{}"`.
+  - The hint does not change grounding. On the workstation, all six
+    questions gave grounded answers with verified classes.
+
+- `projectbuddy-ask` 0.3.0 adds the `diagnose <question-id>` verb (#298, #290
+  slice 4).
+  - The peer's forced command runs the deployed `projectbuddy-diagnose`, with
+    its pinned policy and the deny list, from fixed paths with no shell, and
+    allows 180 s.
+  - It returns the grounded report, or no advice with its reason, in the
+    `projectbuddy/peer-ask@1` envelope. An unknown question is refused.
+  - The workstation client waits longer for `diagnose` and checks the
+    answer's shape, including the report's schema and verified citations.
+  - The question ID cannot start with `-` or carry a trailing newline.
+
+- `projectbuddy-diagnose` verifies the answer's class (#299, #302). The policy
+  (`projectbuddy/diagnose-policy@2`) gives each question ordered,
+  machine-checkable rules.
+  - Conditions use `some`, `every` or `none` over JSON-pointer matches, with
+    `*` over arrays, and `eq`/`ne`/`lt`/`le`/`gt`/`ge`/`prefix`/`present`
+    tests.
+  - A condition is undecided when its tool was not called, failed, or was
+    truncated in a way that matters.
+  - When the rules decide, the answer schema allows only the decided class
+    from the first attempt, so the model's attempts go to the finding and
+    citations. A class check stays as a defence in depth. The report adds
+    `verified: ["citations", "class"]` and the rule with its basis facts.
+    When the rules cannot decide, the class stays the model's, advisory.
+  - The rules reach the model as generated prose.
+  - The shipped rules guard against failed reads that probes report inside
+    their data: services `error`, event-errors `errors`, and vm-states
+    `running: null`.
+  - `projectbuddy-probes services` adds `githubRunner`, decided before
+    redaction can rewrite a runner's name.
+
+- Add `tools/peer/diagnose` (`projectbuddy-diagnose`, #295, #290 slice 3): the
+  bounded P4 agent loop. A local model answers one question from a closed
+  list by calling only the read-only `projectbuddy-probes` tools.
+  - Bounds: rounds, calls per round and in total, and an evidence byte budget.
+    Every request passes the truncation guard.
+  - The answer is asked for separately, in a JSON schema. It is redacted
+    again and grounded: every citation's JSON pointer must resolve to exactly
+    the cited value in a tool result the model was given. A rejected answer
+    may be repaired once; otherwise there is no advice (exit 6).
+  - The policy (`projectbuddy/diagnose-policy@1`) pins `qwen2.5:7b` by digest
+    and gives each question's classes with their rules.
+- `projectbuddy-probes`: `disk` reports `freePercent`, computed by the tool.
+  The `ollama` description says that `identity` marks the pinned model. The
+  deny-list loader is now the public `HostRedactor`, shared with diagnose.
+- Coverage filters for `advise`, `bench` and `probes` use `*` wildcards.
+  Coverlet ignored the hyphenated assembly names, and the gate held only
+  because the Exclude lists covered everything else.
+
+- Fix `projectbuddy-probes network-link` on Windows (#292). .NET also lists
+  NDIS filter pseudo-interfaces (QoS Packet Scheduler, WFP filters) and absent
+  adapters, which could fill the 16-adapter cap and push out real adapters.
+  - On Windows, adapters bound to neither IPv4 nor IPv6 are now counted in
+    `omitted` instead of listed.
+  - Adapters with a default gateway are listed first, then those that are up,
+    with absent ones last.
+  - The README records what a Windows run verified, and that `vm-states` sees
+    only the VMs registered to its own account.
+
+- Add `tools/peer/probes` (`projectbuddy-probes`, #292, #290 slice 2): the
+  closed list of read-only tools the P4 diagnostics agent may call on the
+  peer.
+  - The six tools are `network-link`, `disk`, `ollama`, `vm-states`,
+    `services` and `event-errors` (`hours` 1 to 72).
+  - Unknown tools and out-of-spec arguments are refused before anything runs.
+  - Programs run without a shell and never from `PATH`.
+  - `showvminfo` keys, services and tasks are read from allow-lists. Events
+    are reduced to provider, ID and level counts.
+  - Every result is redacted with the deny list and the host's own names,
+    capped per list and at 16 KiB, and marked `truncated` when anything was
+    cut. Results that cannot be made safe become a fixed failure envelope.
+  - `run-all` adds a SHA-256 per result for the live proof. The shared Ollama
+    client gains `LoadedAsync` (`/api/ps` size, VRAM and context length).
+  - CI adds it to the `Peer Tool Tests` matrix at 100% coverage and publishes
+    the trimmed win-x64 binary.
+
+- Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
+  deterministic and idempotent redaction that peer evidence passes through
+  before a local model sees it and before it leaves the peer.
+  - It covers secrets (token formats, `Authorization` headers including
+    escaped JSON and table layouts, flags and Windows switches, command-line
+    passwords for `net use`, `net user`, `schtasks`, `sqlcmd`, `bcp`, `psexec`,
+    `certutil`, `docker login` and `7z`, `ConvertTo-SecureString` and
+    `NetworkCredential`, prefixed and table-style assignments, connection
+    strings, XML settings, SAS signatures).
+  - It also covers accounts in switches and `user@address`, URLs (allow-listed
+    hosts only, never a path), git remotes, e-mail addresses, directory names
+    and certificate subjects, and bare host names under generic and country
+    domains.
+  - It also covers `reg query` secret rows, `netsh` key content,
+    certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts, and
+    Name/Value layouts: JSON objects at any depth (one linear scan), Format-List
+    and YAML records, CSV tables, JSON argument arrays and ProcessStartInfo
+    argument strings, XML elements and attributes (unattend.xml, Maven,
+    `ConvertTo-Xml`, CLIXML), and PowerShell `@{…}` object strings.
+  - Secret values with spaces are taken whole at a line start (after an
+    optional log timestamp), after a table gap, and inside a quoted
+    `KEY=value` string.
+  - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
+    first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
+    text such as a Windows path is never decoded. JSON string literals with
+    escapes are redacted as the text they stand for (decoded, settled and
+    encoded again, at any nesting), so line-based rules work inside JSON and
+    the output stays well formed; the corpus is also checked wrapped in JSON.
+  - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
+    encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
+    runs through spaces and stops at a colon, a switch, or the next path.
+  - Allow-listed paths are kept only to a fixed depth. Separators and trailing
+    dots cannot dodge a limit, any `.` or `..` hides the whole path, and
+    profiles are reduced to `<user>`.
+  - MACs and IPs are redacted except loopback and the cable. An operator-private
+    deny list (substring) plus the host's own machine and account names
+    (whole word) become `<private>`, matched across any whitespace and invisible
+    characters.
+  - Rules repeat until the text settles (at most 32 passes, more than the
+    number of rules), so the output is idempotent by construction. Evidence
+    over 4,000,000 characters is refused whole unless it is already redacted,
+    and every adversarial shape tested stays linear up to that cap.
+  - Diagnostics stay: digests, versions, exit codes and times.
+  - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
+    matrix at 100% coverage. Its linear-time tests at the 4,000,000-character
+    cap run in a separate Release step, outside the instrumented coverage run.
+
+- Add `projectbuddy-advise pre-review` (#284 slice 2). It gives advisory
+  findings on a `git diff`.
+  - Each finding must name a rule from the policy rubric, which fixes its
+    severity, and cite a non-blank added line. The report includes that line
+    of code.
+  - Large diffs are split by file, hunk and line window into requests within
+    the truncation-safe budget, and coverage reports exactly what was left
+    unreviewed.
+  - Findings that only restate their rule's guidance are labelled `generic`.
+  - Measured: F1 0.78 on the bench security corpus. On real PR diffs,
+    precision is low and every false positive was `generic`, so pre-review
+    stays a first look, never a substitute for review.
+- Advise reports keep quotes readable: relaxed JSON escaping, since the output
+  is never embedded in HTML.
+
+- `projectbuddy-advise triage` grounding refinements from the corpus
+  accuracy check (#284):
+  - an exact whole log line counts from 3 characters (a bare `Killed`),
+    while fragments still need 8;
+  - a step not found in the log is reported as `null`, and `verified`
+    lists only `errorLine`, instead of discarding a verified error line.
+
+  On the bench corpus, all 8 items were answered with no ungrounded claim:
+  7/8 error lines matched ground truth, the class was correct on 8/8, and
+  1 step was dropped rather than wrong.
+- Add `projectbuddy-advise triage` (`tools/peer/advise`, #284, P2 of #210). It
+  turns a CI log into a few hundred bytes of local, advisory triage: the
+  failing step, one error line quoted verbatim, and a class from a closed
+  list.
+  - Evidence shaping: timestamps and ANSI codes removed, one header per
+    GitHub job/step, error-looking lines from the whole log first, then the
+    newest lines within a byte budget.
+  - The model (base `qwen2.5:7b`, the #217 winner) is digest-pinned in a
+    committed policy.
+  - Replies are accepted only after the truncation probe and the half-context
+    rule. An answer that is not grounded in the evidence yields no advice
+    (exit 6), never a guess.
+  - On real failed runs, reports were 51–94× smaller than the raw logs.
+- Extract the shared Ollama guard library `tools/peer/ollama`
+  (`ProjectBuddy.PeerOllama`): the loopback-only client (no proxy, no
+  redirects), the truncation probe and accept rule, model digest pins, and
+  strict JSON. `projectbuddy-bench` now uses it unchanged in behavior. CI runs
+  the library, bench and advise as a `Peer Tool Tests` matrix, each gated at
+  100% line and branch coverage of its own assembly.
+- Bench selection rule (D10): pool scores across machines and treat security
+  F1 differences under 0.05 as ties, the lessons from #217.
+
+- Add `projectbuddy-bench` (`tools/peer/bench`, #217), a .NET 10 single-file
+  benchmark that scores digest-pinned Ollama candidates against #210 D10 on
+  both the workstation and the peer. It covers triage extraction and
+  diagnosis, security recall with clean controls, native tool calling, VRAM
+  residency and latency.
+  - It talks only to loopback Ollama.
+  - It refuses reported prompt counts that could hide Ollama's silent
+    `num_ctx/2` truncation, after a per-model probe proves the server still
+    truncates that way.
+  - It fails malformed model output closed.
+  - CI enforces 100% line and branch coverage and a trimmed win-x64 publish.
+- Add a locally tested, read-only active-capture MCP evidence consumer for
+  issue #255. It validates sealed server/run/VM identity, ordered bounded
+  batches, lifecycle, and explicit frame integrity without capture mutation
+  or retries. Production Actor revision pinning and live qualification remain
+  pending; this does not qualify a live benchmark.
+- Add a local three-mode capture-time scheduling candidate with on-demand,
+  periodic, and continuous modes, bounded queues and deadlines, loopback-only
+  Ollama token streaming, model-digest checks, privacy transformations, and
+  settled cancellation. SDK/Actor/mock-HTTP fixture composition is covered;
+  model choices remain data and never authorize or execute UI actions.
+- Wire an optional capture-bound one-shot dispatcher through the existing sealed
+  broker and pinned MCP router. All three scheduling modes can consume one
+  explicitly approved synthetic action while fixture capture remains active;
+  invalid bindings, changed contracts, partial responses, and uncertain or
+  contradictory acknowledgements abort without retries. Advisory mode remains
+  the default, and production activation is still gated on an immutable Actor pin.
+- Retain bounded numerical reading/limit observations for independent grounding
+  scores, separate from action correctness and task success. Observation claims
+  are not forwarded as authority or tool arguments to the sealed UI broker.
+- Pin the authorized local Actor producer commit in a separate local-only
+  manifest with strict base-contract/source/resource validation. The default
+  production contract and live activation remain unchanged.
+- Advance the opt-in pin to the published 1.5.0 standalone Windows desktop
+  candidate and require explicit desktop workload admission. Native VM/live
+  qualification remains blocked on the tracked Vagrant/VirtualBox import error.
+- Restore the synchronous Ollama chat CPU-option guard, which was unreachable
+  beneath the residency error branch; invalid execution options now fail before
+  HTTP dispatch, matching the streaming transport's fail-closed policy.
+
 ## v0.3.31
 
 Operator-authorized resolution of all 9 issues in the "Semantic Audit

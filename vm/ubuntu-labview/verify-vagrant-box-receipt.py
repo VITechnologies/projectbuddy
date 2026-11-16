@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -10,8 +11,13 @@ import tarfile
 import uuid
 import tempfile
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 
-SCHEMA = "projectbuddy/ubuntu-vagrant-box@1"
+from lane_box.readiness import SKIPPED_ROOTS  # noqa: E402
+
+SCHEMA = "projectbuddy/ubuntu-vagrant-box@2"
+UNSCANNED_SCHEMA = "projectbuddy/ubuntu-vagrant-box@1"
+RUNNER_SCAN_FIELDS = {"bootId", "runnerUnits", "runnerConfigurations", "skippedRoots", "scannedAt"}
 ACTIVATED_SNAPSHOT_NAME = "labview2026-q3-pro-activated-ready"
 PACKAGE_SNAPSHOT_NAME = "labview2026-q3-pro-package-ready"
 FORBIDDEN_FIELDS = {
@@ -36,6 +42,21 @@ def keys(value):
     elif isinstance(value, list):
         for child in value:
             yield from keys(child)
+
+
+def is_uuid(value) -> bool:
+    try:
+        return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def is_utc_time(value) -> bool:
+    try:
+        moment = datetime.datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return False
+    return moment is not None and moment.utcoffset() == datetime.timedelta(0)
 
 
 def write_atomic(path: pathlib.Path, content: str) -> None:
@@ -132,7 +153,18 @@ def main() -> int:
         if not condition:
             errors.append(message)
 
-    require(receipt.get("schema") == SCHEMA, "unexpected schema")
+    if receipt.get("schema") == UNSCANNED_SCHEMA:
+        errors.append("box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it")
+    else:
+        require(receipt.get("schema") == SCHEMA, "unexpected schema")
+    scan = receipt.get("runnerScan")
+    require(isinstance(scan, dict) and set(scan) == RUNNER_SCAN_FIELDS, "runner scan is missing or malformed")
+    if isinstance(scan, dict):
+        require(scan.get("runnerUnits") == [] and scan.get("runnerConfigurations") == [],
+                "runner scan found an Actions runner")
+        require(scan.get("skippedRoots") == ["/" + name for name in SKIPPED_ROOTS], "runner scan skipped other roots")
+        require(is_uuid(scan.get("bootId")), "runner scan boot ID is invalid")
+        require(is_utc_time(scan.get("scannedAt")), "runner scan time is invalid")
     require(receipt.get("outcome") == "PASS", "outcome is not PASS")
     require(receipt.get("failures") == [], "receipt contains failures")
     require(receipt.get("source") == {

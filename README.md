@@ -25,7 +25,7 @@ or private configuration ever flow into this repository.
 ## Standards compliance
 
 Assessed against `svelderrainruiz/repo-standards-review`'s `release-gate`
-profile, **version `v0.2.23`** (commit `ba72187`). See
+profile, **version `v0.5.0`** (commit `0cab380`). See
 [`docs/architecture/standards-compliance.md`](docs/architecture/standards-compliance.md)
 for the full gate status and the living re-certification policy,
 [`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
@@ -62,6 +62,22 @@ risks.
   automatically and never by tracking a floating branch or `latest`.
 
 See [CHANGELOG.md](CHANGELOG.md) for released versions.
+
+### Source-Derived Configuration Prototype
+
+The candidate [.NET source configuration CLI](tools/source-config/README.md)
+derives JSON/TOML drafts from a pinned checkout's existing VIPM manifest and a
+selected packed-library build. Configuration validity requires deterministic
+checks and local Ollama review; native-build proof remains separate. It does
+not register projects, overwrite existing outputs, or enable cleanup.
+
+### Wiki Working Copy
+
+The [wiki working-copy CLI](tools/wiki/README.md) keeps a local, append-only
+copy of the GitHub wiki in PostgreSQL. It seeds the copy from the wiki's
+committed bytes, renders it back byte for byte, and checks for drift. It is
+the base for local AI-assisted wiki regeneration (#307); it never publishes
+to the wiki.
 
 ## What's in this engine
 
@@ -103,6 +119,15 @@ for the full phase-by-phase procedure (both VM families), including the
 deliberate human-only LabVIEW activation boundary (VIPM activation on the
 Ubuntu-LabVIEW family is a deliberate, narrower automated exception) and
 the active fleet-status verification design.
+[`docs/vm-provisioning/ubuntu-lane-box.md`](docs/vm-provisioning/ubuntu-lane-box.md)
+covers the LabVIEW-free Ubuntu lane box (`vm/ubuntu-lane/`,
+`scripts/Invoke-LaneBox.py`), and
+[`docs/vm-provisioning/ubuntu-lane.md`](docs/vm-provisioning/ubuntu-lane.md)
+covers the dry-run lane plan and lane teardown by VM UUID
+(`scripts/Invoke-Lane.py`), and
+[`docs/vm-provisioning/ubuntu-vagrant-clone.md`](docs/vm-provisioning/ubuntu-vagrant-clone.md)
+covers the neutral clone verifier (`scripts/vagrant_clone/`) and its clone
+profiles.
 
 ### Native SBOM reporting (root-level `Run-*`, `Build-Sbom.ps1`, `internal/`, `docker/`)
 
@@ -133,6 +158,21 @@ release-dependency attestation-verification chain, and the deliberate
 native-vs-container difference in whether Grype's own findings gate the
 run.
 
+### LUnit release gate (`docker/lunit-gate/`)
+
+An ephemeral, no-VIPM, GitHub-hosted-runner container (separate from the
+SBOM pipeline's own containers above) that runs a pinned commit of
+`ni/labview-icon-editor`'s real LUnit test suite via native `LabVIEWCLI`,
+proving this engine can execute genuine, unattended LabVIEW automated
+tests without depending on persistent-VM GUI activation. Both Windows
+(Phase 1) and Linux (Phase 2) are implemented and live-dispatch-proven on
+both the fork and upstream `VITechnologies/projectbuddy` -- per `REQ-033`
+the dual-platform gate is now **Active**. See
+[`docs/lunit-gate/procedure.md`](docs/lunit-gate/procedure.md) and
+`docs/architecture/adr/ADR-0003-ephemeral-container-lunit-release-gate-revised.md`
+for the full procedure, the SHA-256 package-pinning provenance, and the
+named-waiver policy.
+
 ### Runner/registration helpers (root-level)
 
 `Register-WindowsRunner.ps1` and `Register-WslRunnerKeepAlive.ps1` plan or
@@ -160,6 +200,23 @@ This is deliberately a plain script, not a GitHub Actions workflow: the
 decision to escalate is a judgment call made during an agent's own
 analysis, not a routine CI step, so it is invoked directly (second
 consumption model above) at the point that judgment is made.
+
+### Human approval gate (`scripts/Invoke-ApprovalGate.py`, `approval-gate.yml`)
+
+Where an escalation only notifies a human, the approval gate lets a human
+authorize one privileged action. An automated requester submits a request
+with `scripts/Invoke-ApprovalGate.py submit`. The request becomes one run
+of `approval-request.yml`, whose gated job waits in a protected GitHub
+environment for a human required reviewer. After an approval, the job
+re-verifies it, then runs the action class's executor with the credential
+that only that environment holds. Every decision is recorded on a
+tracking issue. Forks and other repositories adopt the gate by
+configuration: an action-class registry, one environment per class, and a
+`readiness` check that names anything missing. See
+[`docs/approval-gate/procedure.md`](docs/approval-gate/procedure.md) and
+[`ADR-0007`](docs/architecture/adr/ADR-0007-human-approved-automation-requests.md).
+Phase 1 ships the gate with only a no-op known-answer class, so it is not
+yet live-proven.
 
 ### Repo onboarding (`Enable-RepoIssueTracking.ps1`)
 

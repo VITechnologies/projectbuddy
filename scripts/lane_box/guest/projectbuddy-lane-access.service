@@ -1,0 +1,17 @@
+[Unit]
+Description=ProjectBuddy lane: accept the run's SSH client key from the host
+After=virtualbox-guest-utils.service
+Before=ssh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/projectbuddy-lane-access.py
+TimeoutStartSec=60
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run
+
+[Install]
+WantedBy=multi-user.target

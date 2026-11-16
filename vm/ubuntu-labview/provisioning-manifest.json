@@ -39,5 +39,12 @@
     "version": "26.3.2-4056",
     "url": "https://traffic.libsyn.com/secure/jkinc/vipm_26.3.2-4056_amd64.deb",
     "sha256": "89f50b8dc7ac023224f1b8f822ff99ac221ad31c67bae06951c8d1e09e7eef6c"
+  },
+  "actionsRunner": {
+    "version": "2.338.0",
+    "linX64Filename": "actions-runner-linux-x64-2.338.0.tar.gz",
+    "linX64Sha256": "af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32",
+    "downloadUrlTemplate": "https://github.com/actions/runner/releases/download/v{version}/{linX64Filename}",
+    "verification": "SHA-256 independently computed locally on 2026-11-07 from the downloaded asset, and cross-checked against GitHub's own published checksum in the release notes (both matched). Same pinned version as vm/windows-labview/provisioning-manifest.json's actionsRunner entry, for consistency across both VM families; re-pin both together when bumping. Used by install-actions-runner.sh (invoked by complete-runner-registration.sh's register-runner phase) to download and verify the runner package inside the guest before config.sh configures it."
   }
 }

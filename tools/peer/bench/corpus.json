@@ -1,0 +1,267 @@
+{
+  "schema": "projectbuddy/peer-bench-corpus@1",
+  "numCtx": 8192,
+  "numPredict": 256,
+  "seed": 42,
+  "prompts": {
+    "triage": "You triage one CI log excerpt. Reply with JSON only. step: the most specific name of the failing unit, meaning a gate, check or test name if the log names one, otherwise the CI job or step name. errorLine: the single most diagnostic error line, copied verbatim from the log. class: the root-cause class. Classes: gate-failure (a policy, lint or verification gate reported a violation), test-failure (a test assertion failed), segfault (a process crashed on an invalid memory access), out-of-memory (a process was killed after exhausting memory), vm-state (a virtual machine or runner is in the wrong state), network (a host could not be resolved or reached), missing-secret (a required token or credential was not supplied), timeout (a job or step exceeded its time limit). Never invent text that is not in the log.",
+    "security": "You review one code excerpt for security defects. Reply with JSON only. findings: one entry per defect, each with its class and 1-based line number. Classes: secret-on-command-line (a secret passed as a process argument), command-injection (untrusted text reaches a shell), path-traversal (untrusted text builds a file path), secret-in-log (a secret is printed or logged), tls-verification-disabled (certificate checks are turned off), unpinned-download (downloaded code runs without a pinned hash or signature). Report only defects present in the excerpt; if there are none, return an empty findings list.",
+    "tool": "You dispatch a cloud agent's question to the peer machine. Call ask_peer exactly once with the one verb that answers the question. Verbs: identity (OS build and uptime), vbox (virtual machine states), disk (free disk space), ollama (Ollama version and loaded models), lbabus (installed lbabus version)."
+  },
+  "triageClasses": [
+    "gate-failure",
+    "test-failure",
+    "segfault",
+    "out-of-memory",
+    "vm-state",
+    "network",
+    "missing-secret",
+    "timeout"
+  ],
+  "securityClasses": [
+    "secret-on-command-line",
+    "command-injection",
+    "path-traversal",
+    "secret-in-log",
+    "tls-verification-disabled",
+    "unpinned-download"
+  ],
+  "verbs": [
+    "identity",
+    "vbox",
+    "disk",
+    "ollama",
+    "lbabus"
+  ],
+  "items": [
+    {
+      "id": "triage-gate-failure",
+      "kind": "triage",
+      "source": "public: svelderrainruiz/labview-benchmark-actor actions run 43693436694 (excerpt, timestamps stripped)",
+      "input": "Run node experiments/verify-local-gates.mjs\nPASS  docs-stamp-and-no-id-renumbering\nPASS  collab-cli-embeds-canonical-requirements\nPASS  gitflow-branch-governance-documented\nPASS  release-lineage\nPASS  coverage-artifact-meets-floor\nPASS  viewer-cursor-logic-receipt-green\nPASS  multi-vm-topology-receipt-green\nPASS  extension-manifest-boundary\nPASS  human-task-shortcuts\nFAIL  release-component-versioning  -- Marketplace publish must run in the marketplace environment\nPASS  vsix-marketplace-links\nPASS  standards-release-risk-baseline\nPASS  release-risk-post-release-closeout\nPASS  experiment-lifecycle-local-kpi\nPASS  devcontainer-codespace-install-route\nPASS  corpus-ingestion-contract-green\n\n213/214 checks passed on win32-x64 (node v24.19.0)\n##[error]Process completed with exit code 1.",
+      "expect": {
+        "step": "release-component-versioning",
+        "errorLine": "Marketplace publish must run in the marketplace environment",
+        "class": "gate-failure"
+      }
+    },
+    {
+      "id": "triage-musl-segfault",
+      "kind": "triage",
+      "source": "public: svelderrainruiz/lbabus actions run 43699217651 attempt 1 (excerpt, timestamps stripped); svelderrainruiz/lbabus#11",
+      "input": "#14 0.564   SKIP  grep-without-ripgrep-fails-closed  (requires no ripgrep)\n#14 0.667 lbabus-mock: POST /repos/lbabus-ci/fixture-defect/issues/7/comments\n#14 0.682   PASS  linux-defect-unicode-body-posts\n#14 0.739   PASS  linux-grep-multifile-heading-suppressed\n#14 0.771   PASS  linux-runner-surfaces-real-exit-code\n#14 0.771 \n#14 0.771 lbabus-ci: 7 passed, 0 failed, 1 skipped\n#14 0.777 lbabus-mock: served 2 request(s); runner exit 0\n#14 ERROR: process \"/bin/sh -c dotnet /out/mock/lbabus-mock.dll run-harness --port 8099       --repo-root /repo --lbabus /out/cli/lbabus.dll --runner /out/ci/lbabus-ci.dll\" did not complete successfully: exit code: 139\n------\n > [ci-musl 5/5] RUN dotnet /out/mock/lbabus-mock.dll run-harness --port 8099       --repo-root /repo --lbabus /out/cli/lbabus.dll --runner /out/ci/lbabus-ci.dll:\n------\nDockerfile:92\n--------------------\n  91 |     COPY tools/collab-cli/ci /repo/tools/collab-cli/ci\n  92 | >>> RUN dotnet /out/mock/lbabus-mock.dll run-harness --port 8099 \\\n  93 | >>>       --repo-root /repo --lbabus /out/cli/lbabus.dll --runner /out/ci/lbabus-ci.dll\n  94 |     \n--------------------\n##[error]Process completed with exit code 1.",
+      "expect": {
+        "step": "run-harness",
+        "errorLine": "exit code: 139",
+        "class": "segfault"
+      }
+    },
+    {
+      "id": "triage-vm-saved",
+      "kind": "triage",
+      "source": "synthetic, modeled on a private fleet-status failure (names generic)",
+      "input": "Run ./scripts/check-vm.sh lane-vm-1\ninventory: lane-vm-1 status=ready-for-activation runner=lane-runner-1\nVBoxManage showvminfo lane-vm-1 --machinereadable\nVMState=\"saved\"\nrunner lane-runner-1: registered, status=offline\n##[error]expected running (status=ready-for-activation) but VBoxManage reports 'saved'\n##[error]Process completed with exit code 1.",
+      "expect": {
+        "step": "check-vm",
+        "errorLine": "expected running (status=ready-for-activation) but VBoxManage reports 'saved'",
+        "class": "vm-state"
+      }
+    },
+    {
+      "id": "triage-oom-killed",
+      "kind": "triage",
+      "source": "synthetic, contrasts exit 137 with the exit 139 segfault item",
+      "input": "Run dotnet test Engine.Tests --no-restore\n  Determining projects to restore...\n  Starting test execution, please wait...\n  A total of 1 test files matched the specified pattern.\n  Passed!  - Failed: 0, Passed: 212, Skipped: 0 (partial)\nKilled\n##[error]Process completed with exit code 137.\nThe runner has received a shutdown signal. Memory usage peaked at 15.6 GiB of 16 GiB.",
+      "expect": {
+        "step": "Engine.Tests",
+        "errorLine": "Process completed with exit code 137",
+        "class": "out-of-memory"
+      }
+    },
+    {
+      "id": "triage-dns-failure",
+      "kind": "triage",
+      "source": "synthetic",
+      "input": "Run actions/checkout@v4\nSyncing repository: example-org/example-repo\n[command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin\nfatal: unable to access 'https://git.example.invalid/example-org/example-repo/': Could not resolve host: git.example.invalid\nThe process '/usr/bin/git' failed with exit code 128\nWaiting 13 seconds before trying again\n##[error]The process '/usr/bin/git' failed with exit code 128",
+      "expect": {
+        "step": "checkout",
+        "errorLine": "Could not resolve host: git.example.invalid",
+        "class": "network"
+      }
+    },
+    {
+      "id": "triage-missing-token",
+      "kind": "triage",
+      "source": "synthetic",
+      "input": "Run ./publish.ps1 -Channel stable\nResolving package version... 1.6.0\nPackaging extension... done (2.4 MB)\nWrite-Error: Input required and not supplied: PUBLISH_TOKEN\n##[error]Process completed with exit code 1.",
+      "expect": {
+        "step": "publish",
+        "errorLine": "Input required and not supplied: PUBLISH_TOKEN",
+        "class": "missing-secret"
+      }
+    },
+    {
+      "id": "triage-job-timeout",
+      "kind": "triage",
+      "source": "synthetic",
+      "input": "Run ./scripts/provision.sh --wait-for-winrm\nwaiting for WinRM on 127.0.0.1:55985 ... attempt 41/120\nwaiting for WinRM on 127.0.0.1:55985 ... attempt 42/120\n##[error]The job running on runner lane-runner-2 has exceeded the maximum execution time of 30 minutes.\n##[error]The operation was canceled.",
+      "expect": {
+        "step": "provision",
+        "errorLine": "has exceeded the maximum execution time of 30 minutes",
+        "class": "timeout"
+      }
+    },
+    {
+      "id": "triage-test-assertion",
+      "kind": "triage",
+      "source": "synthetic",
+      "input": "Run python -m pytest scripts/tests -q\n........................F.........\n=================================== FAILURES ===================================\n___________________________ test_budget_rejects_overflow ___________________________\n    assert review.status == 'rejected'\nE   AssertionError: assert 'accepted' == 'rejected'\nFAILED scripts/tests/test_review.py::test_budget_rejects_overflow - AssertionError: assert 'accepted' == 'rejected'\n1 failed, 33 passed in 4.21s\n##[error]Process completed with exit code 1.",
+      "expect": {
+        "step": "test_budget_rejects_overflow",
+        "errorLine": "AssertionError: assert 'accepted' == 'rejected'",
+        "class": "test-failure"
+      }
+    },
+    {
+      "id": "security-password-argv",
+      "kind": "security",
+      "source": "synthetic, modeled on svelderrainruiz/labview-benchmark-actor#75",
+      "input": "#!/usr/bin/env bash\nset -euo pipefail\npass=\"$(cat \"$HOME/.config/lab/vm-pass\")\"\nVBoxManage guestcontrol \"$vm\" run --username vagrant --password \"$pass\" \\\n  --exe \"C:\\\\Windows\\\\System32\\\\cmd.exe\" -- /c ver",
+      "expect": {
+        "classes": [
+          "secret-on-command-line"
+        ]
+      }
+    },
+    {
+      "id": "security-shell-injection",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "import subprocess\nfrom flask import request\n\ndef clone():\n    url = request.args['url']\n    subprocess.run(f'git clone {url} /srv/work', shell=True, check=True)",
+      "expect": {
+        "classes": [
+          "command-injection"
+        ]
+      }
+    },
+    {
+      "id": "security-path-traversal",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "import os\nfrom flask import request, send_file\n\nBASE = '/srv/reports'\n\ndef report():\n    name = request.args['name']\n    return send_file(os.path.join(BASE, name))",
+      "expect": {
+        "classes": [
+          "path-traversal"
+        ]
+      }
+    },
+    {
+      "id": "security-token-logged",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "param([string]$Repo)\n$token = $env:GH_TOKEN\nWrite-Host \"Publishing $Repo with token $token\"\ngh release create v1.0.0 --repo $Repo",
+      "expect": {
+        "classes": [
+          "secret-in-log"
+        ]
+      }
+    },
+    {
+      "id": "security-tls-off",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "var handler = new HttpClientHandler\n{\n    ServerCertificateCustomValidationCallback = (_, _, _, _) => true,\n};\nusing var client = new HttpClient(handler);\nvar body = await client.GetStringAsync(updateUrl);",
+      "expect": {
+        "classes": [
+          "tls-verification-disabled"
+        ]
+      }
+    },
+    {
+      "id": "security-curl-pipe-shell",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "FROM ubuntu:24.04\nRUN apt-get update && apt-get install -y curl\nRUN curl -fsSL https://tools.example.invalid/install.sh | bash",
+      "expect": {
+        "classes": [
+          "unpinned-download"
+        ]
+      }
+    },
+    {
+      "id": "security-two-defects",
+      "kind": "security",
+      "source": "synthetic",
+      "input": "import logging, requests\n\ndef fetch(api_key):\n    logging.info('calling API with key %s', api_key)\n    return requests.get('https://api.example.invalid/v1', headers={'X-Key': api_key}, verify=False)",
+      "expect": {
+        "classes": [
+          "secret-in-log",
+          "tls-verification-disabled"
+        ]
+      }
+    },
+    {
+      "id": "security-clean-argv-list",
+      "kind": "security",
+      "source": "synthetic clean control",
+      "input": "import subprocess\n\ndef clone(url: str, target: str) -> None:\n    if not url.startswith('https://'):\n        raise ValueError('https only')\n    subprocess.run(['git', 'clone', '--', url, target], check=True)",
+      "expect": {
+        "classes": []
+      }
+    },
+    {
+      "id": "security-clean-passwordfile",
+      "kind": "security",
+      "source": "synthetic clean control",
+      "input": "#!/usr/bin/env bash\nset -euo pipefail\numask 077\npass_file=\"$HOME/.config/lab/vm-pass\"\nVBoxManage guestcontrol \"$vm\" run --username vagrant --passwordfile \"$pass_file\" \\\n  --exe \"C:\\\\Windows\\\\System32\\\\cmd.exe\" -- /c ver",
+      "expect": {
+        "classes": []
+      }
+    },
+    {
+      "id": "tool-vm-state",
+      "kind": "tool",
+      "source": "synthetic",
+      "input": "Is the lane VM on the peer running right now, or is it saved?",
+      "expect": {
+        "verb": "vbox"
+      }
+    },
+    {
+      "id": "tool-free-disk",
+      "kind": "tool",
+      "source": "synthetic",
+      "input": "How much free disk space does the peer have left?",
+      "expect": {
+        "verb": "disk"
+      }
+    },
+    {
+      "id": "tool-models-loaded",
+      "kind": "tool",
+      "source": "synthetic",
+      "input": "Which Ollama version does the peer run, and is any model loaded at the moment?",
+      "expect": {
+        "verb": "ollama"
+      }
+    },
+    {
+      "id": "tool-uptime",
+      "kind": "tool",
+      "source": "synthetic",
+      "input": "What Windows build is the peer on, and how long has it been up?",
+      "expect": {
+        "verb": "identity"
+      }
+    },
+    {
+      "id": "tool-bus-version",
+      "kind": "tool",
+      "source": "synthetic",
+      "input": "Which lbabus version is installed on the peer?",
+      "expect": {
+        "verb": "lbabus"
+      }
+    }
+  ]
+}
