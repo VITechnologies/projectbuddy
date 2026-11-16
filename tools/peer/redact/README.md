@@ -204,9 +204,14 @@ Other value rules:
   `"token": null`, and a Name/Value object's numeric `Value` (an event count under
   a provider named `…TokenBroker…`). Any other bare value is written as a string
   (`"<secret>"`), so the JSON still parses.
-- **VirtualBox machine-readable keys:** a secret key in brackets before `=`
-  (`vrdeproperty[VNCPassword]="…"`), and an unseparated MAC
-  (`macaddress1="080027A1B2C3"` → `<mac>`).
+- **VirtualBox machine-readable keys:** a secret key in brackets, in the raw
+  `showvminfo --machinereadable` line only (`vrdeproperty[VNCPassword]="…"`).
+  The same key as a JSON member (`{"vrdeproperty[VNCPassword]":"…"}`) is not
+  read. An unseparated MAC is read only under a `macaddressN` key
+  (`macaddress1="080027A1B2C3"` → `<mac>`); under `"mac"` or `"physicalAddress"`
+  it stays. Tools must allow-list exact keys (#292).
+- **Numbers after a quoted key:** a numeric secret written as a JSON number
+  (`{"password":123456}`) stays, the cost of keeping counts readable (#293).
 
 ## JSON evidence
 
