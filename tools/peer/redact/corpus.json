@@ -1,0 +1,1335 @@
+{
+  "schema": "projectbuddy/redaction-corpus@1",
+  "denyTerms": [
+    "CORP-VPN-7",
+    "WS-CORP-01",
+    "Example Widgets Ltd"
+  ],
+  "wholeWordTerms": [
+    "lab",
+    "WS-HOST-7"
+  ],
+  "items": [
+    {
+      "id": "link-outage",
+      "input": "Test-NetConnection github.com -Port 443\nRemoteAddress    : 140.82.121.4\nInterfaceAlias   : Wi-Fi\nSourceAddress    : 192.168.2.12\nTcpTestSucceeded : True",
+      "mustNotContain": [
+        "192.168.2.12",
+        "140.82.121.4"
+      ],
+      "mustContain": [
+        "github.com",
+        "Wi-Fi",
+        "TcpTestSucceeded : True"
+      ]
+    },
+    {
+      "id": "profile-path",
+      "input": "ollama path: C:\\Users\\JaneOperator\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+      "mustNotContain": [
+        "JaneOperator"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\AppData\\Local\\Programs\\Ollama\\ollama.exe"
+      ]
+    },
+    {
+      "id": "profile-private-folder",
+      "input": "opened C:\\Users\\JaneOperator\\Documents\\Acme Widgets\\plan.docx",
+      "mustNotContain": [
+        "JaneOperator",
+        "Documents",
+        "Acme",
+        "plan.docx"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\<path>"
+      ]
+    },
+    {
+      "id": "customer-path",
+      "input": "Opening D:\\Customer Work\\secret-proj\\main.vi failed",
+      "mustNotContain": [
+        "Customer Work",
+        "secret-proj",
+        "main.vi"
+      ],
+      "mustContain": [
+        "<path>"
+      ]
+    },
+    {
+      "id": "system-path-then-customer-path",
+      "input": "C:\\Windows\\System32\\cmd.exe /c type D:\\Clients\\plan.txt",
+      "mustNotContain": [
+        "Clients",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "C:\\Windows\\System32\\cmd.exe /c type ",
+        "<path>"
+      ]
+    },
+    {
+      "id": "unc-path",
+      "input": "copy \\\\fileserver01\\projects$\\drop\\x.zip",
+      "mustNotContain": [
+        "fileserver01",
+        "projects$",
+        "x.zip"
+      ],
+      "mustContain": [
+        "copy <path>"
+      ]
+    },
+    {
+      "id": "urls",
+      "input": "git clone https://github.com/example-corp/secret-repo.git\nsvn checkout svn://svn.corp.example/trunk\npush https://user:hunter22@gitlab.com/group/x",
+      "mustNotContain": [
+        "example-corp",
+        "secret-repo",
+        "svn.corp.example",
+        "hunter22",
+        "group/x"
+      ],
+      "mustContain": [
+        "https://github.com/<path>",
+        "<url>",
+        "https://gitlab.com/<path>"
+      ]
+    },
+    {
+      "id": "scp-remote",
+      "input": "remote: git@github.com:example-corp/secret-repo.git",
+      "mustNotContain": [
+        "example-corp",
+        "secret-repo"
+      ],
+      "mustContain": [
+        "remote: <url>"
+      ]
+    },
+    {
+      "id": "email",
+      "input": "reported by jane.doe@corp.example on Monday",
+      "mustNotContain": [
+        "jane.doe",
+        "corp.example"
+      ],
+      "mustContain": [
+        "reported by <email> on Monday"
+      ]
+    },
+    {
+      "id": "tokens",
+      "input": "gh {{gh}} pat {{ghpat}} gl {{glpat}} runner {{glrt}} aws {{aws}} slack {{slack}} jwt {{jwt}} npm {{npm}} gapi {{gapi}}",
+      "mustNotContain": [
+        "{{gh}}",
+        "{{ghpat}}",
+        "{{glpat}}",
+        "{{glrt}}",
+        "{{aws}}",
+        "{{slack}}",
+        "{{jwt}}",
+        "{{npm}}",
+        "{{gapi}}"
+      ],
+      "mustContain": [
+        "<secret>"
+      ]
+    },
+    {
+      "id": "assignments",
+      "input": "password=hunter2xx\n\"api_key\": \"abcd1234efgh\"\nAuthorization: Bearer abcdefghijklmnop\nclient_secret : s3cr3tvalue",
+      "mustNotContain": [
+        "hunter2xx",
+        "abcd1234efgh",
+        "abcdefghijklmnop",
+        "s3cr3tvalue"
+      ],
+      "mustContain": [
+        "password=<secret>",
+        "\"api_key\": \"<secret>\"",
+        "Bearer <secret>"
+      ]
+    },
+    {
+      "id": "private-key",
+      "input": "key:\n{{pem}}\nend",
+      "mustNotContain": [
+        "MIIEvQ"
+      ],
+      "mustContain": [
+        "<secret>"
+      ]
+    },
+    {
+      "id": "addresses",
+      "input": "peer 10.211.0.2 loopback 127.0.0.1 ::1 any 0.0.0.0 vpn 192.168.10.13 v6 fe80::fe66:37ff:feb8:a510 mac 4c:c5:d9:04:55:14",
+      "mustNotContain": [
+        "192.168.10.13",
+        "fe80::fe66",
+        "4c:c5:d9"
+      ],
+      "mustContain": [
+        "peer 10.211.0.2",
+        "loopback 127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "mac <mac>"
+      ]
+    },
+    {
+      "id": "deny-list",
+      "input": "InterfaceAlias CORP-VPN-7 on WS-CORP-01 for Example Widgets Ltd",
+      "mustNotContain": [
+        "CORP-VPN-7",
+        "WS-CORP-01",
+        "Example Widgets"
+      ],
+      "mustContain": [
+        "InterfaceAlias <private> on <private>"
+      ]
+    },
+    {
+      "id": "kept-diagnostics",
+      "input": "##[error]Process completed with exit code 1.\nsha256 7FC234C4286DE57A24425823F7FC4769DBEC74EACB8CDACF58ABEB228237D601\nollama version is 0.40.16 on build 10.0.26300.7171\n[Math]::Round at 18:09:12",
+      "mustNotContain": [],
+      "mustContain": [
+        "##[error]Process completed with exit code 1.",
+        "7FC234C4286DE57A24425823F7FC4769DBEC74EACB8CDACF58ABEB228237D601",
+        "0.40.16",
+        "10.0.26300.7171",
+        "[Math]::Round at 18:09:12"
+      ]
+    },
+    {
+      "id": "posix-home",
+      "input": "cache /home/jane/customers/example/x.bin",
+      "mustNotContain": [
+        "jane",
+        "customers",
+        "x.bin"
+      ],
+      "mustContain": [
+        "/home/<user>/<path>"
+      ]
+    },
+    {
+      "id": "unc-with-spaces",
+      "input": "copy \\\\fs01\\Customer Share\\Acme Corp\\plan.txt",
+      "mustNotContain": [
+        "fs01",
+        "Customer Share",
+        "Acme Corp",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "copy <path>"
+      ]
+    },
+    {
+      "id": "long-and-device-paths",
+      "input": "\\\\?\\C:\\Users\\Jane\\Desktop\\x.txt\n\\\\?\\UNC\\fs01\\share\\acme\\x\n\\\\.\\pipe\\acme-secret-pipe\nopen \\\\fs01",
+      "mustNotContain": [
+        "Jane",
+        "Desktop",
+        "fs01",
+        "acme"
+      ],
+      "mustContain": [
+        "\\\\?\\C:\\Users\\<user>\\<path>",
+        "open <path>"
+      ]
+    },
+    {
+      "id": "forward-slash-and-url-paths",
+      "input": "C:/Users/Jane/Documents/plan.txt\nfile:///C:/Users/Jane/plan.txt\nC%3A%2FUsers%2FJane%2Fplan.txt\n/c/Users/Jane/plan.txt\n/mnt/d/Clients/x\n/users/jane/Library",
+      "mustNotContain": [
+        "Jane",
+        "plan.txt",
+        "Clients",
+        "Library"
+      ],
+      "mustContain": [
+        "C:/Users/<user>/<path>",
+        "file:///C:/Users/<user>/<path>",
+        "C%3A%2FUsers%2F<user>%2F<path>",
+        "/users/<user>/<path>"
+      ]
+    },
+    {
+      "id": "escaped-paths",
+      "input": "{\"path\":\"C:\\\\Users\\\\Jane\\\\Desktop\\\\plan.txt\",\"twice\":\"C:\\\\\\\\Users\\\\\\\\Jane\\\\\\\\Desktop\",\"unc\":\"\\\\\\\\fs01\\\\share\\\\x\"}",
+      "mustNotContain": [
+        "Jane",
+        "Desktop",
+        "fs01",
+        "plan.txt"
+      ],
+      "mustContain": [
+        "\"C:\\\\Users\\\\<user>\\\\<path>\"",
+        "\"C:\\\\\\\\Users\\\\\\\\<user>\\\\\\\\<path>\"",
+        "\"unc\":\"<path>\""
+      ]
+    },
+    {
+      "id": "mixed-separators-and-traversal",
+      "input": "C:\\Windows\\Temp/acme/x.log\nC:\\Windows\\System32/../../Users/Jane\nC:\\Windows\\..\\Users\\Jane\\x\nC:\\Windows\\System32\\..\\..\\Clients\\x",
+      "mustNotContain": [
+        "acme",
+        "Jane",
+        "Clients"
+      ],
+      "mustContain": [
+        "C:\\Windows\\Temp/<path>"
+      ]
+    },
+    {
+      "id": "depth-limits",
+      "input": "C:\\Program Files\\Acme\\Customer\\Secret\\deep\\x.txt\nC:\\ProgramData\\Other\\x\nC:\\Users\\Jane\\.ollama\\models\\blobs\\sha256-abc",
+      "mustNotContain": [
+        "deep",
+        "x.txt",
+        "Other",
+        "sha256-abc",
+        "Jane"
+      ],
+      "mustContain": [
+        "C:\\Program Files\\Acme\\Customer\\Secret\\<path>",
+        "C:\\Users\\<user>\\.ollama\\models\\blobs\\<path>"
+      ]
+    },
+    {
+      "id": "spaces-and-apostrophes",
+      "input": "D:\\Acme Projects\\O'Brien Ltd\\plan.txt was missing\nC:\\Users\\Jane Doe\\Desktop\\plan.txt",
+      "mustNotContain": [
+        "Acme",
+        "Brien",
+        "Ltd",
+        "plan.txt",
+        "Doe",
+        "Jane"
+      ],
+      "mustContain": [
+        "C:\\Users\\<user>\\<path>"
+      ]
+    },
+    {
+      "id": "prefixed-and-flag-secrets",
+      "input": "ACTIONS_RUNNER_INPUT_TOKEN=abcdef123456\nDB_PASSWORD: hunter2xx\nconfig.sh --url https://github.com/x --token AAAAB3secret99 --name runner",
+      "mustNotContain": [
+        "abcdef123456",
+        "hunter2xx",
+        "AAAAB3secret99"
+      ],
+      "mustContain": [
+        "ACTIONS_RUNNER_INPUT_TOKEN=<secret>",
+        "DB_PASSWORD: <secret>",
+        "--token <secret> --name runner"
+      ]
+    },
+    {
+      "id": "environment-table",
+      "input": "Name                Value\n----                -----\nDB_PASSWORD         hunter2xx\nPATH                C:\\Windows",
+      "mustNotContain": [
+        "hunter2xx"
+      ],
+      "mustContain": [
+        "DB_PASSWORD         <secret>",
+        "PATH                C:\\Windows"
+      ]
+    },
+    {
+      "id": "connection-strings",
+      "input": "Server=sql01;Database=app;User Id=sa;Password=Pa55 w0rd!;Encrypt=true\nDefaultEndpointsProtocol=https;AccountName=acmestore;AccountKey=abcd1234==;EndpointSuffix=core.windows.net",
+      "mustNotContain": [
+        "Pa55",
+        "w0rd",
+        "abcd1234"
+      ],
+      "mustContain": [
+        "Password=<secret>;Encrypt=true",
+        "AccountKey=<secret>;"
+      ]
+    },
+    {
+      "id": "xml-and-authorization",
+      "input": "<add key=\"ClearTextPassword\" value=\"hunter2xx\" />\nAuthorization: token abc123def\n{\"Authorization\": \"Bearer abc123def456ghi\"}\nAuthorization: AWS4-HMAC-SHA256 Credential=AKID/2024, SignedHeaders=host, Signature=abc123",
+      "mustNotContain": [
+        "hunter2xx",
+        "abc123",
+        "AKID",
+        "SignedHeaders"
+      ],
+      "mustContain": [
+        "value=\"<secret>\"",
+        "Authorization: token <secret>",
+        "\"Bearer <secret>\"",
+        "AWS4-HMAC-SHA256 <secret>"
+      ]
+    },
+    {
+      "id": "sas-signatures",
+      "input": "?sv=2020&se=2024&sig=abcd%2Bsecret\nhttps://acmestore.blob.core.windows.net/c/x?sv=2020&sig=efgh%2Bsecret",
+      "mustNotContain": [
+        "abcd%2Bsecret",
+        "efgh",
+        "acmestore"
+      ],
+      "mustContain": [
+        "&sig=<secret>"
+      ]
+    },
+    {
+      "id": "addresses-in-prose",
+      "input": "connected to 192.168.4.20.\nreverse 20.4.168.192.in-addr.arpa\nping 2001:db8::1.",
+      "mustNotContain": [
+        "192.168.4.20",
+        "20.4.168.192",
+        "2001:db8"
+      ],
+      "mustContain": [
+        "connected to <ip>.",
+        "ping <ip>."
+      ]
+    },
+    {
+      "id": "git-remotes-and-hosts",
+      "input": "git clone build01:acme/repo.git\ngit clone git@build01:acme/repo.git\nresolve fs01.corp.acme.com failed\nsee www.acme.com/clients\napi.github.com/repos/x",
+      "mustNotContain": [
+        "build01",
+        "acme",
+        "fs01",
+        "clients"
+      ],
+      "mustContain": [
+        "git clone <url>",
+        "resolve <host> failed",
+        "api.github.com/<path>"
+      ]
+    },
+    {
+      "id": "deny-term-spellings",
+      "input": "Example  Widgets\nLtd shipped\nExample\u00a0Widgets Ltd left\nWS-\u200bCORP-01 joined\nExam\u200bple Widgets Ltd paid",
+      "mustNotContain": [
+        "Widgets",
+        "CORP-01",
+        "Exam"
+      ],
+      "mustContain": [
+        "<private> shipped",
+        "<private> left",
+        "<private> joined",
+        "<private> paid"
+      ]
+    },
+    {
+      "id": "kept-diagnostics-2",
+      "input": "Version=13.0.0.0, Culture=neutral\nBasic authentication failed\nv1.2.3.4 released\nmain.vi and ollama.exe and System.Text.Json\nC:\\Program Files\\National Instruments\\LabVIEW 2025\\LabVIEW.exe\nC:\\Windows\\System32\\cmd.exe /c dir\nat Foo.Bar() in D:\\src\\acme\\x.cs:line 42\nD:\\src\\acme\\proj.csproj(12,5): error CS1002: ; expected",
+      "mustNotContain": [
+        "acme",
+        "src"
+      ],
+      "mustContain": [
+        "Version=13.0.0.0, Culture=neutral",
+        "Basic authentication failed",
+        "v1.2.3.4 released",
+        "main.vi and ollama.exe and System.Text.Json",
+        "C:\\Program Files\\National Instruments\\LabVIEW 2025\\LabVIEW.exe",
+        "C:\\Windows\\System32\\cmd.exe /c dir",
+        "in <path>:line 42",
+        "<path>: error CS1002: ; expected"
+      ]
+    },
+    {
+      "id": "posix-paths-with-spaces",
+      "input": "/d/Customer Work/Bid A/main.vi\n/mnt/d/Customer Work/Bid B/main.vi\n/cygdrive/d/Customer Work/x\n/home/jane/Customer Work/Bid C/x\n//fileserver01/Customer Projects/x.zip\nfile:////fileserver01/Customer Projects/x\n/home/jane/x.py:42: error",
+      "mustNotContain": [
+        "Customer",
+        "Work",
+        "Bid",
+        "fileserver01",
+        "Projects",
+        "jane"
+      ],
+      "mustContain": [
+        "/home/<user>/<path>",
+        "<path>:42: error"
+      ]
+    },
+    {
+      "id": "windows-command-secrets",
+      "input": "Server=db01;User Id=sa;Password=Pa55 hidden words\n$pw = ConvertTo-SecureString \"Sup3rSecure\" -AsPlainText -Force\n\"Sup3rPiped\" | ConvertTo-SecureString -AsPlainText -Force\nnet use Z: \\\\fs01\\share /user:CORP\\jane Sup3rNetUse\nnet user jane Sup3rNetUser /add\ncmdkey /add:fs01 /user:jane /pass:Sup3rCmdkey\nschtasks /Create /TN Nightly /RU CORP\\svc /RP Sup3rTask /F\nplink -ssh jane@10.0.0.5 -pw Sup3rPlink",
+      "mustNotContain": [
+        "Pa55",
+        "hidden words",
+        "Sup3r",
+        "jane",
+        "CORP",
+        "fs01\\share",
+        "svc"
+      ],
+      "mustContain": [
+        "Password=<secret>",
+        "ConvertTo-SecureString <secret> -AsPlainText",
+        "<secret> | ConvertTo-SecureString",
+        "net use Z: <path> /user:<user> <secret>",
+        "net user <user> <secret> /add",
+        "/pass:<secret>",
+        "/RU <user> /RP <secret> /F",
+        "-pw <secret>"
+      ]
+    },
+    {
+      "id": "escaped-and-table-authorization",
+      "input": "Authorization                  token 0123abcd4567\n{\\\"Authorization\\\":\\\"token 4567efgh0123\\\"}\n{\\\"password\\\":\\\"hunter2xx\\\"}",
+      "mustNotContain": [
+        "0123abcd",
+        "4567efgh",
+        "hunter2xx"
+      ],
+      "mustContain": [
+        "Authorization                  token <secret>",
+        "{\\\"Authorization\\\":\\\"token <secret>\\\"}",
+        "{\\\"password\\\":\\\"<secret>\\\"}"
+      ]
+    },
+    {
+      "id": "doubled-separators-and-system-data",
+      "input": "C:/Users//Jane//Documents//Plans\nC:\\Users\\/Jane\\x\nC:\\Windows\\.\\Temp\\Acme Bid\\plan.docx\nC:\\Windows\\Temp.\\Acme\\x\nC:\\Windows\\SystemTemp\\Acme_build\\x.log\nC:\\Windows\\Prefetch\\TESTER.EXE-1.pf\nC:\\Windows\\System32\\Tasks\\Nightly Sync",
+      "mustNotContain": [
+        "Jane",
+        "Plans",
+        "Acme",
+        "TESTER",
+        "Nightly"
+      ],
+      "mustContain": [
+        "C:/Users//<user>//<path>",
+        "C:\\Windows\\Temp.\\<path>",
+        "C:\\Windows\\SystemTemp\\<path>",
+        "C:\\Windows\\System32\\Tasks\\<path>"
+      ]
+    },
+    {
+      "id": "more-domains-and-directory-names",
+      "input": "fs01.lanl.gov daq.mit.edu x.mil contoso.com.au contoso.co.jp contoso.fr contoso.ai www.contoso.it\n_ldap._tcp.dc._msdcs.contoso.com\nCN=Doe\\, John,OU=Lab,DC=corp,DC=local\nuser.id and arr.at and README.md and CN=github.com",
+      "mustNotContain": [
+        "lanl",
+        "mit.edu",
+        "x.mil",
+        "contoso",
+        "Doe",
+        "John",
+        "corp"
+      ],
+      "mustContain": [
+        "user.id and arr.at and README.md and CN=github.com",
+        "CN=<private>,OU=<private>,DC=<private>,DC=<private>"
+      ]
+    },
+    {
+      "id": "dotnet-and-version-diagnostics",
+      "input": "Microsoft.NETCore.App 10.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\nC:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\nusing System.IO; ASP.NET Core\nC:\\Windows\\System32\\chcp.com 65001\nalpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\"ProductVersion\": \"1.0.0.0\"\nProductVersion : 1.0.0.0",
+      "mustNotContain": [
+        "<host>",
+        "<ip>",
+        "<url>",
+        "<path>"
+      ],
+      "mustContain": [
+        "Microsoft.NETCore.App 10.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]",
+        "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
+        "using System.IO; ASP.NET Core",
+        "C:\\Windows\\System32\\chcp.com 65001",
+        "alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "\"ProductVersion\": \"1.0.0.0\"",
+        "ProductVersion : 1.0.0.0"
+      ]
+    },
+    {
+      "id": "drives-after-switches-and-escapes",
+      "input": "7z x a.zip -oD:\\Clients\\Acme\ncl.exe /ID:\\Clients\\inc\n\"fatal:\\tD:/Clients/Acme Bid/firmware\"\nC:\\Program Files\\7-Zip\\7z.exe x a.zip -oD:\\Clients\nC:\\x\\abcD:\\y\\z\nhttps:\\/\\/acme.com\\/x\nD:\\tools\\x.exe /user:CORP\\jane",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "abcD",
+        "acme.com",
+        "jane"
+      ],
+      "mustContain": [
+        "7z x a.zip -o<path>",
+        "cl.exe /I<path>",
+        "\"fatal:\\t<path>\"",
+        "C:\\Program Files\\7-Zip\\7z.exe x a.zip -o<path>",
+        "<path> /user:<user>"
+      ]
+    },
+    {
+      "id": "host-names-whole-word",
+      "input": "LabVIEW 2025 run by lab on WS-HOST-7; lab-01 and Administrators",
+      "mustNotContain": [
+        "WS-HOST-7",
+        " lab ",
+        "lab-01"
+      ],
+      "mustContain": [
+        "LabVIEW 2025 run by <private> on <private>; <private>-01 and Administrators"
+      ]
+    },
+    {
+      "id": "invisible-tag-characters",
+      "input": "Exam\udb40\udc20ple Widgets Ltd and WS-\udb40\udc41CORP-01",
+      "mustNotContain": [
+        "Widgets",
+        "CORP-01"
+      ],
+      "mustContain": [
+        "<private> and <private>"
+      ]
+    },
+    {
+      "id": "utf8-json-writer-escapes",
+      "input": "{\"stderr\":\"fatal: not a git repository at \\u0027D:/Clients/Acme/firmware\\u0027\",\"customer\":\"Example Widgets Lt\\u0064\",\"cmd\":\"git -C \\u0022D:/Clients/Acme Bid/firmware\\u0022 status\",\"name\":\"WS-\\u200BCORP-01\"}",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "Widgets",
+        "CORP-01"
+      ],
+      "mustContain": [
+        "at '<path>'",
+        "\"customer\":\"<private>\"",
+        "git -C \\\"<path>\\\" status",
+        "\"name\":\"<private>\""
+      ]
+    },
+    {
+      "id": "tool-credentials",
+      "input": "sqlcmd -S db01 -U sa -P Sup3rSql -Q x\nsqlcmd -Usa -PSup3rGlued\ncertutil -f -p Sup3rCert -importpfx x.pfx\npsexec -u jane -p Sup3rPsexec cmd\ndocker login -u jane -p Sup3rDocker ghcr.io\n7z a -pSup3rZip backup.7z\nopenssl pkcs12 -export -passout pass:Sup3rSsl\n$pw = \"Sup3rPw\"\n$pass = 'Sup3rPass'\nNew-Object System.Net.NetworkCredential(\"jane\", \"Sup3rCred\")\n$pw = Read-Host -AsSecureString\nbypass=true",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "-U <user> -P <secret> -Q x",
+        "-U<user> -P<secret>",
+        "-p <secret> -importpfx",
+        "7z a -p<secret> backup.7z",
+        "-passout <secret>",
+        "$pw = \"<secret>\"",
+        "$pass = '<secret>'",
+        "NetworkCredential(<user>, <secret>)",
+        "$pw = Read-Host -AsSecureString",
+        "bypass=true"
+      ]
+    },
+    {
+      "id": "certificate-subjects",
+      "input": "Subject : CN=fs01.acme.local, O=Acme Ltd, L=Austin, S=Texas, C=US\nsubject=/C=US/ST=Texas/O=Acme/CN=build01\nIssuer : CN=DigiCert Global Root G2, O=DigiCert Inc",
+      "mustNotContain": [
+        "acme",
+        "Austin",
+        "Texas",
+        "build01"
+      ],
+      "mustContain": [
+        "CN=<private>, O=<private>, L=<private>, S=<private>, C=US",
+        "/C=US/ST=<private>/O=<private>/CN=<private>",
+        "Issuer : CN=DigiCert Global Root G2, O=DigiCert Inc"
+      ]
+    },
+    {
+      "id": "dns-context-domains",
+      "input": "   Primary Dns Suffix  . . . . . . . : acme.it\nResolve-DnsName acme.pl; ping acme.in\nuser.id and README.md",
+      "mustNotContain": [
+        "acme"
+      ],
+      "mustContain": [
+        "Suffix  . . . . . . . : <host>",
+        "Resolve-DnsName <host>; ping <host>",
+        "user.id and README.md"
+      ]
+    },
+    {
+      "id": "rule-chain-settles",
+      "input": "user lab_fs01.corp.local::5\\\\fs01\\share\nC:\\Users\\ \\Jane\\Documents\\Acme\nProductVersion     : 1.2.3.4",
+      "mustNotContain": [
+        "fs01",
+        "corp.local",
+        "Jane",
+        "Acme"
+      ],
+      "mustContain": [
+        "user <private><host><ip><path>",
+        "ProductVersion     : 1.2.3.4"
+      ]
+    },
+    {
+      "id": "registry-and-wifi-secrets",
+      "input": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\n    AutoAdminLogon    REG_SZ    1\n    DefaultUserName    REG_SZ    vagrant\n    DefaultPassword    REG_SZ    Sup3rWinlogon\n    ProxyPassword    REG_SZ    my hidden phrase\n    Key Content            : MyWiFiS3cret",
+      "mustNotContain": [
+        "Sup3r",
+        "hidden phrase",
+        "MyWiFi"
+      ],
+      "mustContain": [
+        "AutoAdminLogon    REG_SZ    1",
+        "DefaultPassword    REG_SZ    <secret>",
+        "ProxyPassword    REG_SZ    <secret>",
+        "Key Content            : <secret>"
+      ]
+    },
+    {
+      "id": "apostrophes-in-paths",
+      "input": "D:\\Projects\\Customers' Data\\Acme Corp\\plan.docx\nD:\\Customers'\\Acme Bid\\plan.docx\nD:\\Music\\Rock 'n' Roll Ltd\\plan.docx\nCannot find path 'D:\\Clients\\x' because it does not exist.\nls: cannot access '/home/jane/Customer Work/x': No such file\n/home/o'brien/x",
+      "mustNotContain": [
+        "Data",
+        "Acme",
+        "Roll",
+        "Clients",
+        "Customer Work",
+        "brien"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "cannot access '/home/<user>/<path>': No such file"
+      ]
+    },
+    {
+      "id": "certificate-formats",
+      "input": "*  issuer: C=US; ST=Texas; O=Acme Ltd; CN=Acme Proxy CA\nissuer=C = US, ST = Texas, O = Acme Ltd, CN = Acme Proxy CA\nSubject: CN=Acme Microsoft Teams Room, O=Acme Ltd (Microsoft Partner), C=US",
+      "mustNotContain": [
+        "Acme",
+        "Texas",
+        "Teams"
+      ],
+      "mustContain": [
+        "issuer: C=US; ST=<private>; O=<private>; CN=<private>",
+        "issuer=C = US, ST = <private>, O = <private>, CN = <private>",
+        "Subject: CN=<private>, O=<private>, C=US"
+      ]
+    },
+    {
+      "id": "kept-counters-and-options",
+      "input": "retries=3, s=5, e=2\nsetup.exe /s=1 /L=1033\nTotal: 10, Pass: 9, Fail: 1\n# pass  9\ngcc -O=2 x.c\n$pw = Read-Host -AsSecureString",
+      "mustNotContain": [
+        "<private>",
+        "<secret>"
+      ],
+      "mustContain": [
+        "retries=3, s=5, e=2",
+        "setup.exe /s=1 /L=1033",
+        "Total: 10, Pass: 9, Fail: 1",
+        "# pass  9",
+        "gcc -O=2 x.c"
+      ]
+    },
+    {
+      "id": "more-tool-credentials",
+      "input": "certutil /f /p Sup3rCert /importpfx x.pfx\n7z x -p\"Sup3r Zip\" a.7z\nNew-Object System.Net.NetworkCredential -ArgumentList \"jane\", \"Sup3rArg\"\n[System.Net.NetworkCredential]::new($env:USERNAME, \"Sup3rNew\")",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "/p <secret> /importpfx",
+        "-p<secret> a.7z",
+        "-ArgumentList <user>, <secret>",
+        "::new($env:USERNAME, <secret>)"
+      ]
+    },
+    {
+      "id": "raw-escapes-not-decoded",
+      "input": "C:\\Windows\\Temp\\uadd1\\Acme Bid\\plan.docx\nC:\\Users\\u0123456\\Documents\\x",
+      "mustNotContain": [
+        "Acme",
+        "Documents",
+        "u0123456"
+      ],
+      "mustContain": [
+        "C:\\Windows\\Temp\\<path>",
+        "C:\\Users\\<user>\\<path>"
+      ]
+    },
+    {
+      "id": "certutil-dump-names",
+      "input": "Issuer:\n    CN=Acme Proxy CA\n    O=Acme Ltd\n    L=Austin\n  Name Hash(sha1): 0123abcd\nSubject: CN=acme.com, SERIALNUMBER=1234567, O=Acme Ltd\nSubject: CN=build01.acme.local, OU=Lab, S=Texas,\n    O=Acme Ltd, C=US",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "1234567",
+        "Texas",
+        "build01"
+      ],
+      "mustContain": [
+        "Issuer:\n    CN=<private>\n    O=<private>\n    L=<private>\n  Name Hash(sha1): 0123abcd",
+        "SERIALNUMBER=<private>, O=<private>",
+        "S=<private>,\n    O=<private>, C=US"
+      ]
+    },
+    {
+      "id": "public-issuers-whole-name",
+      "input": "CN=Microsoft Teams Room - Acme Boardroom, O=Microsoft Corporation\nIssuer: CN=DigiCert SHA2 Assured ID Code Signing CA, O=DigiCert Inc, C=US\nCN=ISRG Root X1, O=Internet Security Research Group",
+      "mustNotContain": [
+        "Acme",
+        "Boardroom",
+        "Teams"
+      ],
+      "mustContain": [
+        "CN=<private>, O=Microsoft Corporation",
+        "Issuer: CN=DigiCert SHA2 Assured ID Code Signing CA, O=DigiCert Inc, C=US",
+        "CN=ISRG Root X1, O=Internet Security Research Group"
+      ]
+    },
+    {
+      "id": "quoted-paths-with-apostrophes",
+      "input": "Cannot find path 'D:\\Projects\\Customers' Data\\Acme Corp\\plan.docx' because it does not exist.\nRemove-Item -LiteralPath 'D:\\Projects\\Customers'' Data\\Acme Corp'\n'D:\\O'Brien\\x' missing\nls: cannot access '/home/jane/Customer' Work/x': No such file",
+      "mustNotContain": [
+        "Data",
+        "Acme",
+        "Brien",
+        "jane",
+        "Work"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "-LiteralPath '<path>'",
+        "'<path>' missing",
+        "cannot access '/home/<user>/<path>': No such file"
+      ]
+    },
+    {
+      "id": "registry-short-names-and-flags",
+      "input": "    db_pass    REG_SZ    Sup3rDb\n    ProxyPass    REG_SZ    Sup3rProxy\n    DisablePasswordChange    REG_DWORD    0x0\n    Bypass    REG_DWORD    0x1",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "db_pass    REG_SZ    <secret>",
+        "ProxyPass    REG_SZ    <secret>",
+        "DisablePasswordChange    REG_DWORD    0x0",
+        "Bypass    REG_DWORD    0x1"
+      ]
+    },
+    {
+      "id": "unclosed-quoted-argument",
+      "input": "net use Z: \\\\fs01\\share \"Sup3r Spaced",
+      "mustNotContain": [
+        "Sup3r",
+        "Spaced",
+        "fs01"
+      ],
+      "mustContain": [
+        "net use Z: <path> \"<secret>"
+      ]
+    },
+    {
+      "id": "quoted-certificate-values",
+      "input": "Subject: CN=fs01.acme.local, O=\"Acme, Inc.\", L=Austin, S=Texas, C=US\nIssuer: CN=\"Acme, Inc. Proxy CA\", O=\"Acme, Inc.\", C=US\nsubject=C = US, ST = Texas, L = Austin, O = \"Acme, Inc.\", CN = fs01.acme.local\nCN=\"Doe, John \"\"JD\"\"\", OU=Lab, DC=corp",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "Texas",
+        "Doe",
+        "John",
+        "JD"
+      ],
+      "mustContain": [
+        "Subject: CN=<private>, O=<private>, L=<private>, S=<private>, C=US",
+        "Issuer: CN=<private>, O=<private>, C=US",
+        "ST = <private>, L = <private>, O = <private>, CN = <private>",
+        "CN=<private>, OU=<private>, DC=<private>"
+      ]
+    },
+    {
+      "id": "public-issuer-locality",
+      "input": "Issuer: CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\nIssuer: CN=Acme Room, O=Microsoft Corporation, L=Austin, S=Texas",
+      "mustNotContain": [
+        "Acme",
+        "Austin",
+        "Texas"
+      ],
+      "mustContain": [
+        "CN=Microsoft Code Signing PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "CN=<private>, O=Microsoft Corporation, L=<private>, S=<private>"
+      ]
+    },
+    {
+      "id": "apostrophes-in-last-segment",
+      "input": "Cannot find path 'D:\\Clients\\Acme\\Jones' Bakery Invoice.docx' because it does not exist.\nCannot find path 'D:\\Music\\Rock 'n' Roll Ltd' because it does not exist.\nCannot find path 'D:\\Clients\\x' because it doesn't exist.",
+      "mustNotContain": [
+        "Clients",
+        "Acme",
+        "Bakery",
+        "Roll"
+      ],
+      "mustContain": [
+        "Cannot find path '<path>' because it does not exist.",
+        "Cannot find path '<path>' because it doesn't exist."
+      ]
+    },
+    {
+      "id": "json-command-line-secrets",
+      "input": "{\"CommandLine\":\"C:\\\\Tools\\\\sync.exe --password \\u0022Sup3rSync Zqone\\u0022 --host fs01\"}\n{\"CommandLine\":\"pscp -pw \\u0022Sup3rPscp\\u0022 a b\"}\n{\"CommandLine\":\"NetworkCredential(\\u0022jane\\u0022, \\u0022Sup3rCred Zqtwo\\u0022)\"}\n{\"CommandLine\":\"ConvertTo-SecureString \\u0022Sup3rSecure Zqthree\\u0022 -AsPlainText\"}\n{\"CommandLine\":\"runas /user:\\u0022CORP\\\\Sup3rUser Name\\u0022 cmd\"}\n{\"CommandLine\":\"https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\"}\n{\"CommandLine\":\"C:\\\\Tools\\\\sync.exe --password \\\"Sup3rSync Zqone\\\" --host fs01\"}\n{\"CommandLine\":\"pscp -pw \\\"Sup3rPscp\\\" a b\"}\n{\"CommandLine\":\"NetworkCredential(\\\"jane\\\", \\\"Sup3rCred Zqtwo\\\")\"}\n{\"CommandLine\":\"ConvertTo-SecureString \\\"Sup3rSecure Zqthree\\\" -AsPlainText\"}\n{\"CommandLine\":\"runas /user:\\\"CORP\\\\Sup3rUser Name\\\" cmd\"}\n{\"CommandLine\":\"https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\"}",
+      "mustNotContain": [
+        "Sup3r",
+        "Zqone",
+        "Zqtwo",
+        "Zqthree",
+        "acme"
+      ],
+      "mustContain": [
+        "{\"CommandLine\":\"<path> <secret> --host fs01\"}",
+        "{\"CommandLine\":\"pscp -pw <secret> a b\"}",
+        "{\"CommandLine\":\"NetworkCredential(<user>, <secret>)\"}",
+        "{\"CommandLine\":\"runas /user:<user> cmd\"}"
+      ]
+    },
+    {
+      "id": "json-in-json-command-line-secrets",
+      "input": "{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022C:\\\\\\\\Tools\\\\\\\\sync.exe --password \\\\u0022Sup3rSync Zqone\\\\u0022 --host fs01\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022pscp -pw \\\\u0022Sup3rPscp\\\\u0022 a b\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022NetworkCredential(\\\\u0022jane\\\\u0022, \\\\u0022Sup3rCred Zqtwo\\\\u0022)\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022ConvertTo-SecureString \\\\u0022Sup3rSecure Zqthree\\\\u0022 -AsPlainText\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022runas /user:\\\\u0022CORP\\\\\\\\Sup3rUser Name\\\\u0022 cmd\\u0022}\"}\n{\"Outer\":\"{\\u0022CommandLine\\u0022:\\u0022https://acme.blob.core.windows.net/c?sv=1&sig=Sup3rSig\\u0022}\"}",
+      "mustNotContain": [
+        "Sup3r",
+        "Zqone",
+        "Zqtwo",
+        "Zqthree",
+        "acme"
+      ],
+      "mustContain": [
+        "--host fs01",
+        "pscp -pw <secret> a b",
+        "ConvertTo-SecureString <secret> -AsPlainText"
+      ]
+    },
+    {
+      "id": "short-switch-unc-and-posix",
+      "input": "7z x a.7z -o\\\\fs01\\Customer Projects\\Acme Bid\n7z x a.7z -o//fs01/Customer Projects/Acme Bid\ncl /I\\\\srv\\share\\inc x.c\ntar -C/c/Users/jane/Acme -x\nx -o/home/jane/Acme Bid\nAccess to the path 'D:\\Clients\\Jones' Bakery.docx' is denied.",
+      "mustNotContain": [
+        "fs01",
+        "Customer",
+        "Acme",
+        "srv",
+        "jane",
+        "Clients",
+        "Bakery"
+      ],
+      "mustContain": [
+        "7z x a.7z -o<path>",
+        "cl /I<path>",
+        "tar -C<path>",
+        "x -o/home/<user>/<path>",
+        "Access to the path '<path>' is denied."
+      ]
+    },
+    {
+      "id": "github-own-certificate",
+      "input": "Subject: O=\"GitHub, Inc.\", CN=github.com, L=San Francisco, S=California, C=US",
+      "mustNotContain": [
+        "<private>"
+      ],
+      "mustContain": [
+        "Subject: O=\"GitHub, Inc.\", CN=github.com, L=San Francisco, S=California, C=US"
+      ]
+    },
+    {
+      "id": "quoted-arguments-at-line-end",
+      "input": "net use Z: \\\\srv\\s \"Sup3r Qone\"\nnet user jane \"Sup3r Qtwo\"\n7z x a.7z -p\"Sup3r Qthree\"\nschtasks /RP \"Sup3r Qfour\"",
+      "mustNotContain": [
+        "Sup3r",
+        "Qone",
+        "Qtwo",
+        "Qthree",
+        "Qfour",
+        "jane"
+      ],
+      "mustContain": [
+        "net use Z: <path> \"<secret>\"",
+        "net user <user> \"<secret>\"",
+        "-p\"<secret>\"",
+        "/RP \"<secret>\""
+      ]
+    },
+    {
+      "id": "name-value-json",
+      "input": "[{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rEnv\",\"Name\":\"DB_PASSWORD\"},{\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"Sup3rRunner\"},{\"Key\":\"PATH\",\"Value\":\"C:\\\\Windows\"},{\"Name\":\"DB_PASSWORD\",\"UserName\":\"SYSTEM\",\"VariableValue\":\"Sup3rWmi\"},{\"key\":\"ClearTextPassword\",\"value\":\"Sup3rXml\"}]",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"",
+        "\"Key\":\"PATH\",\"Value\":\"C:\\\\Windows\"",
+        "\"VariableValue\":\"<secret>\"",
+        "\"key\":\"ClearTextPassword\",\"value\":\"<secret>\""
+      ]
+    },
+    {
+      "id": "name-value-records",
+      "input": "Name  : DB_PASSWORD\nValue : Sup3rList\n\nName           : API_TOKEN\nUserName       : SYSTEM\nVariableValue  : Sup3rWmi\n\nenv:\n- name: DB_PASSWORD\n  value: Sup3rYaml\n- name: HOME\n  value: /root\n\n\"PSPath\",\"Name\",\"Key\",\"Value\"\n\"Env:\\DB_PASSWORD\",\"DB_PASSWORD\",\"DB_PASSWORD\",\"Sup3rCsv\"\n\"Env:\\USERDOMAIN\",\"USERDOMAIN\",\"USERDOMAIN\",\"WORKGROUP\"\n\nTotal: 2, ok\nName,Value\nAPI_KEY,Sup3rPlain",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Value : <secret>",
+        "VariableValue  : <secret>",
+        "  value: <secret>",
+        "  value: /root",
+        "\"DB_PASSWORD\",\"DB_PASSWORD\",\"<secret>\"",
+        "\"USERDOMAIN\",\"WORKGROUP\"",
+        "API_KEY,<secret>"
+      ]
+    },
+    {
+      "id": "json-argument-arrays",
+      "input": "[\"tool.exe\",\"--password\",\"Sup3rArg\"]\n[\"sqlcmd\",\"-S\",\"db01\",\"-U\",\"sa\",\"-P\",\"Sup3rSql\"]\n[\"C:\\\\Tools\\\\docker.exe\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rDocker\"]\n[\"git\",\"status\"]\n[\"app.exe\",\"--username\",\"Zqjane\",\"--verbose\"]",
+      "mustNotContain": [
+        "Sup3r",
+        "jane",
+        "Zqjane"
+      ],
+      "mustContain": [
+        "\"--password\",\"<secret>\"",
+        "\"-U\",\"<user>\",\"-P\",\"<secret>\"",
+        "\"-u\",\"<user>\",\"-p\",\"<secret>\"",
+        "[\"git\",\"status\"]",
+        "\"--username\",\"<user>\",\"--verbose\""
+      ]
+    },
+    {
+      "id": "raw-paths-between-json-punctuation",
+      "input": "path: \"D:\\repos\\fabrikam\\notes.txt\", exit: 1\n\"D:\\repos\\fabrikam\\notes.txt\"\ngit,\"D:\\repos\\fabrikam-firmware\",clean\nshare: \"\\\\fs01\\temp\\fabrikam\", ok\n[\"C:\\tools\\build.bat\", \"D:\\builds\\northwind\\release\"]",
+      "mustNotContain": [
+        "repos",
+        "fabrikam",
+        "fs01",
+        "northwind",
+        "builds"
+      ],
+      "mustContain": [
+        "path: \"<path>\", exit: 1",
+        "git,\"<path>\",clean",
+        "share: \"<path>\", ok",
+        "[\"<path>\", \"<path>\"]"
+      ]
+    },
+    {
+      "id": "json-secret-members",
+      "input": "{\"password\":\"Sup3rA\",\"client_secret\":\"Sup3rB\",\"n\":1,\"token\":\"Sup3rC\",\"Credential\":\"System.Management.Automation.PSCredential\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"password\":\"<secret>\"",
+        "\"client_secret\":\"<secret>\",\"n\":1",
+        "\"token\":\"<secret>\"",
+        "\"Credential\":\"System.Management.Automation.PSCredential\""
+      ]
+    },
+    {
+      "id": "powershell-env-json-compressed",
+      "input": "[{\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"Sup3rRunnerTok\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::ACTIONS_RUNNER_INPUT_TOKEN\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"ACTIONS_RUNNER_INPUT_TOKEN\"},{\"Key\":\"AZURE_STORAGE_KEY\",\"Value\":\"Sup3rAzureKey\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::AZURE_STORAGE_KEY\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"AZURE_STORAGE_KEY\"},{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rEnvPw\",\"PSPath\":\"Microsoft.PowerShell.Core\\\\Environment::DB_PASSWORD\",\"PSDrive\":{\"CurrentLocation\":\"\",\"Name\":\"Env\",\"Provider\":\"Microsoft.PowerShell.Core\\\\Environment\",\"Root\":\"\",\"Description\":\"Drive that contains a view of the environment variables for the process\",\"MaximumSize\":null,\"Credential\":\"System.Management.Automation.PSCredential\",\"DisplayRoot\":null,\"VolumeSeparatedByColon\":true},\"PSProvider\":{\"ImplementingType\":\"Microsoft.PowerShell.Commands.EnvironmentProvider\",\"HelpFile\":\"System.Management.Automation.dll-Help.xml\",\"Name\":\"Environment\",\"PSSnapIn\":\"Microsoft.PowerShell.Core\",\"ModuleName\":\"Microsoft.PowerShell.Core\",\"Module\":null,\"Description\":\"\",\"Capabilities\":16,\"Home\":\"\",\"Drives\":\"Env\",\"VolumeSeparatedByColon\":true,\"ItemSeparator\":\"/\",\"AltItemSeparator\":\"\\\\\"},\"PSIsContainer\":false,\"Name\":\"DB_PASSWORD\"}]",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Key\":\"DB_PASSWORD\",\"Value\":\"<secret>\"",
+        "\"Key\":\"AZURE_STORAGE_KEY\",\"Value\":\"<secret>\"",
+        "\"Key\":\"ACTIONS_RUNNER_INPUT_TOKEN\",\"Value\":\"<secret>\""
+      ]
+    },
+    {
+      "id": "powershell-env-json-pretty",
+      "input": "{\n  \"Key\": \"DB_PASSWORD\",\n  \"Value\": \"Sup3rEnvPw\",\n  \"PSPath\": \"Microsoft.PowerShell.Core\\\\Environment::DB_PASSWORD\",\n  \"PSDrive\": {\n    \"CurrentLocation\": \"\",\n    \"Name\": \"Env\",\n    \"Provider\": {\n      \"ImplementingType\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"HelpFile\": \"System.Management.Automation.dll-Help.xml\",\n      \"Name\": \"Environment\",\n      \"PSSnapIn\": \"Microsoft.PowerShell.Core\",\n      \"ModuleName\": \"Microsoft.PowerShell.Core\",\n      \"Module\": null,\n      \"Description\": \"\",\n      \"Capabilities\": 16,\n      \"Home\": \"\",\n      \"Drives\": \"Env\",\n      \"VolumeSeparatedByColon\": true,\n      \"ItemSeparator\": \"/\",\n      \"AltItemSeparator\": \"\\\\\"\n    },\n    \"Root\": \"\",\n    \"Description\": \"Drive that contains a view of the environment variables for the process\",\n    \"MaximumSize\": null,\n    \"Credential\": {\n      \"UserName\": null,\n      \"Password\": null\n    },\n    \"DisplayRoot\": null,\n    \"VolumeSeparatedByColon\": true\n  },\n  \"PSProvider\": {\n    \"ImplementingType\": {\n      \"IsCollectible\": false,\n      \"DeclaringMethod\": null,\n      \"FullName\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"AssemblyQualifiedName\": \"Microsoft.PowerShell.Commands.EnvironmentProvider, System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"Namespace\": \"Microsoft.PowerShell.Commands\",\n      \"GUID\": \"5ffe799d-9030-3db4-8eb8-c068dedaddcc\",\n      \"IsEnum\": false,\n      \"IsByRefLike\": false,\n      \"IsConstructedGenericType\": false,\n      \"IsGenericType\": false,\n      \"IsGenericTypeDefinition\": false,\n      \"GenericParameterAttributes\": null,\n      \"IsSZArray\": false,\n      \"GenericParameterPosition\": null,\n      \"ContainsGenericParameters\": false,\n      \"StructLayoutAttribute\": \"System.Runtime.InteropServices.StructLayoutAttribute\",\n      \"IsFunctionPointer\": false,\n      \"IsUnmanagedFunctionPointer\": false,\n      \"Name\": \"EnvironmentProvider\",\n      \"DeclaringType\": null,\n      \"Assembly\": \"System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"BaseType\": \"Microsoft.PowerShell.Commands.SessionStateProviderBase\",\n      \"IsGenericParameter\": false,\n      \"IsTypeDefinition\": true,\n      \"IsSecurityCritical\": true,\n      \"IsSecuritySafeCritical\": false,\n      \"IsSecurityTransparent\": false,\n      \"MemberType\": 32,\n      \"MetadataToken\": 33556228,\n      \"Module\": \"System.Management.Automation.dll\",\n      \"ReflectedType\": null,\n      \"TypeHandle\": \"System.RuntimeTypeHandle\",\n      \"UnderlyingSystemType\": \"Microsoft.PowerShell.Commands.EnvironmentProvider\",\n      \"GenericTypeParameters\": \"\",\n      \"DeclaredConstructors\": \"Void .ctor()\",\n      \"DeclaredEvents\": \"\",\n      \"DeclaredFields\": \"System.String ProviderName\",\n      \"DeclaredMembers\": \"System.Collections.ObjectModel.Collection`1[System.Management.Automation.PSDriveInfo] InitializeDefaultDrives() System.Object GetSessionStateItem(System.String) Void SetSessionStateItem(System.String, System.Object, Boolean) Void RemoveSessionStateItem(System.String) System.Collections.IDictionary GetSessionStateTable() System.Object GetValueOfItem(System.Object) Void .ctor() System.String ProviderName\",\n      \"DeclaredMethods\": \"System.Collections.ObjectModel.Collection`1[System.Management.Automation.PSDriveInfo] InitializeDefaultDrives() System.Object GetSessionStateItem(System.String) Void SetSessionStateItem(System.String, System.Object, Boolean) Void RemoveSessionStateItem(System.String) System.Collections.IDictionary GetSessionStateTable() System.Object GetValueOfItem(System.Object)\",\n      \"DeclaredNestedTypes\": \"\",\n      \"DeclaredProperties\": \"\",\n      \"ImplementedInterfaces\": \"System.Management.Automation.IResourceSupplier System.Management.Automation.Provider.IContentCmdletProvider\",\n      \"IsInterface\": false,\n      \"IsNested\": false,\n      \"IsArray\": false,\n      \"IsByRef\": false,\n      \"IsPointer\": false,\n      \"IsGenericTypeParameter\": false,\n      \"IsGenericMethodParameter\": false,\n      \"IsVariableBoundArray\": false,\n      \"HasElementType\": false,\n      \"GenericTypeArguments\": \"\",\n      \"Attributes\": 1048833,\n      \"IsAbstract\": false,\n      \"IsImport\": false,\n      \"IsSealed\": true,\n      \"IsSpecialName\": false,\n      \"IsClass\": true,\n      \"IsNestedAssembly\": false,\n      \"IsNestedFamANDAssem\": false,\n      \"IsNestedFamily\": false,\n      \"IsNestedFamORAssem\": false,\n      \"IsNestedPrivate\": false,\n      \"IsNestedPublic\": false,\n      \"IsNotPublic\": false,\n      \"IsPublic\": true,\n      \"IsAutoLayout\": true,\n      \"IsExplicitLayout\": false,\n      \"IsLayoutSequential\": false,\n      \"IsAnsiClass\": true,\n      \"IsAutoClass\": false,\n      \"IsUnicodeClass\": false,\n      \"IsCOMObject\": false,\n      \"IsContextful\": false,\n      \"IsMarshalByRef\": false,\n      \"IsPrimitive\": false,\n      \"IsValueType\": false,\n      \"IsSignatureType\": false,\n      \"TypeInitializer\": null,\n      \"IsSerializable\": false,\n      \"IsVisible\": true,\n      \"CustomAttributes\": \"[System.Management.Automation.Provider.CmdletProviderAttribute(\\\"Environment\\\", (System.Management.Automation.Provider.ProviderCapabilities)16)]\"\n    },\n    \"HelpFile\": \"System.Management.Automation.dll-Help.xml\",\n    \"Name\": \"Environment\",\n    \"PSSnapIn\": {\n      \"Name\": \"Microsoft.PowerShell.Core\",\n      \"IsDefault\": true,\n      \"ApplicationBase\": \"/opt/microsoft/powershell/7\",\n      \"AssemblyName\": \"System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\n      \"ModuleName\": \"/opt/microsoft/powershell/7/System.Management.Automation.dll\",\n      \"PSVersion\": \"7.6.1\",\n      \"Version\": \"7.6.0.500\",\n      \"Types\": \"types.ps1xml typesv3.ps1xml\",\n      \"Formats\": \"Certificate.format.ps1xml DotNetTypes.format.ps1xml FileSystem.format.ps1xml Help.format.ps1xml HelpV3.format.ps1xml PowerShellCore.format.ps1xml PowerShellTrace.format.ps1xml Registry.format.ps1xml\",\n      \"Description\": null,\n      \"Vendor\": null,\n      \"LogPipelineExecutionDetails\": false\n    },\n    \"ModuleName\": \"Microsoft.PowerShell.Core\",\n    \"Module\": null,\n    \"Description\": \"\",\n    \"Capabilities\": 16,\n    \"Home\": \"\",\n    \"Drives\": [\n      \"Env\"\n    ],\n    \"VolumeSeparatedByColon\": true,\n    \"ItemSeparator\": \"/\",\n    \"AltItemSeparator\": \"\\\\\"\n  },\n  \"PSIsContainer\": false,\n  \"Name\": \"DB_PASSWORD\"\n}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "\"Value\": \"<secret>\"",
+        "\"Name\": \"Environment\""
+      ]
+    },
+    {
+      "id": "name-value-nested-and-arguments",
+      "input": "{\"Name\":\"DB_PASSWORD\",\"Meta\":{\"a\":1},\"Value\":\"Sup3rNested\"}\n{\"FileName\":\"sqlcmd.exe\",\"Arguments\":[\"-S\",\"db01\",\"-U\",\"sa\",\"-P\",\"Sup3rArgs\"]}\n[\"docker\",\"run\",\"-p\",\"8080:80\",\"-u\",\"1000\",\"nginx\"]\n[\"docker\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rDocker\"]",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "\"Meta\":{\"a\":1},\"Value\":\"<secret>\"",
+        "\"-U\",\"<user>\",\"-P\",\"<secret>\"",
+        "[\"docker\",\"run\",\"-p\",\"8080:80\",\"-u\",\"1000\",\"nginx\"]",
+        "\"login\",\"-u\",\"<user>\",\"-p\",\"<secret>\""
+      ]
+    },
+    {
+      "id": "records-csv-variants",
+      "input": "Value : Sup3rFirst\nName  : DB_PASSWORD\n\r\r\nNode,Name,UserName,VariableValue\r\r\nWS01,DB_PASSWORD,SYSTEM,Sup3rWmic\r\r\nWS01,HOME,SYSTEM,/root\r\r\n\nName,Value\nDB_PASSWORD,Sup3r,Comma\nHOME,x",
+      "mustNotContain": [
+        "Sup3r",
+        "Comma"
+      ],
+      "mustContain": [
+        "Value : <secret>\nName  : DB_PASSWORD",
+        "WS01,DB_PASSWORD,SYSTEM,<secret>",
+        "WS01,HOME,SYSTEM,/root",
+        "DB_PASSWORD,<secret>\nHOME,x"
+      ]
+    },
+    {
+      "id": "secret-variable-names",
+      "input": "AZURE_STORAGE_KEY=Sup3rAzure==\nAZURE_DEVOPS_EXT_PAT=Sup3rPat\nGPG_PASSPHRASE=Sup3r correct horse\nSIGNING_KEY=Sup3rSign\nAZURE_STORAGE_KEY    Sup3rTable\n{\"name\":\"AZURE_STORAGE_KEY\",\"value\":\"Sup3rJson\"}\nexport DB_PASSWORD=Sup3r with spaces\npassword: Sup3r yaml words\nPassword     : Sup3r list words\n  \"token\": null,\nPass: 9\nCredential : System.Management.Automation.PSCredential",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "spaces",
+        "words"
+      ],
+      "mustContain": [
+        "AZURE_STORAGE_KEY=<secret>",
+        "AZURE_DEVOPS_EXT_PAT=<secret>",
+        "GPG_PASSPHRASE=<secret>",
+        "export DB_PASSWORD=<secret>",
+        "Password     : <secret>",
+        "\"token\": null,",
+        "Pass: 9",
+        "Credential : System.Management.Automation.PSCredential"
+      ]
+    },
+    {
+      "id": "drive-at-line-end-in-json",
+      "input": "{\"out\":\"Volume C:\\nName  : DB_PASSWORD\\nValue : Sup3rVolume\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Value : <secret>"
+      ]
+    },
+    {
+      "id": "xml-secret-elements",
+      "input": "<AutoLogon>\n  <Password>\n    <Value>Sup3rAuto</Value>\n    <PlainText>true</PlainText>\n  </Password>\n  <Enabled>true</Enabled>\n</AutoLogon>\n<AdministratorPassword><Value>Sup3rAdmin</Value><PlainText>true</PlainText></AdministratorPassword>\n<server><id>x</id><password>Sup3rMaven</password></server>\n<RequirePassword>true</RequirePassword>\n<Objects>\n  <Object Type=\"System.Management.Automation.PSCustomObject\">\n    <Property Name=\"Name\" Type=\"System.String\">DB_PASSWORD</Property>\n    <Property Name=\"Value\" Type=\"System.String\">Sup3r Xml Words</Property>\n  </Object>\n</Objects>\n<MS>\n  <S N=\"Name\">DB_PASSWORD</S>\n  <S N=\"Value\">Sup3r Cli Words</S>\n  <S N=\"Password\">Sup3rCli</S>\n</MS>\n<S N=\"Name\">HOME</S><S N=\"Value\">/root</S>",
+      "mustNotContain": [
+        "Sup3r",
+        "Words"
+      ],
+      "mustContain": [
+        "<Value><secret></Value>\n    <PlainText>true</PlainText>",
+        "<password><secret></password>",
+        "<RequirePassword>true</RequirePassword>",
+        "<Property Name=\"Value\" Type=\"System.String\"><secret></Property>",
+        "<S N=\"Value\"><secret></S>",
+        "<S N=\"Password\"><secret></S>",
+        "<S N=\"Value\">/root</S>"
+      ]
+    },
+    {
+      "id": "json-scanner-stray-quotes",
+      "input": "CommandLine: cmd /c \"C:\\scripts\\\" deploy.cmd {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rA\"}\nrobocopy \"C:\\src\\\" \"D:\\dst\\\" -> {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rB\"}\nnote: 5\" screen, env={\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rC\"}\nsaid \"hi {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rD\"}\n{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rE\",\"PSDrive\":{\"Name\":\"Env\",\"Descr\nlater\n[1/3] done]\n{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rDeep\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "{\"Name\":\"API_TOKEN\",\"Value\":\"<secret>\"}",
+        "\"Value\":\"<secret>\",\"PSDrive\""
+      ]
+    },
+    {
+      "id": "multi-word-secret-values",
+      "input": "Name                           Value\n----                           -----\nGPG_PASSPHRASE                 Sup3r horse battery\nDB_PASSWORD                    Sup3r S3cret two\n{\"Env\":[\"GPG_PASSPHRASE=Sup3r horse battery\",\"PATH=/usr/bin\"]}\ndocker run -e \"DB_PASSWORD=Sup3r b c\" img\n2026-11-15T10:00:00.1234567Z GPG_PASSPHRASE=Sup3r horse battery\nGPG_PASSPHRASE=\"Sup3r unclosed horse\nDB_PASSWORD=Sup3rKq9#mZ]],Lp2$xR8!vT",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "battery",
+        "two",
+        "unclosed",
+        "Lp2"
+      ],
+      "mustContain": [
+        "GPG_PASSPHRASE                 <secret>",
+        "\"GPG_PASSPHRASE=<secret>\",\"PATH=/usr/bin\"",
+        "docker run -e \"DB_PASSWORD=<secret>\" img",
+        "2026-11-15T10:00:00.1234567Z GPG_PASSPHRASE=<secret>",
+        "DB_PASSWORD=<secret>"
+      ]
+    },
+    {
+      "id": "powershell-objects-and-process-records",
+      "input": "item: @{Name=DB_PASSWORD; Value=Sup3r S3cret two}\nhash: @{Password=Sup3r a b; User=svc}\nobj: @{Name=HOME; Value=/root}\n{\"FileName\":\"sqlcmd.exe\",\"Arguments\":\"-S db01 -U sa -P Sup3rStart\"}\nFileName  : sqlcmd.exe\nArguments : -S db01 -U sa -P Sup3rList\nVerb      :\n\nVerb      :\nArguments : -S db01 -U sa -P Sup3rFirst\nCreateNoWindow : False\nFileName  : sqlcmd.exe",
+      "mustNotContain": [
+        "Sup3r",
+        "two"
+      ],
+      "mustContain": [
+        "@{Name=DB_PASSWORD; Value=<secret>}",
+        "; User=svc}",
+        "@{Name=HOME; Value=/root}",
+        "\"Arguments\":\"-S db01 -U <user> -P <secret>\"",
+        "Arguments : -S db01 -U <user> -P <secret>"
+      ]
+    },
+    {
+      "id": "key-names-kept-and-caught",
+      "input": "Public-Key: (2048 bit)\n{\"cache_key\":\"setup-dotnet-123\",\"primary_key\":\"id\"}\npartition_key=tenantId exit=0\nset PROJECT_KEY=LV2025 && build.cmd\nVersion=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089\nAZURE_STORAGE_KEY=Sup3rStorage",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Public-Key: (2048 bit)",
+        "\"cache_key\":\"setup-dotnet-123\"",
+        "partition_key=tenantId exit=0",
+        "set PROJECT_KEY=LV2025 && build.cmd",
+        "PublicKeyToken=b77a5c561934e089",
+        "AZURE_STORAGE_KEY=<secret>"
+      ]
+    },
+    {
+      "id": "docker-options-and-cut-arrays",
+      "input": "[\"docker\",\"--context\",\"prod\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rArr\"]\ndocker --context prod login -u jane -p Sup3rText\n[\"tool.exe\",\"--password\",\"Sup3rCut",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "\"login\",\"-u\",\"<user>\",\"-p\",\"<secret>\"",
+        "docker --context prod login -u <user> -p <secret>",
+        "\"--password\",\"<secret>\""
+      ]
+    },
+    {
+      "id": "escaped-quote-after-raw-drive",
+      "input": "{\"out\": \"Volume C:\\nlabel OS\\\\\\\" ok\", \"exit\": 0}",
+      "mustNotContain": [
+        "<user>"
+      ],
+      "mustContain": [
+        "\"exit\": 0"
+      ]
+    },
+    {
+      "id": "key-names-azure-and-openai",
+      "input": "AZURE_OPENAI_KEY=Sup3rA\nCOSMOS_KEY=Sup3rB\nSPEECH_KEY=Sup3rC\nAZURE_SEARCH_KEY=Sup3rD\nNUGET_KEY=Sup3rE\n{\"Name\":\"REDIS_KEY\",\"Value\":\"Sup3rF\"}\ndocker run -e \"OPENAI_KEY=Sup3rG x\" img\n{\"primaryKey\":\"Sup3rH\",\"cache_key\":\"setup-dotnet\",\"sort_key\":\"ts\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "AZURE_OPENAI_KEY=<secret>",
+        "\"Value\":\"<secret>\"",
+        "\"primaryKey\":\"<secret>\",\"cache_key\":\"setup-dotnet\",\"sort_key\":\"ts\""
+      ]
+    },
+    {
+      "id": "clixml-env-dump",
+      "input": "<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\">\n  <Obj RefId=\"0\">\n    <TN RefId=\"0\">\n      <T>System.Object[]</T>\n      <T>System.Array</T>\n      <T>System.Object</T>\n    </TN>\n    <LST>\n      <Obj RefId=\"1\">\n        <TN RefId=\"1\">\n          <T>System.Collections.DictionaryEntry</T>\n          <T>System.ValueType</T>\n          <T>System.Object</T>\n        </TN>\n        <ToString>[API_TOKEN, Sup3rTok]</ToString>\n        <Props>\n          <S N=\"Key\">API_TOKEN</S>\n          <S N=\"Value\">Sup3rTok</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::API_TOKEN</S>\n          <Obj N=\"PSDrive\" RefId=\"2\">\n            <TN RefId=\"2\">\n              <T>System.Management.Automation.PSDriveInfo</T>\n              <T>System.Object</T>\n            </TN>\n            <ToString>Env</ToString>\n            <Props>\n              <S N=\"CurrentLocation\"></S>\n              <S N=\"Name\">Env</S>\n              <S N=\"Provider\">Microsoft.PowerShell.Core\\Environment</S>\n              <S N=\"Root\"></S>\n              <S N=\"Description\">Drive that contains a view of the environment variables for the process</S>\n              <Nil N=\"MaximumSize\" />\n              <Obj N=\"Credential\" RefId=\"3\">\n                <TN RefId=\"3\">\n                  <T>System.Management.Automation.PSCredential</T>\n                  <T>System.Object</T>\n                </TN>\n                <ToString>System.Management.Automation.PSCredential</ToString>\n                <Props>\n                  <Nil N=\"UserName\" />\n                  <Nil N=\"Password\" />\n                </Props>\n              </Obj>\n              <Nil N=\"DisplayRoot\" />\n              <B N=\"VolumeSeparatedByColon\">true</B>\n            </Props>\n            <MS>\n              <Obj N=\"Used\" RefId=\"4\">\n                <S></S>\n              </Obj>\n              <Ref N=\"Free\" RefId=\"4\" />\n            </MS>\n          </Obj>\n          <Obj N=\"PSProvider\" RefId=\"5\">\n            <TN RefId=\"4\">\n              <T>System.Management.Automation.ProviderInfo</T>\n              <T>System.Object</T>\n            </TN>\n            <ToString>Microsoft.PowerShell.Core\\Environment</ToString>\n            <Props>\n              <S N=\"ImplementingType\">Microsoft.PowerShell.Commands.EnvironmentProvider</S>\n              <S N=\"HelpFile\">System.Management.Automation.dll-Help.xml</S>\n              <S N=\"Name\">Environment</S>\n              <S N=\"PSSnapIn\">Microsoft.PowerShell.Core</S>\n              <S N=\"ModuleName\">Microsoft.PowerShell.Core</S>\n              <Nil N=\"Module\" />\n              <S N=\"Description\"></S>\n              <S N=\"Capabilities\">ShouldProcess</S>\n              <S N=\"Home\"></S>\n              <Obj N=\"Drives\" RefId=\"6\">\n                <TN RefId=\"5\">\n                  <T>System.Collections.ObjectModel.Collection`1[[System.Management.Automation.PSDriveInfo, System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]</T>\n                  <T>System.Object</T>\n                </TN>\n                <LST>\n                  <Ref RefId=\"2\" />\n                </LST>\n              </Obj>\n              <B N=\"VolumeSeparatedByColon\">true</B>\n              <C N=\"ItemSeparator\">47</C>\n              <C N=\"AltItemSeparator\">92</C>\n            </Props>\n          </Obj>\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">API_TOKEN</S>\n        </MS>\n      </Obj>\n      <Obj RefId=\"7\">\n        <TNRef RefId=\"1\" />\n        <ToString>[DB_PASSWORD, Sup3rClixml Words]</ToString>\n        <Props>\n          <S N=\"Key\">DB_PASSWORD</S>\n          <S N=\"Value\">Sup3rClixml Words</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::DB_PASSWORD</S>\n          <Ref N=\"PSDrive\" RefId=\"2\" />\n          <Ref N=\"PSProvider\" RefId=\"5\" />\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">DB_PASSWORD</S>\n        </MS>\n      </Obj>\n      <Obj RefId=\"8\">\n        <TNRef RefId=\"1\" />\n        <ToString>[HOME, /home/jdoe]</ToString>\n        <Props>\n          <S N=\"Key\">HOME</S>\n          <S N=\"Value\">/home/jdoe</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::HOME</S>\n          <Ref N=\"PSDrive\" RefId=\"2\" />\n          <Ref N=\"PSProvider\" RefId=\"5\" />\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">HOME</S>\n        </MS>\n      </Obj>\n    </LST>\n  </Obj>\n</Objs>",
+      "mustNotContain": [
+        "Sup3r",
+        "Words"
+      ],
+      "mustContain": [
+        "<ToString>[API_TOKEN, <secret>]</ToString>",
+        "<ToString>[DB_PASSWORD, <secret>]</ToString>"
+      ]
+    },
+    {
+      "id": "escaped-json-in-log-lines",
+      "input": "level=info msg=\"{\\\"Name\\\":\\\"x\\\"}\" status=200\nts=1 level=warn msg=\"retry while count<limit reached\"\nts=2 level=info name=\"worker\" status=\"ok\"",
+      "mustNotContain": [
+        "<secret>"
+      ],
+      "mustContain": [
+        "status=200",
+        "msg=\"retry while count<limit reached\"",
+        "name=\"worker\" status=\"ok\""
+      ]
+    },
+    {
+      "id": "unattend-viewed-in-pieces",
+      "input": "[\"        <Password>\",\"            <Value>Sup3rJson</Value>\",\"            <PlainText>true</PlainText>\"]\nun.xml:3:        <Password>\nun.xml-4-            <Value>Sup3rGrep</Value>\n> un.xml:4:            <Value>Sup3rSelect</Value>\n  un.xml:5:            <PlainText>true</PlainText>\n<Settings><Value>shown</Value></Settings>",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "<Value><secret></Value>",
+        "<Settings><Value>shown</Value></Settings>"
+      ]
+    },
+    {
+      "id": "tools-that-set-secrets",
+      "input": "setx DB_PASSWORD Sup3rSetx\n[Environment]::SetEnvironmentVariable(\"DB_PASSWORD\", \"Sup3rEnv\", \"Machine\")\nSet-Item env:DB_PASSWORD Sup3rItem\nNew-Item -Path env:DB_PASSWORD -Value \"Sup3rNew\"\ngh secret set DB_PASSWORD --body Sup3rGh\naz keyvault secret set --vault-name kv01 --name db-password --value Sup3rAz\nDEBUG:     ! SET $passwordText = 'Sup3rTrace'.",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "setx DB_PASSWORD <secret>",
+        "\"DB_PASSWORD\", \"<secret>\", \"Machine\"",
+        "env:DB_PASSWORD <secret>",
+        "-Value \"<secret>\"",
+        "--body <secret>",
+        "--value <secret>",
+        "$passwordText = '<secret>'"
+      ]
+    },
+    {
+      "id": "xml-and-config-settings",
+      "input": "<setting name=\"ApiToken\" serializeAs=\"String\"><value>Sup3rTok</value></setting>\n<property name=\"password\" value=\"Sup3rSpring\"/>\n<Setting name=\"ApiKey\" value=\"Sup3rCs\"/>\n<add name=\"ApiToken\" value=\"Sup3rAdd\"/>\n{\"auths\":{\"ghcr.io\":{\"auth\":\"Sup3rAuth\"}}}\noauth=enabled",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "<value><secret></value>",
+        "value=\"<secret>\"",
+        "\"auth\":\"<secret>\"",
+        "oauth=enabled"
+      ]
+    },
+    {
+      "id": "log-prefixes-and-tables",
+      "input": "[2026-11-15 10:00:00Z INFO Runner] DB_PASSWORD=Sup3r horse battery\n2026-11-15 10:00:00,123 INFO DB_PASSWORD=Sup3r correct horse\nENV DB_PASSWORD Sup3r S3cret words\n{\"summary\":\"pass=12 fail=0 skip=1\"}\n PASS  src/App.test.js (5.2 s)\nEnvironment : {[PATH, /usr/bin], [DB_PASSWORD, Sup3rEnvList]...}",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "words"
+      ],
+      "mustContain": [
+        "Runner] DB_PASSWORD=<secret>",
+        "INFO DB_PASSWORD=<secret>",
+        "ENV DB_PASSWORD <secret>",
+        "\"pass=12 fail=0 skip=1\"",
+        " PASS  src/App.test.js (5.2 s)",
+        "[PATH, /usr/bin], [DB_PASSWORD, <secret>]"
+      ]
+    },
+    {
+      "id": "env-assignments-and-tool-json",
+      "input": "$env:DB_PASSWORD = \"Sup3rA\"\n$env:API_TOKEN = 'Sup3rB'\nGet-Item env:DB_PASSWORD | Format-List\nSet-Item -Path env:DB_PASSWORD -Value \"Sup3rC\"\n[\"setx DB_PASSWORD \",\"x\"]\n{\"msg\":\"Removing env:API_TOKEN \",\"ok\":true}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "$env:DB_PASSWORD = \"<secret>\"",
+        "$env:API_TOKEN = '<secret>'",
+        "Get-Item env:DB_PASSWORD | Format-List",
+        "-Value \"<secret>\"",
+        "[\"setx DB_PASSWORD \",\"x\"]",
+        "{\"msg\":\"Removing env:API_TOKEN \",\"ok\":true}"
+      ]
+    },
+    {
+      "id": "p4-tool-result-shapes",
+      "input": "{\"schema\":\"projectbuddy/peer-tool-result@1\",\"tool\":\"event-errors\",\"truncated\":false,\"redaction\":{\"ip\":2,\"secret\":0},\"hasToken\":true,\"token\":null,\"groups\":[{\"Key\":\"Microsoft-Windows-TokenBroker/1098\",\"Value\":2},{\"provider\":\"Kerberos-Key-Distribution-Center\",\"id\":7,\"count\":3}]}\nvrdeproperty[VNCPassword]=\"Sup3rVnc\"\nmacaddress1=\"080027A1B2C3\"",
+      "mustNotContain": [
+        "Sup3r",
+        "080027A1B2C3"
+      ],
+      "mustContain": [
+        "\"redaction\":{\"ip\":2,\"secret\":0}",
+        "\"hasToken\":true,\"token\":null",
+        "\"Value\":2",
+        "\"count\":3",
+        "vrdeproperty[VNCPassword]=\"<secret>\"",
+        "macaddress1=\"<mac>\""
+      ]
+    }
+  ]
+}

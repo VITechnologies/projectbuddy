@@ -6,6 +6,53 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `tools/peer/redact` (`ProjectBuddy.PeerRedact`, #290 slice 1), the
+  deterministic and idempotent redaction that peer evidence passes through
+  before a local model sees it and before it leaves the peer.
+  - It covers secrets (token formats, `Authorization` headers including
+    escaped JSON and table layouts, flags and Windows switches, command-line
+    passwords for `net use`, `net user`, `schtasks`, `sqlcmd`, `bcp`, `psexec`,
+    `certutil`, `docker login` and `7z`, `ConvertTo-SecureString` and
+    `NetworkCredential`, prefixed and table-style assignments, connection
+    strings, XML settings, SAS signatures).
+  - It also covers accounts in switches and `user@address`, URLs (allow-listed
+    hosts only, never a path), git remotes, e-mail addresses, directory names
+    and certificate subjects, and bare host names under generic and country
+    domains.
+  - It also covers `reg query` secret rows, `netsh` key content,
+    certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts, and
+    Name/Value layouts: JSON objects at any depth (one linear scan), Format-List
+    and YAML records, CSV tables, JSON argument arrays and ProcessStartInfo
+    argument strings, XML elements and attributes (unattend.xml, Maven,
+    `ConvertTo-Xml`, CLIXML), and PowerShell `@{…}` object strings.
+  - Secret values with spaces are taken whole at a line start (after an
+    optional log timestamp), after a table gap, and inside a quoted
+    `KEY=value` string.
+  - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
+    first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
+    text such as a Windows path is never decoded. JSON string literals with
+    escapes are redacted as the text they stand for (decoded, settled and
+    encoded again, at any nesting), so line-based rules work inside JSON and
+    the output stays well formed; the corpus is also checked wrapped in JSON.
+  - Paths are covered in every spelling: forward-slash, escaped, `file:///`,
+    encoded, long, device, UNC, `//server`, Git Bash, WSL and Cygwin. A path
+    runs through spaces and stops at a colon, a switch, or the next path.
+  - Allow-listed paths are kept only to a fixed depth. Separators and trailing
+    dots cannot dodge a limit, any `.` or `..` hides the whole path, and
+    profiles are reduced to `<user>`.
+  - MACs and IPs are redacted except loopback and the cable. An operator-private
+    deny list (substring) plus the host's own machine and account names
+    (whole word) become `<private>`, matched across any whitespace and invisible
+    characters.
+  - Rules repeat until the text settles (at most 32 passes, more than the
+    number of rules), so the output is idempotent by construction. Evidence
+    over 4,000,000 characters is refused whole unless it is already redacted,
+    and every adversarial shape tested stays linear up to that cap.
+  - Diagnostics stay: digests, versions, exit codes and times.
+  - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
+    matrix at 100% coverage. Its linear-time tests at the 4,000,000-character
+    cap run in a separate Release step, outside the instrumented coverage run.
+
 - Add `projectbuddy-advise pre-review` (#284 slice 2). It gives advisory
   findings on a `git diff`.
   - Each finding must name a rule from the policy rubric, which fixes its
