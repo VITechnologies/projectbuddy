@@ -6,6 +6,17 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Adopt the repo-standards-review consumer kit at RSR v0.5.0 (#277), and
+  re-certify the compliance stamp against v0.5.0.
+  - Executable scripts under `vm`, `docker`, `scripts` and
+    `.github/scripts`, and `Run-Pipeline.sh`, check out with LF on every
+    platform. The CRLF Windows unattended template stays byte-exact.
+  - The kit's check runs in CI and pins RSR to its published release
+    manifest.
+  - `standards-assurance-scan.yml` and
+    `docs/architecture/standards-compliance.md` move together from v0.2.23 to
+    v0.5.0. All 5 required gates `PASS`.
+
 - `projectbuddy-wiki` pins the ecosystem wiki standard it implements:
   `rsr/ecosystem-wiki-standard@1` from repo-standards-review `v0.5.0` (#320).
   - `project` reports the pin.
