@@ -6,6 +6,10 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Move the RSR consumer kit, the standards scan pin and the compliance stamp
+  to RSR v0.6.0 (#332, north star M2). Re-certification passes all 5 required
+  gates.
+
 - `projectbuddy-wiki` implements `rsr/ecosystem-wiki-standard@2`, pinned from
   repo-standards-review v0.6.0 (#329).
   - A wiki may declare its governed scopes, directories, ID prefixes and

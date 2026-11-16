@@ -6,15 +6,22 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.5.0 sha=0cab3803284aafc66f786d7a1114d58fc04fc5e6 -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.6.0 sha=d25cfc1661228ab70762314389b0a1e4e9c8da3a -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.5.0` |
-| Version (commit SHA) | `0cab3803284aafc66f786d7a1114d58fc04fc5e6` |
+| Version (tag) | `v0.6.0` |
+| Version (commit SHA) | `d25cfc1661228ab70762314389b0a1e4e9c8da3a` |
 | Assessed | 2026-11-16 |
 | Profile | `release-gate` |
+
+`v0.6.0` adds `rsr/ecosystem-wiki-standard@2`, with member wiki profiles and
+whole-wiki findings (#329). `projectbuddy-wiki` pins it, and this repository's
+wiki conforms with zero findings. Re-certification against `v0.6.0` on
+2026-11-16 ran the steps of `.github/workflows/standards-assurance-scan.yml`
+locally against the pinned commit. It found no regression: the 5 required
+gates `PASS` at High confidence (99-100%), and DoD stays the optional `FAIL`.
 
 `v0.5.0` adds the ecosystem wiki standard, `rsr/ecosystem-wiki-standard@1`.
 `projectbuddy-wiki` is its reference checker (#318, #319, #320), and this
@@ -171,7 +178,7 @@ maturity), and tag the wiki repository at each release boundary going
 forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
 `CHANGELOG.md` entry for the full, per-issue resolution detail.
 
-## Current gate status (as of the stamped `v0.5.0`)
+## Current gate status (as of the stamped `v0.6.0`)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
