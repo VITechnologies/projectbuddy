@@ -55,18 +55,15 @@ public sealed class ArchitectureTests : IDisposable
     public void ImplementsExactlyThePinnedStandard()
     {
         // Each catalogue, in order, must be what the installed functions report (after every migration, so a later
-        // CREATE OR REPLACE counts). A function's findings appear in its text in the order it checks them; each family is
-        // its gate function's first finding (unexpected-file), then its parser's reasons, then the gate's remaining ones.
+        // CREATE OR REPLACE counts). A function's findings appear in its text in the order it checks them; a gate
+        // function's parser reasons are checked where its text tests p.reason, so they are spliced in there.
         var (_, report, connection) = Project();
-        List<string> Findings(string function) => [.. System.Text.RegularExpressions.Regex
-            .Matches((string)server.Scalar(connection, $"SELECT pg_get_functiondef('{function}'::regprocedure)")!, "'([a-z]+(?:-[a-z0-9]+)+)'")
-            .Select(match => match.Groups[1].Value).Distinct()];
-        var pages = Findings("wiki_v1.governed_pages(uuid)");
-        var architecture = Findings("wiki_v1.architecture_pages(uuid)");
-        string[] installedPages = [pages[0], .. Findings("wiki_v1.parse_page(bytea)"), .. pages[1..]];
-        string[] installedArchitecture = [architecture[0], .. Findings("wiki_v1.parse_architecture_page(bytea)"), .. architecture[1..]];
-        Assert.Equal(Standard.PageFindings, installedPages);
-        Assert.Equal(Standard.ArchitectureFindings, installedArchitecture);
+        List<string> Findings(string function, string? parser = null) => [.. System.Text.RegularExpressions.Regex
+            .Matches((string)server.Scalar(connection, $"SELECT pg_get_functiondef('{function}'::regprocedure)")!, "'([a-z]+(?:-[a-z0-9]+)+)'|p[.]reason IS NOT NULL")
+            .SelectMany(match => match.Groups[1].Success ? [match.Groups[1].Value] : Findings(parser!))
+            .Distinct()];
+        Assert.Equal(Standard.PageFindings, Findings("wiki_v1.governed_pages(uuid)", "wiki_v1.parse_page(bytea)"));
+        Assert.Equal(Standard.ArchitectureFindings, Findings("wiki_v1.architecture_pages(uuid)", "wiki_v1.parse_architecture_page(bytea)"));
         Assert.Equal(Standard.EdgeFindings, Findings("wiki_v1.governed_edges(uuid)"));
 
         Assert.Equal("""{"id":"rsr/ecosystem-wiki-standard@1","rsrRelease":"v0.5.0","rsrCommit":"0cab3803284aafc66f786d7a1114d58fc04fc5e6"}""",
