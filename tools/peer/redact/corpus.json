@@ -1106,6 +1106,106 @@
       "mustContain": [
         "Value : <secret>"
       ]
+    },
+    {
+      "id": "xml-secret-elements",
+      "input": "<AutoLogon>\n  <Password>\n    <Value>Sup3rAuto</Value>\n    <PlainText>true</PlainText>\n  </Password>\n  <Enabled>true</Enabled>\n</AutoLogon>\n<AdministratorPassword><Value>Sup3rAdmin</Value><PlainText>true</PlainText></AdministratorPassword>\n<server><id>x</id><password>Sup3rMaven</password></server>\n<RequirePassword>true</RequirePassword>\n<Objects>\n  <Object Type=\"System.Management.Automation.PSCustomObject\">\n    <Property Name=\"Name\" Type=\"System.String\">DB_PASSWORD</Property>\n    <Property Name=\"Value\" Type=\"System.String\">Sup3r Xml Words</Property>\n  </Object>\n</Objects>\n<MS>\n  <S N=\"Name\">DB_PASSWORD</S>\n  <S N=\"Value\">Sup3r Cli Words</S>\n  <S N=\"Password\">Sup3rCli</S>\n</MS>\n<S N=\"Name\">HOME</S><S N=\"Value\">/root</S>",
+      "mustNotContain": [
+        "Sup3r",
+        "Words"
+      ],
+      "mustContain": [
+        "<Value><secret></Value>\n    <PlainText>true</PlainText>",
+        "<password><secret></password>",
+        "<RequirePassword>true</RequirePassword>",
+        "<Property Name=\"Value\" Type=\"System.String\"><secret></Property>",
+        "<S N=\"Value\"><secret></S>",
+        "<S N=\"Password\"><secret></S>",
+        "<S N=\"Value\">/root</S>"
+      ]
+    },
+    {
+      "id": "json-scanner-stray-quotes",
+      "input": "CommandLine: cmd /c \"C:\\scripts\\\" deploy.cmd {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rA\"}\nrobocopy \"C:\\src\\\" \"D:\\dst\\\" -> {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rB\"}\nnote: 5\" screen, env={\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rC\"}\nsaid \"hi {\"Name\":\"API_TOKEN\",\"Value\":\"Sup3rD\"}\n{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rE\",\"PSDrive\":{\"Name\":\"Env\",\"Descr\nlater\n[1/3] done]\n{\"Key\":\"DB_PASSWORD\",\"Value\":\"Sup3rDeep\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "{\"Name\":\"API_TOKEN\",\"Value\":\"<secret>\"}",
+        "\"Value\":\"<secret>\",\"PSDrive\""
+      ]
+    },
+    {
+      "id": "multi-word-secret-values",
+      "input": "Name                           Value\n----                           -----\nGPG_PASSPHRASE                 Sup3r horse battery\nDB_PASSWORD                    Sup3r S3cret two\n{\"Env\":[\"GPG_PASSPHRASE=Sup3r horse battery\",\"PATH=/usr/bin\"]}\ndocker run -e \"DB_PASSWORD=Sup3r b c\" img\n2026-11-15T10:00:00.1234567Z GPG_PASSPHRASE=Sup3r horse battery\nGPG_PASSPHRASE=\"Sup3r unclosed horse\nDB_PASSWORD=Sup3rKq9#mZ]],Lp2$xR8!vT",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "battery",
+        "two",
+        "unclosed",
+        "Lp2"
+      ],
+      "mustContain": [
+        "GPG_PASSPHRASE                 <secret>",
+        "\"GPG_PASSPHRASE=<secret>\",\"PATH=/usr/bin\"",
+        "docker run -e \"DB_PASSWORD=<secret>\" img",
+        "2026-11-15T10:00:00.1234567Z GPG_PASSPHRASE=<secret>",
+        "DB_PASSWORD=<secret>"
+      ]
+    },
+    {
+      "id": "powershell-objects-and-process-records",
+      "input": "item: @{Name=DB_PASSWORD; Value=Sup3r S3cret two}\nhash: @{Password=Sup3r a b; User=svc}\nobj: @{Name=HOME; Value=/root}\n{\"FileName\":\"sqlcmd.exe\",\"Arguments\":\"-S db01 -U sa -P Sup3rStart\"}\nFileName  : sqlcmd.exe\nArguments : -S db01 -U sa -P Sup3rList\nVerb      :\n\nVerb      :\nArguments : -S db01 -U sa -P Sup3rFirst\nCreateNoWindow : False\nFileName  : sqlcmd.exe",
+      "mustNotContain": [
+        "Sup3r",
+        "two"
+      ],
+      "mustContain": [
+        "@{Name=DB_PASSWORD; Value=<secret>}",
+        "; User=svc}",
+        "@{Name=HOME; Value=/root}",
+        "\"Arguments\":\"-S db01 -U <user> -P <secret>\"",
+        "Arguments : -S db01 -U <user> -P <secret>"
+      ]
+    },
+    {
+      "id": "key-names-kept-and-caught",
+      "input": "Public-Key: (2048 bit)\n{\"cache_key\":\"setup-dotnet-123\",\"primary_key\":\"id\"}\npartition_key=tenantId exit=0\nset PROJECT_KEY=LV2025 && build.cmd\nVersion=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089\nAZURE_STORAGE_KEY=Sup3rStorage",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "Public-Key: (2048 bit)",
+        "\"cache_key\":\"setup-dotnet-123\",\"primary_key\":\"id\"",
+        "partition_key=tenantId exit=0",
+        "set PROJECT_KEY=LV2025 && build.cmd",
+        "PublicKeyToken=b77a5c561934e089",
+        "AZURE_STORAGE_KEY=<secret>"
+      ]
+    },
+    {
+      "id": "docker-options-and-cut-arrays",
+      "input": "[\"docker\",\"--context\",\"prod\",\"login\",\"-u\",\"jane\",\"-p\",\"Sup3rArr\"]\ndocker --context prod login -u jane -p Sup3rText\n[\"tool.exe\",\"--password\",\"Sup3rCut",
+      "mustNotContain": [
+        "Sup3r",
+        "jane"
+      ],
+      "mustContain": [
+        "\"login\",\"-u\",\"<user>\",\"-p\",\"<secret>\"",
+        "docker --context prod login -u <user> -p <secret>",
+        "\"--password\",\"<secret>\""
+      ]
+    },
+    {
+      "id": "escaped-quote-after-raw-drive",
+      "input": "{\"out\": \"Volume C:\\nlabel OS\\\\\\\" ok\", \"exit\": 0}",
+      "mustNotContain": [
+        "<user>"
+      ],
+      "mustContain": [
+        "\"exit\": 0"
+      ]
     }
   ]
 }

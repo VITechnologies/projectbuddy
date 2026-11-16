@@ -197,10 +197,17 @@ public sealed partial class Redactor
             + (match.Groups["user"].Value.StartsWith('$') ? match.Groups["user"].Value : "<user>") + match.Groups["separator"].Value + "<secret>");
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Registry(), match => SecretToClose(match.Groups["key"].Value, match.Groups["value"].Value));
+        result = Apply(result, "secret", XmlElement(), RedactXmlElement);
+        result = Apply(result, "secret", XmlValueChild(), match => SecretName().IsMatch(LocalName(match.Groups["tag"].Value)) ? match.Groups["head"].Value + "<secret>" : match.Value);
+        result = Apply(result, "secret", XmlNameValue(), match => SecretName().IsMatch(match.Groups["name"].Value.Trim()) ? match.Groups["head"].Value + "<secret>" : match.Value);
+        result = Apply(result, "secret", PsObject(), RedactPsObject);
+        result = Apply(result, "secret", ProcessRecord(), RedactProcessRecord);
+        result = Apply(result, "secret", ProcessRecordArgumentsFirst(), RedactProcessRecord);
         result = Apply(result, "secret", Record(), RedactRecord);
         result = Apply(result, "secret", RecordValueFirst(), RedactRecord);
         result = Apply(result, "secret", CsvBlock(), RedactCsv);
         result = Apply(result, "secret", LineAssignment(), RedactAssignment);
+        result = Apply(result, "secret", QuotedAssignment(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Assignment(), RedactAssignment);
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
         result = Apply(result, "user", UserFlag(), match => match.Groups["key"].Value + "<user>");
@@ -361,7 +368,7 @@ public sealed partial class Redactor
 
     private const int MaxJsonDepth = 256;
 
-    private sealed record JsonValue(string? Name, int Start, int End, bool IsString, JsonFrame? Child);
+    private sealed record JsonValue(string? Name, int Start, int End, bool IsString, JsonFrame? Child, bool Cut = false);
 
     private sealed class JsonFrame(bool isObject, int start, string? member, bool inParent)
     {
@@ -393,7 +400,19 @@ public sealed partial class Redactor
 
         var stack = new List<JsonFrame>();
         var edits = new SortedDictionary<int, (int End, string Text)>();
-        int stringStart = -1, stringEnd = -1, previous = -1;
+        int stringStart = -1, stringEnd = -1, previous = -1, unterminatedUntil = -1;
+
+        // Frames are always finished before they are dropped, so a stray closer or the depth cap never skips a pair.
+        void Reset()
+        {
+            for (var depth = stack.Count - 1; depth >= 0; depth--)
+            {
+                Finish(text, stack[depth], edits);
+            }
+
+            stack.Clear();
+        }
+
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
@@ -405,17 +424,23 @@ public sealed partial class Redactor
             var top = stack.Count > 0 ? stack[^1] : null;
             if (character == '"')
             {
-                var end = StringEnd(text, index);
+                // Once a quote finds no closing quote before the line end, no later quote on that line can: the escape
+                // pairing from here on is the same, so the line is not scanned again.
+                var end = index < unterminatedUntil ? -1 : StringEnd(text, index);
+                if (end < 0 && index >= unterminatedUntil)
+                {
+                    var lineEnd = text.IndexOfAny(['\r', '\n'], index);
+                    unterminatedUntil = lineEnd < 0 ? text.Length : lineEnd;
+                }
+
                 if (end < 0 && top is { ExpectValue: true })
                 {
                     // A string cut off at the line end (truncated JSON) is taken to the line end.
-                    var stop = text.IndexOfAny(['\r', '\n'], index);
-                    stop = stop < 0 ? text.Length : stop;
-                    top.Values.Add(new(top.Name, index, stop, false, null));
+                    top.Values.Add(new(top.Name, index, unterminatedUntil, true, null, Cut: true));
                     top.ExpectValue = false;
-                    index = stop - 1;
+                    index = unterminatedUntil - 1;
                 }
-                else if (end > 0)
+                else if (end > 0 && (top is { ExpectValue: true } || ClosesJsonString(text, end)))
                 {
                     if (top is { ExpectValue: true })
                     {
@@ -432,7 +457,7 @@ public sealed partial class Redactor
                 var inParent = top is { ExpectValue: true } && stack.Count < MaxJsonDepth;
                 if (stack.Count >= MaxJsonDepth)
                 {
-                    stack.Clear();
+                    Reset();
                 }
 
                 stack.Add(new(character == '{', index, inParent ? top!.Name : null, inParent));
@@ -445,7 +470,7 @@ public sealed partial class Redactor
             {
                 if (top is null || top.IsObject != (character == '}'))
                 {
-                    stack.Clear();
+                    Reset();
                 }
                 else
                 {
@@ -490,10 +515,7 @@ public sealed partial class Redactor
         }
 
         // Truncated JSON (a cut log line) is read as far as it goes.
-        for (var depth = stack.Count - 1; depth >= 0; depth--)
-        {
-            Finish(text, stack[depth], edits);
-        }
+        Reset();
 
         if (edits.Count == 0)
         {
@@ -538,10 +560,24 @@ public sealed partial class Redactor
         return -1;
     }
 
+    // Outside a value position a string counts only when JSON punctuation (or the line end) follows its closing quote,
+    // so a stray quote in prose or a command line ("C:\scripts\" deploy.cmd {...}) cannot shift the pairing of the
+    // quotes after it.
+    private static bool ClosesJsonString(string text, int end)
+    {
+        while (end < text.Length && text[end] is ' ' or '\t')
+        {
+            end++;
+        }
+
+        return end == text.Length || text[end] is ':' or ',' or '}' or ']' or '\r' or '\n';
+    }
+
     private static string StringText(string text, JsonValue value)
     {
         var literal = text[value.Start..value.End];
-        return JsonString().Match(literal) is { Success: true } match && match.Length == literal.Length ? Unescape(literal) : literal[1..^1];
+        return value.Cut ? literal[1..]
+            : JsonString().Match(literal) is { Success: true } match && match.Length == literal.Length ? Unescape(literal) : literal[1..^1];
     }
 
     private static void Finish(string text, JsonFrame frame, SortedDictionary<int, (int End, string Text)> edits)
@@ -566,6 +602,17 @@ public sealed partial class Redactor
         {
             RedactArguments(text, arguments.Child!.Values, program is null ? null : StringText(text, program), edits);
         }
+
+        // ProcessStartInfo.Arguments is one string: it is read as the FileName's command line.
+        foreach (var arguments in frame.Values.Where(value => program is not null && value.IsString && Is(value, ArgumentFields)))
+        {
+            var original = StringText(text, arguments);
+            var redacted = RedactArgumentText(StringText(text, program!), original);
+            if (redacted != original)
+            {
+                edits[arguments.Start] = (arguments.End, Quote(redacted));
+            }
+        }
     }
 
     // In an argument array the element after a secret flag, or after the command's own password switch, is secret;
@@ -575,8 +622,10 @@ public sealed partial class Redactor
         var words = elements.Select(element => element.IsString ? StringText(text, element) : null).ToList();
         var switches = CommandSwitches(program ?? words.FirstOrDefault() ?? "");
 
-        // docker's -p and -u are ports and users of a container except after "login".
-        if (switches == Docker && !words.Take(2).Contains("login"))
+        // docker's -p and -u are ports and users of a container, except after the "login" subcommand (which may follow
+        // global options: docker --context prod login -p x).
+        var from = switches == Docker ? words.IndexOf("login") : -1;
+        if (switches == Docker && from < 0)
         {
             switches = null;
         }
@@ -589,8 +638,9 @@ public sealed partial class Redactor
                 continue;
             }
 
-            var secret = SecretFlag().IsMatch(flag) || (switches is not null && switches.Secret.Contains(flag, StringComparer.FromComparison(switches.Case)));
-            var user = !secret && (UserSwitch().IsMatch(flag) || (switches is not null && switches.User.Contains(flag, StringComparer.FromComparison(switches.Case))));
+            var family = index > from ? switches : null;
+            var secret = SecretFlag().IsMatch(flag) || (family is not null && family.Secret.Contains(flag, StringComparer.FromComparison(family.Case)));
+            var user = !secret && (UserSwitch().IsMatch(flag) || (family is not null && family.User.Contains(flag, StringComparer.FromComparison(family.Case))));
             if (secret || user)
             {
                 edits[elements[index + 1].Start] = (elements[index + 1].End, secret ? "\"<secret>\"" : "\"<user>\"");
@@ -605,6 +655,52 @@ public sealed partial class Redactor
             : match.Value;
 
     private static bool Redacted(string value) => Placeholders.Contains(value.Trim().Trim('"'));
+
+    private static string LocalName(string tag) => tag[(tag.LastIndexOf(':') + 1)..];
+
+    // <Password>x</Password>, <AdministratorPassword> (by the element name), and ConvertTo-Xml's
+    // <Property Name="Password">x</Property> or CLIXML's <S N="Password">x</S> (by the name attribute). A true or false
+    // flag (<RequirePassword>true</RequirePassword>) is a setting, not a secret.
+    private static string RedactXmlElement(Match match)
+    {
+        var named = match.Groups["named"].Success && SecretName().IsMatch(match.Groups["named"].Value);
+        return (SecretName().IsMatch(LocalName(match.Groups["tag"].Value)) || named) && !Flag().IsMatch(match.Groups["value"].Value)
+            ? match.Groups["head"].Value + "<secret>" + match.Groups["close"].Value
+            : match.Value;
+    }
+
+    // @{Name=DB_PASSWORD; Value=x} (a PowerShell object written as a string) and @{Password=a b}: a value whose key is
+    // a secret name, or a Value member beside a Name or Key holding one, becomes <secret>.
+    private static string RedactPsObject(Match match)
+    {
+        var members = PsMember().Matches(match.Value);
+        var secretItem = members.Any(member => NameFields.Contains(member.Groups["key"].Value.Trim(), StringComparer.OrdinalIgnoreCase) && SecretName().IsMatch(member.Groups["value"].Value.Trim()));
+        return PsMember().Replace(match.Value, member =>
+        {
+            var key = member.Groups["key"].Value.Trim();
+            var secret = (secretItem && ValueFields.Contains(key, StringComparer.OrdinalIgnoreCase)) || (!NameFields.Contains(key, StringComparer.OrdinalIgnoreCase) && SecretName().IsMatch(key));
+            return secret && member.Groups["value"].Value.Trim().Length > 0 && !Redacted(member.Groups["value"].Value)
+                ? member.Value[..(member.Groups["value"].Index - member.Index)] + "<secret>"
+                : member.Value;
+        });
+    }
+
+    // A ProcessStartInfo shown with Format-List: its Arguments read with the FileName's switch table.
+    private static string RedactProcessRecord(Match match) =>
+        match.Groups["head"].Value + RedactArgumentText(match.Groups["program"].Value.Trim(), match.Groups["args"].Value) + match.Groups["tail"].Value;
+
+    // An argument string for a program (ProcessStartInfo.Arguments) is read as that program's command line.
+    private static string RedactArgumentText(string program, string arguments)
+    {
+        var name = Path.GetFileName(program.Trim('"').Replace('\\', '/'));
+        if (name.Length == 0)
+        {
+            return arguments;
+        }
+
+        var redacted = Command().Replace(name + " " + arguments, RedactCommand);
+        return redacted[(name.Length + 1)..];
+    }
 
     // A CSV row is read against the last header naming a name column and a value column. A row with more fields than
     // the header holds a comma in an unquoted value, so everything from the value column on is secret.
@@ -922,8 +1018,9 @@ public sealed partial class Redactor
     }
 
     // A name that holds a secret: any prefix before a secret word (DB_PASSWORD, ACTIONS_RUNNER_INPUT_TOKEN), a
-    // *_KEY, or pw, pass or pat as a whole final part ($pw, db_pass, AZURE_DEVOPS_EXT_PAT; not bypass).
-    private const string SecretKey = @"(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|[A-Za-z0-9_.-]*[_.-]key|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass|pat)))";
+    // *_KEY qualified as a secret key (AZURE_STORAGE_KEY, SIGNING_KEY; not cache_key or Public-Key), or pw, pass or pat
+    // as a whole final part ($pw, db_pass, AZURE_DEVOPS_EXT_PAT; not bypass). An assembly's PublicKeyToken is public.
+    private const string SecretKey = @"(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|passphrase|secret|(?<!PublicKey)token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|[A-Za-z0-9_.-]*(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas)[_.-]?key|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass|pat)))";
 
     private const string AuthSchemes = "Bearer|Basic|Digest|token|Negotiate|NTLM|SharedKey|SharedKeyLite|ApiKey|SSWS|AWS4-HMAC-SHA256";
 
@@ -971,7 +1068,7 @@ public sealed partial class Redactor
     // hold (file.cs:line 42, https://), before a switch (" /c"; no Windows name starts with "/" or ends with a space),
     // and before the next drive or UNC path, so a kept path never carries another one along. A colon before a
     // backslash is kept when its letter cannot start a drive (abcD:\x), so no tail leaks.
-    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)\\"")(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|')|:(?=" + BackSeparator + @")))*";
+    private const string PathTail = @"(?:(?!" + DriveHead + "|" + UncHead + @"| /|(?<!\\)(?:\\\\)*\\"")(?:[^""'<>|:\r\n\t*?]|(?(open)" + QuotedApostrophe + "|')|:(?=" + BackSeparator + @")))*";
 
     private const string PosixTail = @"(?:[^""'<>|:\r\n\t*?\\]|\\(?!"")|(?(open)" + QuotedApostrophe + "|'))*";
 
@@ -1018,7 +1115,7 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>" + WordStart + @"key\s*=\s*(?<name>" + Quoted + @")\s+value\s*=\s*)(?<value>" + Quoted + ")", RegexOptions.IgnoreCase)]
     private static partial Regex XmlSecret();
 
-    [GeneratedRegex(@"(?<command>" + WordStart + @"(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>" + LineRest + ")", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<command>" + WordStart + @"(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?(?:[ \t]+--?[A-Za-z][\w-]{0,40}(?:[ \t=]+[^\s-]\S{0,200})?){0,4}?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>" + LineRest + ")", RegexOptions.IgnoreCase)]
     private static partial Regex Command();
 
     // An argument is a run of plain characters and quoted parts, so -p"two words" and "\\fs01\a b" are one argument;
@@ -1060,10 +1157,16 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>\b(?:[\w.-]*(?:password|passwd|pwd|passphrase|secret|token|credential|apikey|api_key|accesskey|accountkey|productkey|privatekey)[\w.-]*|[\w.-]*(?:pass|pw))[ \t]{2,}REG_(?:SZ|EXPAND_SZ|MULTI_SZ|BINARY|NONE)[ \t]+|\bKey Content[ \t]*:[ \t]*)(?<value>[^\s][^\r\n]*)", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex Registry();
 
-    // At the start of a line, an unquoted secret key (GPG_PASSPHRASE=correct horse, export X=..., YAML "password: a b")
-    // takes its unquoted value to the line end, so a value with spaces never leaks a word.
-    [GeneratedRegex(@"(?<key>^[ \t]*(?:(?:export|set)[ \t]+|-[ \t]+)?" + SecretKey + @")(?<separator>[ \t]*[=:][ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?![""'])(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?<value>" + NotClosing + @"[^\s]" + LineRest + ")", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    // At the start of a line (after an optional log timestamp, as in GitHub Actions logs), an unquoted secret key
+    // (GPG_PASSPHRASE=correct horse, export X=..., YAML "password: a b", an env table row "X    a b") takes the rest of
+    // the line, quotes and brackets included, so a value with spaces or an unclosed quote never leaks a word.
+    [GeneratedRegex(@"(?<key>^[ \t]*(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.]+Z?[ \t]+)?(?:(?:export|set|ENV)[ \t]+|-[ \t]+)?" + SecretKey + @")(?<separator>[ \t]*[=:][ \t]*|[ \t]{2,}(?![=:]|REG_))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?<value>[^\s][^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex LineAssignment();
+
+    // A secret key that opens a quoted string ("GPG_PASSPHRASE=a b c" in docker inspect Env, docker run -e "X=a b",
+    // \"X=a b\" in escaped JSON, 'X=a b') takes the value to the closing quote of the same spelling.
+    [GeneratedRegex(@"(?<key>(?<![\w\\""])""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>(?:[^""\\\r\n]|\\[^\r\n])+)(?="")|(?<key>(?<!\\)\\""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>(?:[^""\\\r\n]|\\(?!"")[^\r\n])+)(?=\\"")|(?<key>(?<![\w'])'" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>[^'\r\n]+)(?=')", RegexOptions.IgnoreCase)]
+    private static partial Regex QuotedAssignment();
 
     [GeneratedRegex(@"(?<=[?&;]|\\u00(?:26|3[Ff]|3[Bb]))sig=(?:[^&\s""'<>;\\]|\\(?!""))+", RegexOptions.IgnoreCase)]
     private static partial Regex SasSignature();
@@ -1178,7 +1281,7 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:\\(?![\\""])|(?<![\\\w:])\\\\[A-Za-z0-9._$-]+\\(?![\\""])")]
     private static partial Regex RawPath();
 
-    [GeneratedRegex(@"password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass|pat)$|[_.-]key$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"password|passwd|pwd|passphrase|secret|(?<!publickey)token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass|pat)$|(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas)[_.-]?key(?:$|[_.-])", RegexOptions.IgnoreCase)]
     private static partial Regex SecretName();
 
     [GeneratedRegex(@"^(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|passphrase|secret|pat|api-?key|pw|pass(?:in|out)?)|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass))$", RegexOptions.IgnoreCase)]
@@ -1189,6 +1292,33 @@ public sealed partial class Redactor
 
     [GeneratedRegex(@"^(?:System|Microsoft)(?:\.[A-Za-z_][\w`]*)+(?:\[[^\]]*\])?$")]
     private static partial Regex TypeName();
+
+    [GeneratedRegex(@"^\s*(?:true|false)\s*$", RegexOptions.IgnoreCase)]
+    private static partial Regex Flag();
+
+    // An element with text content: the element name or a Name/N/Key attribute names the secret.
+    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})(?:[ \t\r\n][^<>]*?\b(?:Name|N|Key)[ \t]*=[ \t]*[""'](?<named>[^""'<>]*)[""'][^<>]*|[ \t\r\n][^<>]*)?>)(?<value>(?=\s*[^\s<])(?>[^<]+))(?<close></\k<tag>>)", RegexOptions.IgnoreCase)]
+    private static partial Regex XmlElement();
+
+    // An unattend.xml secret element holding a <Value> child: <AdministratorPassword><Value>x</Value>.
+    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})(?:[ \t\r\n][^<>]*)?>\s*<Value(?:[ \t\r\n][^<>]*)?>)(?=\s*[^\s<])(?>[^<]+)(?=</Value>)", RegexOptions.IgnoreCase)]
+    private static partial Regex XmlValueChild();
+
+    // ConvertTo-Xml and CLIXML Name/Value siblings: <S N="Name">DB_PASSWORD</S> ... <S N="Value">x</S>.
+    [GeneratedRegex(@"(?<head><(?<t1>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]*?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Name|Key)[""'][^<>]*>(?<name>[^<]*)</\k<t1>>(?:\s*<[^<>/]*>[^<]*</[^<>]*>){0,8}?\s*<(?<t2>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]*?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Value|VariableValue|Data)[""'][^<>]*>)(?=\s*[^\s<])(?>[^<]+)(?=</\k<t2>>)", RegexOptions.IgnoreCase)]
+    private static partial Regex XmlNameValue();
+
+    [GeneratedRegex(@"@\{[^{}\r\n]*\}", RegexOptions.NonBacktracking)]
+    private static partial Regex PsObject();
+
+    [GeneratedRegex(@"(?<=@\{|;)(?<key>[^=;{}]+)=(?<value>[^;}]*)")]
+    private static partial Regex PsMember();
+
+    [GeneratedRegex(@"(?<head>^[ \t]*FileName[ \t]*:[ \t]*(?<program>[^\r\n]*)\r*\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r*\n){0,16}?[ \t]*Arguments[ \t]*:[ \t]*)(?<args>[^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex ProcessRecord();
+
+    [GeneratedRegex(@"(?<head>^[ \t]*Arguments[ \t]*:[ \t]*)(?<args>[^\r\n]*)(?<tail>\r*\n(?:[ \t]*[A-Za-z]\w*[ \t]*:[^\r\n]*\r*\n){0,16}?[ \t]*FileName[ \t]*:[ \t]*(?<program>[^\r\n]*))", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex ProcessRecordArgumentsFirst();
 
     // Format-List and YAML records: "Name : DB_PASSWORD" (or "- name: x"), then within a few lines "Value : x", or the
     // value line first.

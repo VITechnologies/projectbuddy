@@ -96,10 +96,33 @@ than as `key=value`. When the name holds a secret word (the assignment keys, plu
   objects, `Win32_Environment`, and `{"key":"ClearTextPassword","value":"…"}`.
   - One linear scan reads them, and it also tracks strings, nesting and
     truncated JSON (a cut string runs to the line end).
-  - Past a depth of 256 the scan starts over, so memory stays bounded.
+  - Outside a value position, a string counts only when JSON punctuation (or the
+    line end) follows its closing quote. So a stray quote in prose or a command
+    line (`cmd /c "C:\scripts\" deploy.cmd {…}`) cannot shift how later quotes
+    pair. Once a quote finds no closing quote on its line, later quotes on that
+    line are not scanned again, so the scan stays linear.
+  - Frames are always finished before they are dropped. A stray closer, the end
+    of the text, or the depth cap (past 256 the scan starts over, so memory stays
+    bounded) never skips a Name/Value pair read so far.
   - JSON is read before escaped strings are masked.
 - **Format-List and YAML records:** `Name : DB_PASSWORD` (or `- name: …`), with
   `Value :`, `VariableValue :` or `Data :` within eight lines, in either order.
+- **XML:**
+  - An element named for a secret: `<password>…</password>` (Maven) or
+    `<AdministratorPassword><Value>…</Value>` (unattend.xml, whose secret
+    elements hold a `<Value>` child).
+  - An element whose `Name`, `N` or `Key` attribute names one:
+    `<Property Name="Password">…</Property>` (`ConvertTo-Xml`) or
+    `<S N="Password">…</S>` (CLIXML).
+  - Name/Value siblings in either serializer: `<S N="Name">DB_PASSWORD</S>`
+    followed, within eight elements, by `<S N="Value">…</S>`. Only this order is
+    read; it is the order PowerShell writes.
+  - A `true`/`false` value is a setting, not a secret
+    (`<RequirePassword>true</RequirePassword>`). Any other value of a secret-named
+    element is hidden, numbers included (`<PasswordExpires>2026</PasswordExpires>`).
+- **PowerShell object strings:** in `@{Name=DB_PASSWORD; Value=…}`, the value
+  beside a secret name is hidden, and so is any member keyed by one
+  (`@{Password=a b; User=x}`).
 - **CSV tables** whose header row names a `Name`/`Key` column and a
   `Value`/`VariableValue`/`Data` column (`ConvertTo-Csv`, `wmic … /format:csv`
   with its `\r\r\n` line ends). A row with more fields than the header holds a
@@ -109,16 +132,34 @@ than as `key=value`. When the name holds a secret word (the assignment keys, plu
   - The element after a secret flag (`["tool.exe","--password","…"]`), or after
     the command's own password switch (`["sqlcmd",…,"-P","…"]`), is secret.
   - The element after an account switch is `<user>`.
-  - `docker`'s `-p` and `-u` count only after `login`; in `docker run` they are a
-    port and a container user.
+  - `docker`'s `-p` and `-u` count only after the `login` subcommand, which may
+    follow global options (`docker --context prod login -p …`). In `docker run`
+    they are a port and a container user.
+  - `ProcessStartInfo.Arguments` is a single string. In JSON
+    (`{"FileName":"sqlcmd.exe","Arguments":"-S db01 -U sa -P …"}`) and in a
+    Format-List record (`FileName :` and `Arguments :` within sixteen lines, in
+    either order), it is read as the `FileName` program's command line.
 
-Secret names also include `passphrase`, a final `_KEY` part (`AZURE_STORAGE_KEY`,
-`SIGNING_KEY`) and a final `_PAT` part (`AZURE_DEVOPS_EXT_PAT`).
+Secret names also include `passphrase`, and a final `_PAT` part
+(`AZURE_DEVOPS_EXT_PAT`). A `_KEY` name counts only when its qualifier names a
+secret key: `storage`, `signing`, `encryption`, `master`, `license`, `product`,
+`subscription`, `deploy`, `ssh`, `gpg`, `hmac`, `jwt`, `session`, `admin`,
+`service`, `app`, `client`, `function`, `webhook`, `sas` and the like
+(`AZURE_STORAGE_KEY`, `SIGNING_KEY`). `cache_key`, `primary_key`,
+`partition_key`, `PROJECT_KEY` and `Public-Key` are not secret names. An
+assembly's `PublicKeyToken` is public.
 
 Other value rules:
-- **Line-start keys:** a line that starts with an unquoted secret key
-  (`GPG_PASSPHRASE=…`, `export X=…`, `set X=…`, YAML `password: …`) takes its
-  unquoted value to the line end, so a value with spaces never leaks a word.
+- **Line-start keys:** a line can start with an unquoted secret key, after an
+  optional log timestamp such as the one on every GitHub Actions log line.
+  Examples are `GPG_PASSPHRASE=…`, `export X=…`, `set X=…`, YAML `password: …`,
+  and a `Get-ChildItem env:` table row `X    …`.
+  - Its value takes the rest of the line, quotes and brackets included, so a
+    value with spaces, an unclosed quote or a `]` never leaks a word.
+  - A value that was quoted keeps its quotes.
+- **Quoted keys:** a secret key that opens a quoted string takes the value to the
+  closing quote of the same spelling. Examples are `"GPG_PASSPHRASE=a b c"` in
+  `docker inspect`'s `Env`, `docker run -e "X=a b"`, and `\"X=a b\"` or `'X=a b'`.
 - **Object and array values:** an assignment never takes a value that starts
   with `{` or `[`; nested JSON is the scanner's.
 - **Bare JSON values:** after a quoted key (`"token": null`), the value is written

@@ -22,7 +22,12 @@ release's notes for the exact pinned commit.
   - It also covers `reg query` secret rows, `netsh` key content,
     certificate names in LDAP, curl, OpenSSL and `certutil -dump` layouts, and
     Name/Value layouts: JSON objects at any depth (one linear scan), Format-List
-    and YAML records, CSV tables and JSON argument arrays.
+    and YAML records, CSV tables, JSON argument arrays and ProcessStartInfo
+    argument strings, XML elements and attributes (unattend.xml, Maven,
+    `ConvertTo-Xml`, CLIXML), and PowerShell `@{…}` object strings.
+  - Secret values with spaces are taken whole at a line start (after an
+    optional log timestamp), after a table gap, and inside a quoted
+    `KEY=value` string.
   - JSON `\uXXXX` escapes inside valid JSON string literals are canonicalized
     first, so an escaped apostrophe or umlaut cannot hide a path or a term. Raw
     text such as a Windows path is never decoded. JSON string literals with

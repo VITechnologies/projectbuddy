@@ -355,6 +355,12 @@ public class RedactorTests
     [InlineData("", "{\"Key\":\"password\",\"m\":{\"a\":1},\"Value\":\"a\"},")]
     [InlineData("", "Value : x\nName : password\n")]
     [InlineData("", "GPG_PASSPHRASE=a b\n")]
+    [InlineData("INFO body={", "\\\"k\\\":\\\"v\\\",")]
+    [InlineData("{", "\\\"")]
+    [InlineData("", "<S N=\"Name\">x</S>")]
+    [InlineData("", "@{Name=DB_PASSWORD; Value=x}")]
+    [InlineData("", "'DB_PASSWORD=a ")]
+    [InlineData("", "{\"FileName\":\"sqlcmd\",\"Arguments\":\"-P a\"},")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
@@ -515,4 +521,11 @@ public class RedactorTests
         var text = new string('[', depth) + @"{""Key"":""DB_PASSWORD"",""Value"":""Sup3r""}" + new string(']', depth);
         Assert.DoesNotContain("Sup3r", Plain().Redact(text).Text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("<Settings><Value>shown</Value></Settings>", "<Settings><Value>shown</Value></Settings>")]
+    [InlineData("<Password><Value>Sup3r</Value></Password>", "<Password><Value><secret></Value></Password>")]
+    [InlineData("{\"FileName\":\"C:/tools/\",\"Arguments\":\"-P x\"}", "{\"FileName\":\"<path>\",\"Arguments\":\"-P x\"}")]
+    [InlineData("FileName  : \nArguments : -P x", "FileName  : \nArguments : -P x")]
+    public void XmlAndProcessRecordsNeedTheirOwnContext(string input, string expected) => Assert.Equal(expected, Plain().Redact(input).Text);
 }
