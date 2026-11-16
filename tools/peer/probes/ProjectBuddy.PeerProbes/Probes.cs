@@ -146,13 +146,7 @@ public sealed class SystemSources(Uri ollama, string? vboxManage) : ISources
         return new CommandResult(process.ExitCode, output.ToString(), truncated || !drained);
     }
 
-    // Programs are looked up at fixed places, never on PATH: the Windows system directory for sc.exe, schtasks.exe and
-    // wevtutil.exe; for VBoxManage, the --vboxmanage path when given, otherwise VirtualBox's default install directory.
-    private string? Resolve(string program)
-    {
-        IEnumerable<string> candidates = program != "VBoxManage" ? OperatingSystem.IsWindows() ? [Path.Combine(Environment.SystemDirectory, program)] : []
-            : vboxManage is not null ? [vboxManage]
-            : [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Oracle", "VirtualBox", "VBoxManage.exe"), "/usr/bin/VBoxManage"];
-        return candidates.FirstOrDefault(File.Exists);
-    }
+    private string? Resolve(string program) =>
+        ProgramPaths.Candidates(program, vboxManage, OperatingSystem.IsWindows(), Environment.SystemDirectory,
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)).FirstOrDefault(File.Exists);
 }

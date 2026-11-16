@@ -101,7 +101,18 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
     public static IReadOnlyDictionary<string, int> Validate(ToolSpec spec, JsonObject? arguments)
     {
         var values = spec.Arguments.ToDictionary(argument => argument.Name, argument => argument.Default, StringComparer.Ordinal);
-        foreach (var (name, node) in arguments ?? [])
+        List<KeyValuePair<string, JsonNode?>> pairs;
+        try
+        {
+            // A JsonObject parsed with duplicate keys throws only when its entries are first read.
+            pairs = [.. arguments ?? []];
+        }
+        catch (ArgumentException)
+        {
+            throw new ToolRefusedException($"{spec.Name} arguments repeat a name");
+        }
+
+        foreach (var (name, node) in pairs)
         {
             var argument = spec.Arguments.FirstOrDefault(candidate => candidate.Name == name)
                 ?? throw new ToolRefusedException($"{spec.Name} takes no argument '{name}'");
@@ -191,7 +202,7 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
 
     private (JsonObject, bool, string[]) VmStates()
     {
-        if (sources.Run("VBoxManage", ["list", "vms"]) is not { } list)
+        if (sources.Run(ProgramPaths.VBoxManage, ["list", "vms"]) is not { } list)
         {
             return (new JsonObject { ["available"] = false, ["reason"] = "VBoxManage is not installed" }, false, []);
         }
@@ -202,14 +213,14 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
         }
 
         var vms = Parsers.VirtualMachines(list.Output).OrderBy(vm => vm.Name, StringComparer.Ordinal).ThenBy(vm => vm.Uuid, StringComparer.Ordinal).ToList();
-        var runningList = sources.Run("VBoxManage", ["list", "runningvms"]);
+        var runningList = sources.Run(ProgramPaths.VBoxManage, ["list", "runningvms"]);
         var running = runningList is { ExitCode: 0 } ? Parsers.VirtualMachines(runningList.Output).Select(vm => vm.Uuid).ToHashSet(StringComparer.Ordinal) : null;
         var truncated = list.Truncated || vms.Count > MaxVms || runningList is { Truncated: true };
         var array = new JsonArray();
         foreach (var vm in vms.Take(MaxVms))
         {
             var entry = new JsonObject { ["name"] = vm.Name, ["uuid"] = vm.Uuid, ["running"] = running is null ? null : running.Contains(vm.Uuid) };
-            var info = sources.Run("VBoxManage", ["showvminfo", vm.Uuid, "--machinereadable"]);
+            var info = sources.Run(ProgramPaths.VBoxManage, ["showvminfo", vm.Uuid, "--machinereadable"]);
             if (info is not { ExitCode: 0 })
             {
                 entry["error"] = info is null ? "VBoxManage is not installed" : $"showvminfo exited {info.ExitCode}";

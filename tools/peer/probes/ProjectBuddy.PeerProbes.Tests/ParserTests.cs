@@ -113,8 +113,29 @@ public sealed class ParserTests
         Assert.False(dtdComplete);
         Assert.Empty(dtd);
 
+        // Control characters in event data (never read) do not stop the count.
+        var control = ParserTests.Event("a", "1", "2").Replace("secret.txt", "bad\u0000\u0001\u001F\uFFFE\uFFFF\uD800x\uDC00&#x0;&#x1;", StringComparison.Ordinal);
+        var (controlled, controlComplete) = Parsers.Events(control + Event("b\uD83D\uDE00", "2", "1") + "\uD800");
+        Assert.True(controlComplete);
+        Assert.Equal([new EventRecord("a", 1, 2), new EventRecord("b\uD83D\uDE00", 2, 1)], controlled);
+
         var (empty, emptyComplete) = Parsers.Events("");
         Assert.True(emptyComplete);
         Assert.Empty(empty);
+    }
+
+    [Fact]
+    public void FindsProgramsOnlyAtFixedPaths()
+    {
+        Assert.Equal(["/win/system32/sc.exe"], ProgramPaths.Candidates("sc.exe", null, isWindows: true, "/win/system32", "/pf"));
+        Assert.Empty(ProgramPaths.Candidates("sc.exe", null, isWindows: false, "/win/system32", "/pf"));
+        Assert.Empty(ProgramPaths.Candidates("sc.exe", null, isWindows: true, "system32", "/pf"));
+        Assert.Equal(["/opt/vbox/VBoxManage"], ProgramPaths.Candidates("VBoxManage", "/opt/vbox/VBoxManage", isWindows: true, "/win/system32", "/pf"));
+        Assert.Empty(ProgramPaths.Candidates("VBoxManage", "VBoxManage", isWindows: false, "/win/system32", "/pf"));
+        Assert.Equal(["/pf/Oracle/VirtualBox/VBoxManage.exe"], ProgramPaths.Candidates("VBoxManage", null, isWindows: true, "/win/system32", "/pf"));
+
+        // GetFolderPath(ProgramFiles) is empty off Windows; a relative path would resolve against the working directory.
+        Assert.Empty(ProgramPaths.Candidates("VBoxManage", null, isWindows: true, "/win/system32", ""));
+        Assert.Equal(["/usr/bin/VBoxManage"], ProgramPaths.Candidates("VBoxManage", null, isWindows: false, "", ""));
     }
 }

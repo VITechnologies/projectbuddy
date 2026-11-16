@@ -111,6 +111,8 @@ public sealed class ProgramTests
     [InlineData("run-all", "--ollama")]
     [InlineData("run-all", "--hours", "x")]
     [InlineData("list", "--hours", "1")]
+    [InlineData("run", "vm-states", "--vboxmanage", "VBoxManage")]
+    [InlineData("run-all", "--vboxmanage", "Oracle/VirtualBox/VBoxManage.exe")]
     public async Task RejectsMalformedCommandLines(params string[] args)
     {
         var (exit, output, error, cli, _) = await Run(new FakeSources(), args);
@@ -124,6 +126,7 @@ public sealed class ProgramTests
     [InlineData("not json", "--args is not valid JSON")]
     [InlineData("[1]", "--args must be a JSON object")]
     [InlineData("null", "--args must be a JSON object")]
+    [InlineData("""{"hours":1,"hours":2}""", "--args is not valid JSON")]
     [InlineData("""{"hours":0}""", "must be 1-72")]
     public async Task RefusesBadToolArguments(string arguments, string message)
     {

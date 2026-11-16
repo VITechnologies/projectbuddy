@@ -87,11 +87,21 @@ public static partial class Parsers
     public static (IReadOnlyList<EventRecord> Events, bool Complete) Events(string output)
     {
         var events = new List<EventRecord>();
-        var settings = new XmlReaderSettings { ConformanceLevel = ConformanceLevel.Fragment, DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, IgnoreComments = true };
+        var settings = new XmlReaderSettings
+        {
+            ConformanceLevel = ConformanceLevel.Fragment,
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreComments = true,
+
+            // Event data may hold characters XML does not allow; it is never read, so they must not stop the count.
+            // Raw ones become spaces before parsing, and character references are not checked.
+            CheckCharacters = false,
+        };
         var (inSystem, provider, id, level) = (false, "", -1, -1);
         try
         {
-            using var reader = XmlReader.Create(new StringReader(output), settings);
+            using var reader = XmlReader.Create(new StringReader(XmlInvalid().Replace(output, " ")), settings);
 
             // Reading an element's content already moves past its end tag, so the next node is used without Read().
             var positioned = false;
@@ -167,4 +177,8 @@ public static partial class Parsers
 
     [GeneratedRegex(@"(?<=^|,)(?:""(?:[^""]|"""")*""|[^,]*)")]
     private static partial Regex CsvField();
+
+    // Characters XML 1.0 does not allow raw: C0 controls other than tab, LF and CR; U+FFFE and U+FFFF; lone surrogates.
+    [GeneratedRegex(@"[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]")]
+    private static partial Regex XmlInvalid();
 }

@@ -166,7 +166,8 @@ public static class Program
         {
             try
             {
-                arguments = JsonNode.Parse(json) as JsonObject ?? throw new ToolRefusedException("--args must be a JSON object");
+                arguments = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false }) as JsonObject
+                    ?? throw new ToolRefusedException("--args must be a JSON object");
             }
             catch (JsonException)
             {
@@ -180,7 +181,12 @@ public static class Program
             throw new UsageException("--hours needs a whole number");
         }
 
+        if (options.TryGetValue("--vboxmanage", out var vboxManage) && !Path.IsPathFullyQualified(vboxManage))
+        {
+            throw new UsageException("--vboxmanage needs a fully qualified path");
+        }
+
         return new Cli(command, tool, arguments, options.GetValueOrDefault("--deny-list"), options.GetValueOrDefault("--ollama") ?? DefaultOllama,
-            options.GetValueOrDefault("--vboxmanage"), options.GetValueOrDefault("--identity") ?? new ProbeOptions().IdentityModel, hours);
+            vboxManage, options.GetValueOrDefault("--identity") ?? new ProbeOptions().IdentityModel, hours);
     }
 }

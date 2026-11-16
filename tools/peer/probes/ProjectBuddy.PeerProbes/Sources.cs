@@ -30,3 +30,19 @@ public interface ISources
     // program is not installed.
     CommandResult? Run(string program, IReadOnlyList<string> arguments);
 }
+
+// Where each fixed program may come from. Only fully qualified paths are ever returned: never PATH, never the working
+// directory, and never a path that another drive or user could resolve differently.
+public static class ProgramPaths
+{
+    public const string VBoxManage = "VBoxManage";
+
+    public static IReadOnlyList<string> Candidates(string program, string? vboxManage, bool isWindows, string systemDirectory, string programFiles)
+    {
+        IEnumerable<string> candidates = program != VBoxManage ? isWindows ? [Path.Combine(systemDirectory, program)] : []
+            : vboxManage is not null ? [vboxManage]
+            : isWindows ? [Path.Combine(programFiles, "Oracle", "VirtualBox", "VBoxManage.exe")]
+            : ["/usr/bin/VBoxManage"];
+        return [.. candidates.Where(Path.IsPathFullyQualified)];
+    }
+}

@@ -44,22 +44,29 @@ the agent loop's tool definitions.
   tasks are queried by their exact names.
 - From each event, only `Provider@Name`, `EventID` and `Level` directly under
   the event's own `<System>` header are read. Event data, user data and
-  rendered messages are never touched.
-- Programs are run without a shell, with fixed argument lists, and never from
-  `PATH`:
+  rendered messages are never touched. Characters XML does not allow are
+  replaced by spaces before parsing, so a control character in event data
+  cannot stop the count.
+- Programs are run without a shell, with fixed argument lists, and only from
+  fully qualified paths, never from `PATH` or the working directory:
   - `sc.exe`, `schtasks.exe` and `wevtutil.exe` come from the Windows system
     directory;
-  - `VBoxManage` comes from `--vboxmanage` when it is given, and otherwise from
-    VirtualBox's default install directory.
+  - `VBoxManage` comes from `--vboxmanage` when it is given (it must be a fully
+    qualified path). Otherwise it comes from
+    `%ProgramFiles%\Oracle\VirtualBox\VBoxManage.exe` on Windows and
+    `/usr/bin/VBoxManage` on Linux.
 - Each program gets 60 seconds and its output is cut at 16 MiB. Either limit
   marks the result truncated.
 
 ## Arguments and refusals
 
 A call names one tool from the list. Its arguments are a JSON object holding
-only that tool's arguments: whole numbers inside their range. An unknown tool,
-an unknown or extra argument, a value that is not a whole number, or a value
-out of range is **refused** (exit 3), and nothing is run.
+only that tool's arguments: whole numbers inside their range. The call is
+**refused** (exit 3), and nothing is run, when it has:
+- an unknown tool;
+- an unknown, extra or repeated argument;
+- a value that is not a whole number;
+- a value out of range.
 
 `run-all` checks its `--hours` before any tool runs.
 

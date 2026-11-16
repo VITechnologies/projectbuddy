@@ -57,6 +57,14 @@ public sealed class RegistryTests
     }
 
     [Fact]
+    public async Task RefusesRepeatedArguments()
+    {
+        var repeated = JsonNode.Parse("""{"hours":1,"hours":2}""")!.AsObject();
+        var refused = await Assert.ThrowsAsync<ToolRefusedException>(() => Invoke(Windows(), "event-errors", repeated));
+        Assert.Equal("event-errors arguments repeat a name", refused.Message);
+    }
+
+    [Fact]
     public async Task RefusesUnknownTools()
     {
         var refused = await Assert.ThrowsAsync<ToolRefusedException>(() => Invoke(Windows(), "shell", null));
