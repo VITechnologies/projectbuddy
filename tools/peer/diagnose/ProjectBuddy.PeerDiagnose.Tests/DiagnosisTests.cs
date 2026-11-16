@@ -179,7 +179,7 @@ public sealed class DiagnosisTests
         var retry = ollama.Chats.Last();
         Assert.Equal("assistant", (string?)Messages(retry)[5]!["role"]);
         Assert.Equal(
-            "That answer was rejected: the citation network-link /data/adapters/0/status = \"down\" matches no network-link result the model was given. "
+            "That answer was rejected: the citation \"network-link\" \"/data/adapters/0/status\" = \"down\" matches no result of that tool the model was given. "
                 + "Answer again with JSON only; cite exact single values at pointers that exist in the tool results above.",
             Content(retry, 6));
 

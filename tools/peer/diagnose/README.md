@@ -46,8 +46,12 @@ out/projectbuddy-diagnose.exe --policy policy.json --question github-unreachable
      result of that `tool` the model was given.
 
    A pointer is resolved against the result as the model received it, then
-   against its `data` object. A cited string also matches a number or boolean
-   whose JSON text it is exactly, so `"5"` cites `5`.
+   against its `data` object. Values are compared by their JSON text and are
+   never converted: a string by its content, a number or boolean by its exact
+   token (`12.0` does not cite `12`). A cited string also matches a number or
+   boolean whose JSON text it is, so `"5"` cites `5`. Model text in a
+   rejection reason is shown as JSON, with control characters escaped, and is
+   cut short.
 5. **Repair.** A rejected answer is shown its reason and may answer again, up
    to `maxAnswerAttempts`. After that the tool gives **no advice** (exit 6) and
    never a guess.

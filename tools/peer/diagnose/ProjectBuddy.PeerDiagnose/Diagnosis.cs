@@ -54,6 +54,8 @@ public static class Diagnosis
     // Refusals are read by the model; they are never embedded in HTML.
     private static readonly JsonSerializerOptions Readable = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
+    private const int MaxShownChars = 120;
+
     public static async Task<JsonObject> RunAsync(Policy policy, Question question, OllamaClient ollama, Registry registry, Func<string, Redaction> redact)
     {
         var version = await ollama.VersionAsync();
@@ -217,7 +219,7 @@ public static class Diagnosis
 
         if (!question.Classes.Contains(answerClass))
         {
-            throw NoAdvice($"class '{answerClass}' is not one of {question.Id}'s classes");
+            throw NoAdvice($"class {Show(answerClass)} is not one of {question.Id}'s classes");
         }
 
         finding = finding.Trim();
@@ -242,7 +244,7 @@ public static class Diagnosis
 
             if (!evidence.Any(item => item.Tool == tool && Matches(JsonNode.Parse(item.Envelope), pointer, value)))
             {
-                throw NoAdvice($"the citation {tool} {pointer} = {value?.ToJsonString() ?? "null"} matches no {tool} result the model was given");
+                throw NoAdvice($"the citation {Show(tool)} {Show(pointer)} = {Show(value)} matches no result of that tool the model was given");
             }
 
             grounded.Add((JsonNode)new JsonObject { ["tool"] = tool, ["pointer"] = pointer, ["value"] = value?.DeepClone() });
@@ -256,11 +258,16 @@ public static class Diagnosis
     private static bool Matches(JsonNode? result, string pointer, JsonNode? value) =>
         (Resolve(result, pointer, out var found) && Same(found, value)) || (Resolve(result!["data"], pointer, out var inData) && Same(inData, value));
 
-    // Exact JSON equality, except that a cited string also matches a number or boolean whose JSON text it is exactly
-    // ("5" cites 5): models often quote numbers, and the text must still be identical.
-    private static bool Same(JsonNode? found, JsonNode? cited) =>
-        JsonNode.DeepEquals(found, cited)
-        || (found is JsonValue value && value.GetValueKind() is not System.Text.Json.JsonValueKind.String && Json.TryString(cited) == value.ToJsonString());
+    // Scalars are compared by their JSON text, never converted: a string by its content, a number or boolean by its exact
+    // token, which a cited string may also give ("5" cites 5, models often quote numbers). Comparing text cannot throw on
+    // an exponent no number type holds, and only the evidence's own spelling of a number is accepted.
+    private static bool Same(JsonNode? found, JsonNode? cited) => found switch
+    {
+        null => cited is null,
+        JsonValue value when value.GetValueKind() == JsonValueKind.String => Json.TryString(cited) == value.GetValue<string>(),
+        JsonValue value => cited is not null && (cited.ToJsonString() == value.ToJsonString() || Json.TryString(cited) == value.ToJsonString()),
+        _ => false,
+    };
 
     // RFC 6901: "/a/0/b", with ~1 for "/" and ~0 for "~"; array indexes are decimal without leading zeros.
     internal static bool Resolve(JsonNode? root, string pointer, out JsonNode? found)
@@ -357,6 +364,15 @@ public static class Diagnosis
 
         return envelope;
     }
+
+    // Model text in a message is shown as JSON, so control characters stay escaped, and cut short.
+    private static string Show(JsonNode? node)
+    {
+        var text = node?.ToJsonString(Readable) ?? "null";
+        return text.Length <= MaxShownChars ? text : text[..MaxShownChars] + "…";
+    }
+
+    private static string Show(string text) => Show(JsonValue.Create(text));
 
     private static string Refusal(string reason) => new JsonObject { ["refused"] = reason }.ToJsonString(Readable);
 
