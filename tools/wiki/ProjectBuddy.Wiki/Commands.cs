@@ -105,7 +105,7 @@ internal static class Commands
     }
 
     // Reports the governed projection of a recorded state (wiki_v1.projection_report): its pages per scope and kind, its
-    // trace edges per type, and every page or link that keeps it out of the registry, which is a finding.
+    // trace edges per type, every page or link that keeps it out of the registry, and its Architecture Packet pages.
     public static (JsonObject Result, bool NotExportable) Project(Database database, string? commit)
     {
         var (snapshot, recorded) = Recorded(database, commit);
@@ -115,9 +115,10 @@ internal static class Commands
             result[name] = value!.DeepClone();
         }
 
+        // Architecture problems are findings too, but they never keep the requirement and test pages from the registry.
         var exportable = (int)result["problemCount"]! == 0;
         result["exportable"] = exportable;
-        return (result, !exportable);
+        return (result, !exportable || (int)result["architectureProblemCount"]! > 0);
     }
 
     // Exports a recorded state to the RSR registry, one snapshot per scope in the order software, system, test: each

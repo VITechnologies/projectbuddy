@@ -6,6 +6,13 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-wiki project` also projects the Architecture Packet (#315).
+  - Migration `0004` gives `Architecture-Packet.md` and `architecture/*.md`
+    one canonical layout, `# title`, a blank line, then the body, and parses
+    hub index blocks into their children.
+  - Pages render back byte for byte. Problems are listed apart and never keep
+    the wiki out of the registry.
+
 - `projectbuddy-wiki export-registry` exports the wiki's governed pages to the
   RSR registry (#309, slice 2 of #307).
   - It ingests one snapshot per scope, in the order software, system, test,

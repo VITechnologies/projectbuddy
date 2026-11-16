@@ -225,7 +225,7 @@ public sealed class DatabaseTests : IDisposable
         var (exit, _, error) = Cli.Run(["migrate", .. server.NewDatabase()]);
         Assert.Equal(ExitCodes.Database, exit);
         Assert.Contains("does not exist", error);
-        Assert.Equal([(1, "0001_wiki_v1.sql"), (2, "0002_ingest_parent_check.sql"), (3, "0003_wiki_projection.sql")], Database.Migrations().Select(migration => (migration.Version, migration.Name)));
+        Assert.Equal([(1, "0001_wiki_v1.sql"), (2, "0002_ingest_parent_check.sql"), (3, "0003_wiki_projection.sql"), (4, "0004_architecture_projection.sql")], Database.Migrations().Select(migration => (migration.Version, migration.Name)));
     }
 
     [Fact]

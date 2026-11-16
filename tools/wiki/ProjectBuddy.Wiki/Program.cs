@@ -66,6 +66,11 @@ public static partial class Program
         {
             var options = Parse(args);
             var database = new Database(options);
+            if (options.Command != "migrate")
+            {
+                database.EnsureMigrated();
+            }
+
             var git = new Git(options.Git);
             // Findings are what check and project report rather than refuse: drift, or pages that cannot be exported.
             var (result, findings) = options.Command switch
