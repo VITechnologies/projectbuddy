@@ -354,6 +354,9 @@ public sealed class RegistryTests
         var broken = await Invoke(Windows(), "disk", redact: text => new Redaction(text + "\"", new Dictionary<string, int> { ["private"] = 1 }));
         Assert.Equal("""{"schema":"projectbuddy/peer-tool-result@1","tool":"disk","truncated":true,"error":"the redacted result is not valid JSON"}""", broken.Text);
 
+        var throwing = await Invoke(Windows(), "disk", redact: _ => throw new RedactionException("C:\\Users\\builder is too long"));
+        Assert.Equal("""{"schema":"projectbuddy/peer-tool-result@1","tool":"disk","truncated":true,"error":"the redaction failed: RedactionException"}""", throwing.Text);
+
         var refused = Assert.Throws<ArgumentOutOfRangeException>(() => new Registry(Windows(), Same, new ProbeOptions(MaxResultBytes: Registry.MinResultBytes - 1)));
         Assert.Contains("at least 256", refused.Message);
         var longest = Registry.Tools.Max(tool => tool.Name.Length);

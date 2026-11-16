@@ -332,15 +332,21 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
     {
         while (true)
         {
-            var redaction = redact(data.ToJsonString(Output));
+            Redaction redaction;
             JsonNode? redacted;
             try
             {
+                redaction = redact(data.ToJsonString(Output));
                 redacted = JsonNode.Parse(redaction.Text);
             }
             catch (JsonException)
             {
                 return Failure(tool, "the redacted result is not valid JSON");
+            }
+            catch (Exception error)
+            {
+                // Nothing unredacted is ever returned: a redactor that fails yields only its exception's type.
+                return Failure(tool, $"the redaction failed: {error.GetType().Name}");
             }
 
             var envelope = new JsonObject

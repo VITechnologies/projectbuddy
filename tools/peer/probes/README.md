@@ -102,7 +102,7 @@ only that tool's arguments: whole numbers inside their range. The call is
 - **Failures.** A result is replaced by a failure envelope with an `error` and
   `truncated: true` when:
   - the result still does not fit once the lists are empty;
-  - the redacted text no longer parses;
+  - the redactor fails, or the redacted text no longer parses;
   - the read itself throws. Only the exception's type is reported, because its
     message can carry paths.
 
