@@ -167,9 +167,12 @@ public sealed class RegistryTests
         var result = await Invoke(sources, "disk");
         Assert.False(Truncated(result));
         Assert.Equal(
-            """{"drives":[{"name":"C:\\","format":"NTFS","totalBytes":1000000000000,"freeBytes":120000000000},{"name":"D:\\","format":"NTFS","totalBytes":2000000000000,"freeBytes":1500000000000}]}""",
+            """{"drives":[{"name":"C:\\","format":"NTFS","totalBytes":1000000000000,"freeBytes":120000000000,"freePercent":12},{"name":"D:\\","format":"NTFS","totalBytes":2000000000000,"freeBytes":1500000000000,"freePercent":75}]}""",
             Data(result).ToJsonString());
 
+        sources.DriveList.Clear();
+        sources.DriveList.Add(new Drive("Z:\\", "NTFS", 0, 0));
+        Assert.Null(Data(await Invoke(sources, "disk"))["drives"]![0]!["freePercent"]);
         sources.DriveList.Clear();
         sources.DriveList.AddRange(Enumerable.Range(0, Registry.MaxDrives + 1).Select(index => new Drive($"{(char)('A' + index % 26)}{index}:\\", "NTFS", 1, 1)));
         var capped = await Invoke(sources, "disk");

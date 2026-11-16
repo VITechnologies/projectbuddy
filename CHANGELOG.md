@@ -6,6 +6,24 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Add `tools/peer/diagnose` (`projectbuddy-diagnose`, #295, #290 slice 3): the
+  bounded P4 agent loop. A local model answers one question from a closed
+  list by calling only the read-only `projectbuddy-probes` tools.
+  - Bounds: rounds, calls per round and in total, and an evidence byte budget.
+    Every request passes the truncation guard.
+  - The answer is asked for separately, in a JSON schema. It is redacted
+    again and grounded: every citation's JSON pointer must resolve to exactly
+    the cited value in a tool result the model was given. A rejected answer
+    may be repaired once; otherwise there is no advice (exit 6).
+  - The policy (`projectbuddy/diagnose-policy@1`) pins `qwen2.5:7b` by digest
+    and gives each question's classes with their rules.
+- `projectbuddy-probes`: `disk` reports `freePercent`, computed by the tool.
+  The `ollama` description says that `identity` marks the pinned model. The
+  deny-list loader is now the public `HostRedactor`, shared with diagnose.
+- Coverage filters for `advise`, `bench` and `probes` use `*` wildcards.
+  Coverlet ignored the hyphenated assembly names, and the gate held only
+  because the Exclude lists covered everything else.
+
 - Fix `projectbuddy-probes network-link` on Windows (#292). .NET also lists
   NDIS filter pseudo-interfaces (QoS Packet Scheduler, WFP filters) and absent
   adapters, which could fill the 16-adapter cap and push out real adapters.
