@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## Unreleased
+
+- `projectbuddy-wiki` implements `rsr/ecosystem-wiki-standard@2` (#329).
+  - A wiki may declare its governed scopes, directories, ID prefixes and
+    sections in a root `.wiki-profile.json`, so members such as lbabus
+    (`LBA-REQ`, `T`) can conform. Without one, projectbuddy's profile applies.
+  - The new whole-wiki findings `page-not-indexed` and `page-over-budget`
+    (#325) report what `Assemble-WikiSpec --strict` refuses.
+  - Realistic row estimates on the projection functions stop PostgreSQL from
+    JIT-compiling whole-wiki queries. The projection report took 1.7 s and now
+    takes 0.14 s.
+
 ## v0.4.0
 
 - Adopt the repo-standards-review consumer kit at RSR v0.5.0 (#277), and
