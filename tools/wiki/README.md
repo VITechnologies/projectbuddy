@@ -44,7 +44,7 @@ out/projectbuddy-wiki export-registry --approval <approval record> --importer-pa
 
 `projectbuddy-wiki` is the reference checker of the ecosystem wiki standard,
 `rsr/ecosystem-wiki-standard@2`. That standard ships in repo-standards-review
-as `docs/architecture/ecosystem-wiki-standard.md`
+`v0.6.0` (`d25cfc1`) as `docs/architecture/ecosystem-wiki-standard.md`
 (VITechnologies/projectbuddy#318, #319, #320, #329).
 
 ### Wiki profiles

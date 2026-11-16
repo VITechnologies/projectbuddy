@@ -6,7 +6,8 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
-- `projectbuddy-wiki` implements `rsr/ecosystem-wiki-standard@2` (#329).
+- `projectbuddy-wiki` implements `rsr/ecosystem-wiki-standard@2`, pinned from
+  repo-standards-review v0.6.0 (#329).
   - A wiki may declare its governed scopes, directories, ID prefixes and
     sections in a root `.wiki-profile.json`, so members such as lbabus
     (`LBA-REQ`, `T`) can conform. Without one, projectbuddy's profile applies.

@@ -8,9 +8,9 @@ public static class Standard
 {
     public const string Id = "rsr/ecosystem-wiki-standard@2";
 
-    public const string RsrRelease = "v0.5.0";
+    public const string RsrRelease = "v0.6.0";
 
-    public const string RsrCommit = "0cab3803284aafc66f786d7a1114d58fc04fc5e6";
+    public const string RsrCommit = "d25cfc1661228ab70762314389b0a1e4e9c8da3a";
 
     // Each catalogue is ordered: the first finding that applies names a page or edge.
     public static readonly string[] PageFindings =
