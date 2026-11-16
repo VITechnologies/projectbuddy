@@ -6,7 +6,7 @@ namespace ProjectBuddy.Wiki;
 // catalogue and in order.
 public static class Standard
 {
-    public const string Id = "rsr/ecosystem-wiki-standard@1";
+    public const string Id = "rsr/ecosystem-wiki-standard@2";
 
     public const string RsrRelease = "v0.5.0";
 
@@ -25,4 +25,8 @@ public static class Standard
     ];
 
     public static readonly string[] EdgeFindings = ["link-outside-field", "link-outside-scope", "dangling-link"];
+
+    public static readonly string[] ProfileFindings = ["invalid-profile"];
+
+    public static readonly string[] WikiFindings = ["page-not-indexed", "page-over-budget"];
 }

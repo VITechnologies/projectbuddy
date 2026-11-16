@@ -120,10 +120,11 @@ internal static class Commands
             result[name] = value!.DeepClone();
         }
 
-        // Architecture problems are findings too, but they never keep the requirement and test pages from the registry.
+        // Architecture and whole-wiki problems are findings too, but they never keep the requirement and test pages from the
+        // registry.
         var exportable = (int)result["problemCount"]! == 0;
         result["exportable"] = exportable;
-        return (result, !exportable || (int)result["architectureProblemCount"]! > 0);
+        return (result, !exportable || (int)result["architectureProblemCount"]! > 0 || (int)result["wikiProblemCount"]! > 0);
     }
 
     // Exports a recorded state to the RSR registry, one snapshot per scope in the order software, system, test: each
@@ -132,7 +133,8 @@ internal static class Commands
     public static JsonObject ExportRegistry(Database database, Registry registry, Approval approval, string? commit)
     {
         var (snapshot, recorded) = Recorded(database, commit);
-        var problems = (int)database.ProjectionReport(snapshot)["problemCount"]!;
+        var report = database.ProjectionReport(snapshot);
+        var problems = (int)report["problemCount"]!;
         if (problems > 0)
         {
             throw new WikiException(ExitCodes.Refused, $"{problems} pages or links cannot be exported; run project");
@@ -147,7 +149,9 @@ internal static class Commands
         }.ToJsonString();
         var targets = new JsonObject();
         var scopes = new JsonObject();
-        foreach (var scope in (string[])["software", "system", "test"])
+        // Only the scopes the wiki's profile holds, in edge order.
+        var held = report["profile"]!["scopes"]!.AsArray().Select(scope => (string)scope!).ToHashSet(StringComparer.Ordinal);
+        foreach (var scope in ((string[])["software", "system", "test"]).Where(held.Contains))
         {
             var text = database.Envelope(recorded, scope, identity, targets.ToJsonString());
             var envelope = JsonNode.Parse(text)!;
