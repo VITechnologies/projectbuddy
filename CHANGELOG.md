@@ -6,6 +6,19 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-wiki` keeps a local working copy of the GitHub wiki in
+  PostgreSQL (#308, slice 1 of #307).
+  - `seed` records the wiki clone's committed bytes as an append-only
+    snapshot in schema `wiki_v1`. Each content is stored once, and a commit
+    already recorded changes nothing.
+  - `render` writes a recorded state back byte for byte. It writes only into
+    a missing or empty directory, or into the top of a clone at a recorded
+    commit (never its `.git` or a subdirectory). It refuses symbolic links.
+  - `check` proves the latest state matches the clone's `HEAD`, and exits 1 on
+    drift.
+  - CI runs the tests against the pinned `postgres:16-alpine` image as
+    `Wiki Tool Tests`, at 100% line and branch coverage.
+
 - `projectbuddy-diagnose` raises the answer yield (#304).
   - When the rules decide, the answer prompt lists the facts they rest on,
     or, if they rest on none, the rule itself, so the model cites exact

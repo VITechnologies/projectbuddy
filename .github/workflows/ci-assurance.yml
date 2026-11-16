@@ -209,6 +209,70 @@ jobs:
           dotnet publish "$PROJECT" -c Release -r win-x64 -o "$RUNNER_TEMP/publish" --nologo
           ls "$RUNNER_TEMP"/publish/*.exe
 
+  wiki-tool:
+    # tools/wiki (#307, #308): the wiki working-copy database and its CLI. The tests run against the same
+    # PostgreSQL image the workstation uses, one throwaway database per test, with a 100% line and branch gate.
+    name: Wiki Tool Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The password of a throwaway service container that only this job can reach; it protects nothing.
+      PBW_CI_PASSWORD: wiki-ci-ephemeral
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+        env:
+          POSTGRES_PASSWORD: wiki-ci-ephemeral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/wiki/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/wiki
+        run: |
+          umask 077
+          printf '%s\n' "$PBW_CI_PASSWORD" > "$RUNNER_TEMP/pbw-password"
+          export PBW_TEST_HOST=127.0.0.1 PBW_TEST_PORT=5432 PBW_TEST_USER=postgres PBW_TEST_PASSWORD_FILE="$RUNNER_TEMP/pbw-password"
+          dotnet restore ProjectBuddy.Wiki.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.Wiki.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/wiki-coverage"
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/wiki-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-wiki coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          packages = [package.attrib["name"] for package in root.iter("package")]
+          if packages != ["projectbuddy-wiki"]:
+              raise SystemExit(f"wiki coverage must measure exactly projectbuddy-wiki, got {packages}")
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-wiki coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-wiki coverage must be 100% line and branch")
+          PY
+
   source-config:
     name: Source Configuration Tests (${{ matrix.os }})
     strategy:
