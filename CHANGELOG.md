@@ -6,13 +6,7 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
-- `projectbuddy-diagnose` constrains the class from the first attempt when the
-  policy's rules decide it (#302). The answer schema allows only the decided
-  class, so the model's attempts go to the finding and citations. The check
-  remains as a defence in depth. `receipt.classCorrected` is removed; the
-  report's `verified` and `rule` already say the rules decided the class.
-
-- `projectbuddy-diagnose` verifies the answer's class (#299). The policy
+- `projectbuddy-diagnose` verifies the answer's class (#299, #302). The policy
   (`projectbuddy/diagnose-policy@2`) gives each question ordered,
   machine-checkable rules.
   - Conditions use `some`, `every` or `none` over JSON-pointer matches, with
@@ -20,10 +14,11 @@ release's notes for the exact pinned commit.
     tests.
   - A condition is undecided when its tool was not called, failed, or was
     truncated in a way that matters.
-  - When the rules decide, the model's class must match. After a
-    contradiction, the repair attempt's schema allows only the decided class.
-    The report adds `verified: ["citations", "class"]`, the rule with its
-    basis facts, and `receipt.classCorrected`.
+  - When the rules decide, the answer schema allows only the decided class
+    from the first attempt, so the model's attempts go to the finding and
+    citations. A class check stays as a defence in depth. The report adds
+    `verified: ["citations", "class"]` and the rule with its basis facts.
+    When the rules cannot decide, the class stays the model's, advisory.
   - The rules reach the model as generated prose.
   - The shipped rules guard against failed reads that probes report inside
     their data: services `error`, event-errors `errors`, and vm-states
