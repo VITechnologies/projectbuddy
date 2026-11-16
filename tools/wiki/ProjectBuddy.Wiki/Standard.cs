@@ -2,7 +2,8 @@ namespace ProjectBuddy.Wiki;
 
 // The ecosystem wiki standard this checker implements, pinned to the RSR release that ships it
 // (docs/architecture/ecosystem-wiki-standard.md). Updating the pin is a deliberate change: the finding catalogues below
-// are copied from that release, and a test fails when the checker's findings and these differ.
+// are copied from that release, and a test fails when the installed functions' findings differ from them, catalogue by
+// catalogue and in order.
 public static class Standard
 {
     public const string Id = "rsr/ecosystem-wiki-standard@1";

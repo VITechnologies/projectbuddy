@@ -9,7 +9,8 @@ release's notes for the exact pinned commit.
 - `projectbuddy-wiki` pins the ecosystem wiki standard it implements:
   `rsr/ecosystem-wiki-standard@1` from repo-standards-review `v0.5.0` (#320).
   - `project` reports the pin.
-  - A test fails when the checker's findings and the pinned catalogue differ.
+  - A test compares the installed projection functions with the pinned
+    catalogues, each one and in order, and fails when they differ.
 
 - `projectbuddy-wiki project` also projects the Architecture Packet (#315).
   - Migration `0004` gives `Architecture-Packet.md` and `architecture/*.md`

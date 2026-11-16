@@ -52,8 +52,8 @@ The pin is in
 release and commit, and the ordered finding catalogues copied from that
 release.
 - `project` reports the pin under `standard`.
-- A test fails when the projection's findings differ from the pinned
-  catalogue.
+- A test reads the installed projection functions after every migration. It
+  fails when any catalogue's findings, or their order, differ from the pin.
 - Moving to a newer standard is a deliberate change to that file.
 
 ## Commands
