@@ -38,7 +38,10 @@ public sealed class DiagnosisTests
         Assert.Equal("projectbuddy-diagnose 0.1.0", (string?)report["tool"]);
         Assert.True((bool)report["advisory"]!);
         Assert.Equal("github-unreachable", (string?)report["question"]);
-        Assert.Equal("""["citations"]""", report["verified"]!.ToJsonString());
+        Assert.Equal("""["citations","class"]""", report["verified"]!.ToJsonString());
+        Assert.Equal(
+            """{"class":"link-up","basis":[{"tool":"network-link","pointer":"/data/adapters/0/status","value":"up"},{"tool":"network-link","pointer":"/data/adapters/0/gateways/0","value":"192.168.1.1"}]}""",
+            report["rule"]!.ToJsonString());
         Assert.Equal("""{"class":"link-up","finding":"Wi-Fi is up.","citations":[{"tool":"network-link","pointer":"/data/adapters/0/status","value":"up"}]}""", report["answer"]!.ToJsonString());
         Assert.Equal(
             $$"""[{"tool":"network-link","arguments":{},"sha256":"{{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(expected)))}}"}]""",
@@ -47,7 +50,7 @@ public sealed class DiagnosisTests
         Assert.Equal("0.40.16", (string?)report["ollamaVersion"]);
         Assert.Equal(Fixtures.Parse().Sha256, (string?)report["policySha256"]);
         Assert.Equal(
-            """{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"evidenceBytes":""" + Encoding.UTF8.GetByteCount(expected)
+            """{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"classCorrected":false,"evidenceBytes":""" + Encoding.UTF8.GetByteCount(expected)
                 + ""","maxPromptTokens":500,"outputTokens":120,"seconds":6}""",
             report["receipt"]!.ToJsonString());
         Assert.Equal(1, sources.AdapterReads);
@@ -64,6 +67,41 @@ public sealed class DiagnosisTests
         Assert.Equal("network-link", (string?)Messages(chats[2])[3]!["tool_name"]);
         Assert.Equal(expected, Content(chats[2], 3));
         Assert.Equal("answer now", Content(chats[2], 4));
+        Assert.Equal(Diagnosis.Prompt(Fixtures.Parse().Questions[0]), Content(chats[0], 1));
+        Assert.Equal(
+            "Is the link the cause?\n\nClasses, decided by the first rule that holds:\n- no-active-link: no network-link /data/adapters/* with /status = \"up\"\n"
+                + "- link-up: some network-link /data/adapters/* with /status = \"up\" and /gateways/0 present\n"
+                + "When the results cannot decide these rules, the class is your judgment; use inconclusive if they do not answer the question.",
+            Content(chats[0], 1));
+    }
+
+    [Fact]
+    public async Task HoldsTheModelToTheClassItsRulesDecide()
+    {
+        var ollama = new FakeOllama();
+        ollama.Replies.Enqueue(FakeOllama.Calls(("network-link", None)));
+        ollama.Replies.Enqueue(FakeOllama.Reply(""));
+        ollama.Replies.Enqueue(FakeOllama.Answer("no-active-link", "No link.", ("network-link", "/data/adapters/0/status", "up")));
+        ollama.Replies.Enqueue(FakeOllama.Answer("link-up", "Wi-Fi is up.", ("network-link", "/data/adapters/0/status", "up")));
+        var policy = Fixtures.Parse(change => change["maxAnswerAttempts"] = 2);
+        var report = await Run(ollama, policy);
+
+        Assert.Equal("link-up", (string?)report["answer"]!["class"]);
+        Assert.True((bool)report["receipt"]!["classCorrected"]!);
+        var retry = ollama.Chats.Last();
+        Assert.Equal(
+            "That answer was rejected: class \"no-active-link\" contradicts the policy's rules, which decide link-up from the results. "
+                + "Answer again with JSON only; cite exact single values at pointers that exist in the tool results above.",
+            Content(retry, 6));
+        Assert.Equal("""["link-up"]""", retry["format"]!["properties"]!["class"]!["enum"]!.ToJsonString());
+        Assert.True(JsonNode.DeepEquals(Diagnosis.AnswerFormat(policy, policy.Questions[0], "link-up"), retry["format"]));
+
+        ollama.Replies.Enqueue(FakeOllama.Calls(("network-link", None)));
+        ollama.Replies.Enqueue(FakeOllama.Reply(""));
+        ollama.Replies.Enqueue(FakeOllama.Answer("no-active-link", "No link.", ("network-link", "/data/adapters/0/status", "up")));
+        var refused = await Assert.ThrowsAsync<PeerException>(() => Run(ollama, Fixtures.Parse()));
+        Assert.Equal(DiagnoseExitCodes.NoAdvice, refused.ExitCode);
+        Assert.Contains("contradicts the policy's rules", refused.Message);
     }
 
     [Fact]
@@ -81,6 +119,10 @@ public sealed class DiagnosisTests
         Assert.Equal("""{"refused":"event-errors argument 'hours' must be 1-72"}""", Content(answer, 4));
         Assert.Equal("""[{"function":{"name":"disk","arguments":{}}}]""", Messages(answer)[5]!["tool_calls"]!.ToJsonString());
         Assert.Equal((3, 2), ((int)report["receipt"]!["toolCalls"]!, (int)report["receipt"]!["refusedCalls"]!));
+
+        // Without a network-link result the rules cannot decide, so the class stays the model's, advisory.
+        Assert.Equal("""["citations"]""", report["verified"]!.ToJsonString());
+        Assert.Null(report["rule"]);
         Assert.Equal("""[{"tool":"disk","arguments":{}}]""", new JsonArray([.. report["evidence"]!.AsArray().Select(item => (JsonNode)new JsonObject
         {
             ["tool"] = item!["tool"]!.DeepClone(),

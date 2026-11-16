@@ -5,8 +5,8 @@ using ProjectBuddy.PeerOllama;
 
 namespace ProjectBuddy.PeerDiagnose;
 
-// A question the loop may be asked, with the closed list of classes its answer may take.
-public sealed record Question(string Id, string Text, IReadOnlyList<string> Classes);
+// A question the loop may be asked, the closed list of classes its answer may take, and the rules that decide the class.
+public sealed record Question(string Id, string Text, IReadOnlyList<string> Classes, IReadOnlyList<Rule> Rules);
 
 // Everything that shapes a diagnosis is pinned here and hashed into the report: the model by digest, the context and
 // output budgets, the loop's bounds, the prompts, and the closed list of questions.
@@ -28,7 +28,7 @@ public sealed partial record Policy(
     string AnswerPrompt,
     IReadOnlyList<Question> Questions)
 {
-    public const string Schema = "projectbuddy/diagnose-policy@1";
+    public const string Schema = "projectbuddy/diagnose-policy@2";
 
     public static Policy Parse(byte[] bytes)
     {
@@ -80,7 +80,7 @@ public sealed partial record Policy(
 
     private static Question ParseQuestion(JsonObject node, List<Question> earlier)
     {
-        Json.Keys(node, "question", "id", "text", "classes");
+        Json.Keys(node, "question", "id", "text", "classes", "rules");
         var id = Json.String(node["id"], "question id");
         if (!Name().IsMatch(id) || earlier.Any(question => question.Id == id))
         {
@@ -93,7 +93,7 @@ public sealed partial record Policy(
             throw new PeerException(ExitCodes.Refused, $"question {id} needs a non-empty list of unique [a-z0-9-]+ classes");
         }
 
-        return new Question(id, Text(node["text"], $"{id} text"), classes);
+        return new Question(id, Text(node["text"], $"{id} text"), classes, Rules.Parse(node["rules"], id, classes));
     }
 
     private static string Text(JsonNode? node, string what)

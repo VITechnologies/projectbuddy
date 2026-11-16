@@ -38,6 +38,8 @@ internal sealed class Receipt
 
     public int AnswerAttempts { get; set; }
 
+    public bool ClassCorrected { get; set; }
+
     public int EvidenceBytes { get; set; }
 
     public int MaxPromptTokens { get; set; }
@@ -62,7 +64,7 @@ public static class Diagnosis
         await ModelPin.RequireInstalledAsync(ollama, [policy.Model]);
         var probeTokens = await TruncationGuard.ProbeAsync(ollama, policy.Model.Name, policy.NumCtx, policy.Seed);
 
-        var request = OllamaClient.ChatRequest(policy.Model.Name, policy.System, question.Text, policy.NumCtx, policy.NumPredict, policy.Seed, tools: ToolDefinitions());
+        var request = OllamaClient.ChatRequest(policy.Model.Name, policy.System, Prompt(question), policy.NumCtx, policy.NumPredict, policy.Seed, tools: ToolDefinitions());
         var messages = request["messages"]!.AsArray();
         var evidence = new List<Evidence>();
         var receipt = new Receipt();
@@ -98,17 +100,33 @@ public static class Diagnosis
         request["format"] = AnswerFormat(policy, question);
         messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = policy.AnswerPrompt });
         JsonObject answer;
+        var decision = Rules.Decide(question.Rules, evidence);
         while (true)
         {
             var content = redact((await ChatAsync(ollama, policy, request, receipt)).Content).Text;
             receipt.AnswerAttempts++;
+            var contradicted = false;
             try
             {
                 answer = Ground(policy, question, evidence, content);
+                if (decision.Class is { } decided && (string?)answer["class"] != decided)
+                {
+                    contradicted = true;
+                    throw NoAdvice($"class {Show((string)answer["class"]!)} contradicts the policy's rules, which decide {decided} from the results");
+                }
+
                 break;
             }
             catch (PeerException rejected) when (receipt.AnswerAttempts < policy.MaxAnswerAttempts)
             {
+                // After a contradiction the answer's shape allows only the decided class; the finding and the
+                // citations are still the model's, and still grounded.
+                if (contradicted)
+                {
+                    request["format"] = AnswerFormat(policy, question, decision.Class);
+                    receipt.ClassCorrected = true;
+                }
+
                 messages.Add((JsonNode)new JsonObject { ["role"] = "assistant", ["content"] = content });
                 messages.Add((JsonNode)new JsonObject
                 {
@@ -124,8 +142,13 @@ public static class Diagnosis
             ["tool"] = $"projectbuddy-diagnose {Versions.Tool}",
             ["advisory"] = true,
             ["question"] = question.Id,
-            ["verified"] = new JsonArray("citations"),
+            ["verified"] = decision.Class is null ? new JsonArray("citations") : new JsonArray("citations", "class"),
             ["answer"] = answer,
+            ["rule"] = decision.Class is null ? null : new JsonObject
+            {
+                ["class"] = decision.Class,
+                ["basis"] = new JsonArray([.. decision.Basis.Select(fact => (JsonNode)new JsonObject { ["tool"] = fact.Tool, ["pointer"] = fact.Pointer, ["value"] = fact.Value })]),
+            },
             ["evidence"] = new JsonArray([.. evidence.Select(item => (JsonNode)new JsonObject
             {
                 ["tool"] = item.Tool,
@@ -144,6 +167,7 @@ public static class Diagnosis
                 ["toolCalls"] = receipt.ToolCalls,
                 ["refusedCalls"] = receipt.Refused,
                 ["answerAttempts"] = receipt.AnswerAttempts,
+                ["classCorrected"] = receipt.ClassCorrected,
                 ["evidenceBytes"] = receipt.EvidenceBytes,
                 ["maxPromptTokens"] = receipt.MaxPromptTokens,
                 ["outputTokens"] = receipt.OutputTokens,
@@ -151,6 +175,10 @@ public static class Diagnosis
             },
         };
     }
+
+    // The question as the model reads it: its text, then its class rules as generated prose.
+    public static string Prompt(Question question) =>
+        $"{question.Text}\n\n{Rules.Describe(question.Rules)}\nWhen the results cannot decide these rules, the class is your judgment; use inconclusive if they do not answer the question.";
 
     // The registry's specs as Ollama tool definitions: the closed list of names, and each argument's type and range.
     public static JsonArray ToolDefinitions() => new([.. Registry.Tools.Select(spec => (JsonNode)new JsonObject
@@ -175,14 +203,14 @@ public static class Diagnosis
         },
     })]);
 
-    // The answer's shape: a class from the question's list, a bounded finding, and 1 to maxCitations citations of short
-    // scalar values from named tools.
-    public static JsonObject AnswerFormat(Policy policy, Question question) => new()
+    // The answer's shape: a class from the question's list (or only onlyClass), a bounded finding, and 1 to
+    // maxCitations citations of short scalar values from named tools.
+    public static JsonObject AnswerFormat(Policy policy, Question question, string? onlyClass = null) => new()
     {
         ["type"] = "object",
         ["properties"] = new JsonObject
         {
-            ["class"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. question.Classes.Select(name => (JsonNode)name)]) },
+            ["class"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. (onlyClass is null ? question.Classes : [onlyClass]).Select(name => (JsonNode)name)]) },
             ["finding"] = new JsonObject { ["type"] = "string", ["maxLength"] = policy.MaxFindingChars },
             ["citations"] = new JsonObject
             {
@@ -261,7 +289,7 @@ public static class Diagnosis
     // Scalars are compared by their JSON text, never converted: a string by its content, a number or boolean by its exact
     // token, which a cited string may also give ("5" cites 5, models often quote numbers). Comparing text cannot throw on
     // an exponent no number type holds, and only the evidence's own spelling of a number is accepted.
-    private static bool Same(JsonNode? found, JsonNode? cited) => found switch
+    internal static bool Same(JsonNode? found, JsonNode? cited) => found switch
     {
         null => cited is null,
         JsonValue value when value.GetValueKind() == JsonValueKind.String => Json.TryString(cited) == value.GetValue<string>(),

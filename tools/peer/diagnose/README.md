@@ -52,14 +52,26 @@ out/projectbuddy-diagnose.exe --policy policy.json --question github-unreachable
    boolean whose JSON text it is, so `"5"` cites `5`. Model text in a
    rejection reason is shown as JSON, with control characters escaped, and is
    cut short.
-5. **Repair.** A rejected answer is shown its reason and may answer again, up
-   to `maxAnswerAttempts`. After that the tool gives **no advice** (exit 6) and
-   never a guess.
+5. **Class.** The question's **rules** decide the class from the same
+   evidence (see [Class rules](#class-rules-299)). When they decide, the
+   model's class must equal that class, and the report says
+   `"verified": ["citations", "class"]`, with the rule and the facts it rests
+   on. When they cannot decide, the class stays the model's judgment and only
+   the citations are verified.
+6. **Repair.** A rejected answer is shown its reason and may answer again, up
+   to `maxAnswerAttempts`.
+   - After a class contradiction, the repair's answer schema allows only the
+     decided class. The finding and citations are still the model's, still
+     grounded.
+   - `receipt.classCorrected` records that this happened.
+
+   After the last attempt the tool gives **no advice** (exit 6) and never a
+   guess.
 
 Every request must provably fit half the context (`TruncationGuard.Fits`). If
 one does not, nothing from the run is trusted (exit 6).
 
-## Policy (`policy.json`, `projectbuddy/diagnose-policy@1`)
+## Policy (`policy.json`, `projectbuddy/diagnose-policy@2`)
 
 The policy pins the base model `qwen2.5:7b` by its registry digest. This is the
 model #217 chose, and its digest is the same on every OS, unlike a locally
@@ -69,10 +81,44 @@ built identity. It also pins:
 - the prompts;
 - the closed list of **questions**.
 
-Each question's text states its classes and the rule for each class, so the
-class follows from tool values rather than from the model's arithmetic. For
-example, `disk` reports `freePercent` and `disk-low` means a drive below 10.
-Every question has `inconclusive`. The policy's SHA-256 goes into the report.
+Each question has its text, its classes (always including `inconclusive`),
+and its **rules**. The policy's SHA-256 goes into the report.
+
+### Class rules (#299)
+
+The model reads the rules as prose that is generated from them, so the prompt
+and the check cannot drift. Rules are tried in order, and the first that holds
+decides the class.
+
+```json
+{"class": "disk-low", "all": [
+  {"tool": "disk", "pointer": "/data/drives/*", "quantifier": "some",
+   "test": [{"pointer": "/freePercent", "op": "lt", "value": 10}]}]}
+```
+
+- **Rule:** `{class, all: [conditions]}` or `{class, any: [conditions]}`. An
+  empty `all` always holds, so it serves as "otherwise".
+- **Condition:** `{tool, pointer, quantifier, test}`.
+  - `pointer` is RFC 6901 into the tool result, and `*` steps over every
+    element of an array.
+  - `quantifier` is `some`, `every` or `none`. It says whether some, every or
+    no element passes **all** its tests.
+  - `every` over no elements is false, so there is no vacuous truth. `none`
+    over no elements is true.
+- **Test:** `{pointer, op, value}`, where the pointer is relative to the
+  element and `""` means the element itself.
+  - `eq` and `ne` compare scalars by their JSON text, as citations do.
+  - `lt`, `le`, `gt` and `ge` compare numbers.
+  - `prefix` checks that a string starts with the value.
+  - `present` checks that the pointer resolves, and takes no value.
+- **Undecided:** a condition is undecided in three cases:
+  - its tool was not called;
+  - a result of that tool failed;
+  - the result was truncated and the outcome depends on items that may have
+    been cut (`some` with no match, `none`, or an `every` that held).
+
+  Rules combine in three values. An undecided rule before the deciding one,
+  or no rule holding, leaves the class undecided.
 
 | Question | Classes |
 |---|---|
@@ -87,18 +133,22 @@ Every question has `inconclusive`. The policy's SHA-256 goes into the report.
 
 ```json
 {"schema":"projectbuddy/peer-diagnosis@1","tool":"projectbuddy-diagnose 0.1.0","advisory":true,"question":"disk-full",
- "verified":["citations"],
+ "verified":["citations","class"],
  "answer":{"class":"disk-low","finding":"…","citations":[{"tool":"disk","pointer":"/data/drives/0/freePercent","value":5}]},
+ "rule":{"class":"disk-low","basis":[{"tool":"disk","pointer":"/data/drives/0/freePercent","value":5}]},
  "evidence":[{"tool":"disk","arguments":{},"sha256":"…"}],
  "model":{"name":"qwen2.5:7b","digest":"…"},"ollamaVersion":"…","policySha256":"…",
- "receipt":{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"evidenceBytes":306,"maxPromptTokens":758,"outputTokens":185,"seconds":5.2}}
+ "receipt":{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"classCorrected":false,"evidenceBytes":306,"maxPromptTokens":758,"outputTokens":185,"seconds":5.2}}
 ```
 
 - No tool output leaves except the cited values, which were already redacted.
   `evidence` holds only each accepted call and the SHA-256 of the result it
   returned.
-- The answer is advisory. Only the citations are verified; the class and the
-  finding are the model's judgment.
+- The answer is advisory.
+  - The citations are always verified.
+  - The class is verified when the rules decide it. `rule.basis` lists up to 8
+    facts it rests on.
+  - The finding is the model's judgment.
 
 | Exit code | Meaning |
 |---|---|

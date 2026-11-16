@@ -109,11 +109,18 @@ internal sealed class FakeSources : ISources
 
 internal static class Fixtures
 {
+    public const string Rules = """
+        [
+          {"class":"no-active-link","all":[{"tool":"network-link","pointer":"/data/adapters/*","quantifier":"none","test":[{"pointer":"/status","op":"eq","value":"up"}]}]},
+          {"class":"link-up","all":[{"tool":"network-link","pointer":"/data/adapters/*","quantifier":"some","test":[{"pointer":"/status","op":"eq","value":"up"},{"pointer":"/gateways/0","op":"present"}]}]}
+        ]
+        """;
+
     public static JsonObject Policy(Action<JsonObject>? change = null)
     {
         var policy = new JsonObject
         {
-            ["schema"] = "projectbuddy/diagnose-policy@1",
+            ["schema"] = "projectbuddy/diagnose-policy@2",
             ["model"] = new JsonObject { ["name"] = FakeOllama.Model, ["digest"] = FakeOllama.Digest },
             ["numCtx"] = 16384,
             ["numPredict"] = 384,
@@ -133,6 +140,7 @@ internal static class Fixtures
                 ["id"] = "github-unreachable",
                 ["text"] = "Is the link the cause?",
                 ["classes"] = new JsonArray("link-up", "no-active-link", "inconclusive"),
+                ["rules"] = JsonNode.Parse(Rules)!.AsArray(),
             }),
         };
         change?.Invoke(policy);

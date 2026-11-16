@@ -1,5 +1,5 @@
 {
-  "schema": "projectbuddy/diagnose-policy@1",
+  "schema": "projectbuddy/diagnose-policy@2",
   "model": {
     "name": "qwen2.5:7b",
     "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e"
@@ -16,67 +16,475 @@
   "maxValueChars": 200,
   "maxAnswerAttempts": 2,
   "system": "You are projectbuddy, diagnosing the build machine you run on. Answer the user's question only from the results of the read-only tools you are offered. Call only the tools the question needs, one or two at a time, and stop calling tools once you have the results you need. Each tool result is JSON with a data object; a result with an error or available false means that check could not be made. Values such as <private>, <host>, <ip>, <user> and <path> are redactions: treat them as unknown and never guess what they hide. Never state a value you did not see in a tool result.",
-  "answerPrompt": "Answer now with JSON only. class: one of the allowed classes, chosen by the rules in the question. finding: one or two plain sentences. citations: 1 to 5 facts you relied on, each with tool (the tool's name), pointer (a JSON pointer into that tool's result as you received it, for example /data/adapters/0/status or /data/drives/0/freePercent) and value (the exact single value at that pointer, copied from the result: a string, number, true, false or null, never a list or an object; to cite a list, cite one item such as /data/adapters/0/gateways/0). Cite only values you saw. If the results do not decide the question, use the class inconclusive and cite what you checked.",
+  "answerPrompt": "Answer now with JSON only. class: one of the allowed classes, decided by the first of the question's rules that holds. finding: one or two plain sentences. citations: 1 to 5 facts you relied on, each with tool (the tool's name), pointer (a JSON pointer into that tool's result as you received it, for example /data/adapters/0/status or /data/drives/0/freePercent) and value (the exact single value at that pointer, copied from the result: a string, number, true, false or null, never a list or an object; to cite a list, cite one item such as /data/adapters/0/gateways/0). Cite only values you saw. If the results do not decide the question, use the class inconclusive and cite what you checked.",
   "questions": [
     {
       "id": "github-unreachable",
-      "text": "This machine cannot reach GitHub. Is its own network link the cause? Use network-link. Classes: no-active-link when no adapter has status up; no-default-route when adapters are up but none has a gateway; link-up when an adapter with status up has a gateway; inconclusive when network-link could not be read.",
+      "text": "This machine cannot reach GitHub. Is its own network link the cause? Use network-link.",
       "classes": [
         "no-active-link",
         "no-default-route",
         "link-up",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "no-active-link",
+          "all": [
+            {
+              "tool": "network-link",
+              "pointer": "/data/adapters/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "/status",
+                  "op": "eq",
+                  "value": "up"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "link-up",
+          "all": [
+            {
+              "tool": "network-link",
+              "pointer": "/data/adapters/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/status",
+                  "op": "eq",
+                  "value": "up"
+                },
+                {
+                  "pointer": "/gateways/0",
+                  "op": "present"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "no-default-route",
+          "all": []
+        }
       ]
     },
     {
       "id": "runner-offline",
-      "text": "The GitHub Actions runner on this machine shows as offline. Is the runner service the cause? Use services, and event-errors for crashes. Classes: runner-service-missing when no actions.runner service is listed; runner-service-stopped when it is listed but its state is not RUNNING; recent-crash when its state is RUNNING and event-errors lists a critical Kernel-Power or EventLog 6008 event; runner-service-running when its state is RUNNING otherwise; inconclusive when services is not available.",
+      "text": "The GitHub Actions runner on this machine shows as offline. Is the runner service the cause, or did the machine recently crash? Use services and event-errors.",
       "classes": [
         "runner-service-missing",
         "runner-service-stopped",
         "runner-service-running",
         "recent-crash",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "inconclusive",
+          "all": [
+            {
+              "tool": "services",
+              "pointer": "/data/available",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "runner-service-missing",
+          "all": [
+            {
+              "tool": "services",
+              "pointer": "/data/services/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "/name",
+                  "op": "prefix",
+                  "value": "actions.runner."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "runner-service-stopped",
+          "all": [
+            {
+              "tool": "services",
+              "pointer": "/data/services/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/name",
+                  "op": "prefix",
+                  "value": "actions.runner."
+                },
+                {
+                  "pointer": "/state",
+                  "op": "ne",
+                  "value": "RUNNING"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "recent-crash",
+          "any": [
+            {
+              "tool": "event-errors",
+              "pointer": "/data/groups/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/provider",
+                  "op": "eq",
+                  "value": "Microsoft-Windows-Kernel-Power"
+                },
+                {
+                  "pointer": "/id",
+                  "op": "eq",
+                  "value": 41
+                }
+              ]
+            },
+            {
+              "tool": "event-errors",
+              "pointer": "/data/groups/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/provider",
+                  "op": "eq",
+                  "value": "EventLog"
+                },
+                {
+                  "pointer": "/id",
+                  "op": "eq",
+                  "value": 6008
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "runner-service-running",
+          "all": []
+        }
       ]
     },
     {
       "id": "ollama-empty",
-      "text": "Is the local Ollama server reachable, and is the pinned projectbuddy identity model installed? Use ollama. Classes: ollama-unreachable when reachable is false; no-models when the models list is empty; identity-present when a model has identity true; identity-missing when models are listed but none has identity true; inconclusive when ollama could not be read.",
+      "text": "Is the local Ollama server reachable, and is the pinned projectbuddy identity model installed? Use ollama; identity is true on the pinned model.",
       "classes": [
         "ollama-unreachable",
         "no-models",
         "identity-missing",
         "identity-present",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "ollama-unreachable",
+          "all": [
+            {
+              "tool": "ollama",
+              "pointer": "/data/reachable",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "no-models",
+          "all": [
+            {
+              "tool": "ollama",
+              "pointer": "/data/models/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "identity-present",
+          "all": [
+            {
+              "tool": "ollama",
+              "pointer": "/data/models/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/identity",
+                  "op": "eq",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "identity-missing",
+          "all": []
+        }
       ]
     },
     {
       "id": "vm-states",
-      "text": "Is VirtualBox installed, and is any VirtualBox VM visible to this account running? Use vm-states. Classes: virtualbox-missing when available is false; no-vms-visible when the vms list is empty; vms-running when a VM has running true; no-vm-running when VMs are listed and none has running true, even if some VMs show an error; inconclusive when the data itself has an error field instead of a vms list.",
+      "text": "Is VirtualBox installed, and is any VirtualBox VM visible to this account running? Use vm-states.",
       "classes": [
         "virtualbox-missing",
         "no-vms-visible",
         "vms-running",
         "no-vm-running",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "virtualbox-missing",
+          "all": [
+            {
+              "tool": "vm-states",
+              "pointer": "/data/available",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "inconclusive",
+          "all": [
+            {
+              "tool": "vm-states",
+              "pointer": "/data/error",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "no-vms-visible",
+          "all": [
+            {
+              "tool": "vm-states",
+              "pointer": "/data/vms/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "vms-running",
+          "all": [
+            {
+              "tool": "vm-states",
+              "pointer": "/data/vms/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/running",
+                  "op": "eq",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "no-vm-running",
+          "all": []
+        }
       ]
     },
     {
       "id": "disk-full",
-      "text": "Is any fixed drive on this machine low on free space? Use disk. Classes: disk-low when any drive has freePercent below 10; disk-ok when every drive has freePercent of 10 or more; inconclusive when disk lists no drives.",
+      "text": "Is any fixed drive on this machine low on free space? Use disk.",
       "classes": [
         "disk-low",
         "disk-ok",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "inconclusive",
+          "all": [
+            {
+              "tool": "disk",
+              "pointer": "/data/drives/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "disk-low",
+          "all": [
+            {
+              "tool": "disk",
+              "pointer": "/data/drives/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/freePercent",
+                  "op": "lt",
+                  "value": 10
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "disk-ok",
+          "all": []
+        }
       ]
     },
     {
       "id": "general-health",
-      "text": "Give a short health check of this machine: network link, free disk space, Ollama and runner services. Classes: degraded when no adapter is up, any drive has freePercent below 10, Ollama is not reachable, or a listed service is not RUNNING; healthy when none of those holds; inconclusive when the tools could not be read.",
+      "text": "Give a short health check of this machine: its network link, free disk space, Ollama and the runner services. Use network-link, disk, ollama and services.",
       "classes": [
         "healthy",
         "degraded",
         "inconclusive"
+      ],
+      "rules": [
+        {
+          "class": "degraded",
+          "any": [
+            {
+              "tool": "network-link",
+              "pointer": "/data/adapters/*",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "/status",
+                  "op": "eq",
+                  "value": "up"
+                }
+              ]
+            },
+            {
+              "tool": "disk",
+              "pointer": "/data/drives/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/freePercent",
+                  "op": "lt",
+                  "value": 10
+                }
+              ]
+            },
+            {
+              "tool": "ollama",
+              "pointer": "/data/reachable",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "tool": "services",
+              "pointer": "/data/services/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/state",
+                  "op": "ne",
+                  "value": "RUNNING"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "healthy",
+          "all": [
+            {
+              "tool": "network-link",
+              "pointer": "/data/adapters/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/status",
+                  "op": "eq",
+                  "value": "up"
+                }
+              ]
+            },
+            {
+              "tool": "disk",
+              "pointer": "/data/drives/*",
+              "quantifier": "every",
+              "test": [
+                {
+                  "pointer": "/freePercent",
+                  "op": "ge",
+                  "value": 10
+                }
+              ]
+            },
+            {
+              "tool": "ollama",
+              "pointer": "/data/reachable",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        }
       ]
     }
   ]
