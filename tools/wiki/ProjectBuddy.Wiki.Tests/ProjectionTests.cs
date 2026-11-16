@@ -30,23 +30,14 @@ public sealed class ProjectionTests : IDisposable
     }
 
     private static string Requirement(string id, string title, string testIds, string codeRef = "None", bool withStatus = true) =>
-        $"# {id}: {title}\n\n## Requirement\n\nThe system shall work.\n\n## Rationale\n\nBecause.\n\n## Fit Criterion\n\nIt works.\n\n"
-        + $"## Verification\n\nPlanned.\n\n## Source\n\n[[Specification]]\n\n## Priority\n\nHigh\n\n## TestID\n\n{testIds}\n\n"
-        + $"## TestArtifact\n\nReview\n\n## CodeRef\n\n{codeRef}" + (withStatus ? "\n\n## Status\n\nPlanned\n" : "\n");
+        Pages.Requirement(id, title, testIds, codeRef, withStatus);
 
-    private static string Marker(string id, string kind, string body) => $"# {id}\n\n<!-- page-kind: {kind} -->\n{body}\n";
+    private static string Marker(string id, string kind, string body) => Pages.Marker(id, kind, body);
 
     private (string Commit, string[] Connection) SeedValidWiki()
     {
         var connection = server.Migrated();
-        var commit = repo
-            .Write("Home.md", "# Home\n")
-            .Write("system-requirements/SYS-REQ-001.md", Requirement("SYS-REQ-001", "Reusable engine", "[[TEST-001]]", "[[REQ-001]], [[REQ-002|the old one]]"))
-            .Write("software-requirements/REQ-001.md", Requirement("REQ-001", "No pinned config: none", "[[TEST-001]], [[TEST-002#case]] and again [[TEST-001]]"))
-            .Write("software-requirements/REQ-002.md", Marker("REQ-002", "retired", "Merged into [[REQ-001]]; see [[Software-Requirements-Specification]]."))
-            .Write("tests/TEST-001.md", "# TEST-001\n\n## Stimulus\n\nRun it.\n## not a heading\n\n## Required observation\n\n\n")
-            .Write("tests/TEST-002.md", Marker("TEST-002", "stub", "No definition yet."))
-            .Commit();
+        var commit = Pages.WriteValidWiki(repo).Commit();
         Assert.Equal(0, Cli.Run(["seed", "--wiki", repo.Path, .. connection]).Exit);
         return (commit, connection);
     }

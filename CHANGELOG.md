@@ -6,6 +6,16 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-wiki export-registry` exports the wiki's governed pages to the
+  RSR registry (#309, slice 2 of #307).
+  - It ingests one snapshot per scope, in the order software, system, test,
+    into `registry_v1`.
+  - It reads the source identity from an operator-approved record.
+  - It reuses a snapshot whose content key exists. Re-exporting unchanged
+    content, even from a later commit, changes nothing.
+  - CI tests the export against a stub of RSR's ingest contract, because RSR
+    is private. The same tests pass against RSR `v0.4.2`'s own migrations.
+
 - `projectbuddy-wiki project` projects the wiki's requirement and test pages
   for the RSR registry (#309, slice 2 of #307).
   - Migration `0003` parses each governed page in exactly one canonical

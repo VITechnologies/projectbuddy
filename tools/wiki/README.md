@@ -8,7 +8,7 @@ AI-assisted generation and regeneration of the wiki:
 - slice 1, [#308](https://github.com/VITechnologies/projectbuddy/issues/308):
   the working copy;
 - slice 2, [#309](https://github.com/VITechnologies/projectbuddy/issues/309):
-  the governed projection and its registry envelopes.
+  the governed projection, and its export to the RSR registry.
 
 The published wiki is canonical. The database is a rebuildable copy that seeds
 itself from the wiki's committed bytes. It renders the wiki back byte for
@@ -34,6 +34,7 @@ out/projectbuddy-wiki seed --wiki "$HOME/repos/projectbuddy.wiki" --port 55432 -
 out/projectbuddy-wiki check --wiki "$HOME/repos/projectbuddy.wiki" --port 55432 --password-file ...
 out/projectbuddy-wiki render --out /tmp/wiki-render --port 55432 --password-file ...
 out/projectbuddy-wiki project --port 55432 --password-file ...
+out/projectbuddy-wiki export-registry --approval <approval record> --importer-password-file <path> --port 55432 --password-file ...
 ```
 
 ## Commands
@@ -46,6 +47,7 @@ Every command prints one JSON object on standard output.
 | `seed --wiki <clone>` | Records the clone's `HEAD` commit. A recorded commit changes nothing (`up-to-date`). Otherwise only bytes the database does not hold yet are stored. The result counts what was added, modified and deleted since the previous state. |
 | `check --wiki <clone>` | Compares the clone's `HEAD` tree with the latest recorded state, byte for byte. It lists at most 100 differences plus their total. Drift exits 1. |
 | `render --out <dir> [--commit <sha>]` | Writes the latest recorded state, or the state of a recorded commit, as files. |
+| `export-registry --approval <file> --importer-password-file <path> [--importer <name>] [--registry-database <name>] [--commit <sha>]` | Exports the latest recorded state, or a recorded commit, to the RSR registry; see [Registry export](#registry-export). |
 | `project [--commit <sha>]` | Reports the [governed projection](#governed-projection) of the latest recorded state, or of a recorded commit: pages per scope and kind, trace edges per type, and at most 100 pages or links that cannot be exported, plus their total. Any such page or link exits 1. |
 
 `seed` and `check` read the **committed** tree (`git ls-tree` and
@@ -245,6 +247,42 @@ An edge is a problem when:
   never holds part of a wiki. An envelope over the registry's limits (10,000
   nodes, 50,000 edges or 16 MiB) is refused too.
 
+## Registry export
+
+`export-registry` writes the governed projection into RSR's `registry_v1`, by
+default the database `registry_local` on the same server. A run goes like
+this:
+
+1. **Refuse a wiki that cannot be exported.** If `project` would list any
+   problem, the export stops before any registry call.
+2. **Read the source identity** from an operator-approved
+   `rsr/source-authority-proposal@1` record (`--approval`):
+   - `approval_status` must be `APPROVED`;
+   - `authority_manifest.source_uuid` and `constellation_uuid`,
+     `authority_manifest_digest`, and `source_lock.accepted_ref` give the
+     identity.
+
+   The registry refuses a manifest it has not admitted
+   (`source_authority_not_admitted`, exit 5). The approval is the one-time
+   registration of the source: it authorizes the `master` ref, not one
+   revision, so later wiki commits are exported under it.
+3. **Export the scopes in the order software, system, test.** For each scope,
+   the run builds the envelope, looks up its content key, and then either
+   reuses the snapshot that holds it or ingests a new one. The next scope's
+   edges point into that snapshot.
+   - The lookup reads as the `--user` login. That is the administrator, as in
+     RSR's own bootstrap, because the importer role cannot read snapshots
+     (svelderrainruiz/repo-standards-review work item 2).
+   - The ingest runs as `--importer` (default `registry_importer_local`), with
+     its own password file. It needs an active importer authorization for the
+     constellation.
+
+The result names each scope's registry snapshot, whether it was reused, and
+its node and edge counts. Exporting unchanged content again, even from a later
+commit, reuses all three snapshots. A changed requirement gives a new software
+snapshot, and new system and test snapshots, because their edges point into
+it.
+
 ## Round-trip proof
 
 On the workstation, against the projectbuddy wiki (352 files, 593,340 bytes):
@@ -295,7 +333,26 @@ timeouts. They cover:
 - concurrent first migrations;
 - every page kind and edge type;
 - every projection problem, the envelopes of each scope with their exact node
-  texts, and every envelope refusal.
+  texts, and every envelope refusal;
+- the export into a registry:
+  - ingest, then reuse when the content is unchanged, including from a later
+    commit;
+  - the new snapshots that follow a changed requirement, and their edges;
+  - every refusal: of the approval record, of an unadmitted manifest, and of
+    a wiki with problems.
 
-CI runs them as `Wiki Tool Tests` against the same pinned
-`postgres:16-alpine` image, at 100% line and branch coverage.
+The registry tests also need `PBW_TEST_REGISTRY_MIGRATIONS`, which names a
+directory of SQL files that build `registry_v1`. It can be either of two:
+- **RSR's own `db/registry-v1`**, the real registry;
+- **the contract stub**,
+  [`RegistryContract/`](ProjectBuddy.Wiki.Tests/RegistryContract/registry_v1_contract.sql).
+  It holds only the tables and `ingest_snapshot` rules that the export relies
+  on, with RSR's error messages.
+
+RSR is private, so public CI uses the stub. The same tests pass against RSR
+`v0.4.2`'s migrations, and the live export to `registry_local` is checked
+with RSR's own `find_requirements` and `dependency_lineage`.
+
+CI runs all the tests as `Wiki Tool Tests`:
+- against the same pinned `postgres:16-alpine` image;
+- at 100% line and branch coverage.
