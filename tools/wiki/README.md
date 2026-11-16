@@ -80,6 +80,7 @@ but they never block the export.
 
 | Finding | Meaning |
 | --- | --- |
+| `not-utf8` | a page outside the governed and Architecture Packet families is not UTF-8 |
 | `page-not-indexed` | the wiki has a hub, and the page is not an ID page, a hub, a child in a page's final sections index, or marked `<!-- page-kind: note -->` under its title |
 | `page-over-budget` | the page exceeds 16,384 bytes |
 

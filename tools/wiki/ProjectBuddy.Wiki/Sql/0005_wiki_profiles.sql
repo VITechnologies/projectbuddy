@@ -145,22 +145,27 @@ $$;
 DROP FUNCTION wiki_v1.page_links(text);
 
 -- Whole-wiki findings over every Markdown page outside dot-prefixed paths, as scripts/Assemble-WikiSpec.py --strict
--- decides them. When the wiki has a hub (a page that is not an ID page, holds a table or sections marker, and is no
+-- decides them. A page that is not UTF-8 is not-utf8, unless it is a governed or Architecture Packet page, whose own
+-- family reports it. When the wiki has a hub (a page that is not an ID page, holds a table or sections marker, and is no
 -- page's child), every other page must be an ID page, a hub, a child in some page's final sections index, or marked
 -- `<!-- page-kind: note -->` directly under its title (page-not-indexed). Every page is at most 16,384 bytes
 -- (page-over-budget). The first that applies names the page.
 CREATE FUNCTION wiki_v1.wiki_pages(p_snapshot uuid) RETURNS TABLE (path text, problem text)
 LANGUAGE sql STABLE AS $$
     WITH files AS (
-        -- A page that is not UTF-8 is left to the finding of its own family.
-        SELECT f.path, regexp_replace(regexp_replace(f.path, '^.*/', ''), '[.]md$', '') AS name, b.content, t.text
+        SELECT f.path, regexp_replace(regexp_replace(f.path, '^.*/', ''), '[.]md$', '') AS name, b.content, t.text,
+               f.path = 'Architecture-Packet.md' OR starts_with(f.path, 'architecture/')
+                   OR EXISTS (SELECT 1 FROM wiki_v1.governed_scopes(p_snapshot) AS s WHERE starts_with(f.path, s.directory || '/')) AS in_family
         FROM wiki_v1.snapshot_files AS f JOIN wiki_v1.blobs AS b USING (sha256)
         CROSS JOIN LATERAL (SELECT wiki_v1.utf8_text(b.content) AS text) AS t
-        WHERE f.snapshot_uuid = p_snapshot AND f.path ~ '[.]md$' AND f.path !~ '(^|/)[.]' AND t.text IS NOT NULL
+        WHERE f.snapshot_uuid = p_snapshot AND f.path ~ '[.]md$' AND f.path !~ '(^|/)[.]'
+    ),
+    unreadable AS (
+        SELECT f.path FROM files AS f WHERE f.text IS NULL AND NOT f.in_family
     ),
     pages AS (
         SELECT f.*, f.name ~ ('^(?:' || (SELECT string_agg(s.id_prefix, '|') FROM wiki_v1.governed_scopes(p_snapshot) AS s) || ')-[0-9]{3,}$') IS TRUE AS is_id
-        FROM files AS f
+        FROM files AS f WHERE f.text IS NOT NULL
     ),
     children AS (
         SELECT DISTINCT c.match[1] AS name
@@ -172,15 +177,19 @@ LANGUAGE sql STABLE AS $$
         SELECT p.name FROM pages AS p
         WHERE NOT p.is_id AND p.text ~ '<!-- /?(?:table|sections)\y' AND p.name NOT IN (SELECT c.name FROM children AS c)
     )
+    SELECT x.path, x.problem FROM (
+    SELECT u.path, 'not-utf8' AS problem FROM unreadable AS u
+    UNION ALL
     SELECT p.path,
         CASE
             WHEN EXISTS (SELECT 1 FROM roots) AND NOT p.is_id AND p.name NOT IN (SELECT r.name FROM roots AS r)
                  AND p.name NOT IN (SELECT c.name FROM children AS c) AND p.text !~ '^[^\n]*\n\n<!-- page-kind: note -->\n'
                 THEN 'page-not-indexed'
             WHEN octet_length(p.content) > 16384 THEN 'page-over-budget'
-        END
+        END AS problem
     FROM pages AS p
-    ORDER BY p.path COLLATE "C";
+    ) AS x
+    ORDER BY x.path COLLATE "C";
 $$;
 
 CREATE OR REPLACE FUNCTION wiki_v1.parse_page(p_content bytea)

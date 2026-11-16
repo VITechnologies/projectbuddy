@@ -28,5 +28,5 @@ public static class Standard
 
     public static readonly string[] ProfileFindings = ["invalid-profile"];
 
-    public static readonly string[] WikiFindings = ["page-not-indexed", "page-over-budget"];
+    public static readonly string[] WikiFindings = ["not-utf8", "page-not-indexed", "page-over-budget"];
 }

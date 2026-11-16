@@ -133,15 +133,16 @@ public sealed class ProfileTests : IDisposable
             .Write("Late-Note.md", "# Late Note\n\nx\n<!-- page-kind: note -->\n")
             .Write("Big.md", "# Big\n\n<!-- page-kind: note -->\n" + new string('x', 16400) + "\n")
             .Write("Bad.md", [0xff])
+            .Write("architecture/Bad-Architecture.md", [0xff])
             .Write(".trash/Ignored.md", "# Ignored\n\nx\n")
             .Write("notes.txt", "not a page\n")
             .Write("tests/TEST-001.md", Pages.Marker("TEST-001", "stub", "x"));
         var (_, _, report, exit) = Project();
         Assert.Equal(ExitCodes.Findings, exit);
         Assert.True((bool)report["exportable"]!);
-        Assert.Equal(["Big.md:page-over-budget", "Late-Note.md:page-not-indexed", "Orphan.md:page-not-indexed"],
+        Assert.Equal(["Bad.md:not-utf8", "Big.md:page-over-budget", "Late-Note.md:page-not-indexed", "Orphan.md:page-not-indexed"],
             report["wikiProblems"]!.AsArray().Select(problem => $"{problem!["path"]}:{problem["problem"]}"));
-        Assert.Equal(3, (int)report["wikiProblemCount"]!);
+        Assert.Equal(4, (int)report["wikiProblemCount"]!);
     }
 
     [Fact]
