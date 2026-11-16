@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
-## Unreleased
+## v0.4.0
 
 - Adopt the repo-standards-review consumer kit at RSR v0.5.0 (#277), and
   re-certify the compliance stamp against v0.5.0.
