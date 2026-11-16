@@ -67,7 +67,10 @@ public sealed class DiagnosisTests
         Assert.Equal("""[{"function":{"name":"network-link","arguments":{}}}]""", Messages(chats[2])[2]!["tool_calls"]!.ToJsonString());
         Assert.Equal("network-link", (string?)Messages(chats[2])[3]!["tool_name"]);
         Assert.Equal(expected, Content(chats[2], 3));
-        Assert.Equal("answer now", Content(chats[2], 4));
+        Assert.Equal(
+            "answer now\n\nThe policy's rules decide the class link-up from these facts; cite them exactly as written (tool, pointer, value):\n"
+                + "- network-link /data/adapters/0/status = \"up\"\n- network-link /data/adapters/0/gateways/0 = \"192.168.1.1\"",
+            Content(chats[2], 4));
         Assert.Equal(Diagnosis.Prompt(Fixtures.Parse().Questions[0]), Content(chats[0], 1));
         Assert.Equal(
             "Is the link the cause?\n\nClasses, decided by the first rule that holds:\n- no-active-link: no network-link /data/adapters/* with /status = \"up\"\n"
@@ -107,6 +110,24 @@ public sealed class DiagnosisTests
     }
 
     [Fact]
+    public async Task ShowsTheRuleWhenItRestsOnNoFacts()
+    {
+        // "No adapter is up" holds over no element, so there is no fact to show; the rule itself is shown instead.
+        var sources = new FakeSources();
+        sources.AdapterList.Clear();
+        var ollama = new FakeOllama();
+        ollama.Replies.Enqueue(FakeOllama.Calls(("network-link", None)));
+        ollama.Replies.Enqueue(FakeOllama.Reply(""));
+        ollama.Replies.Enqueue(FakeOllama.Answer("no-active-link", "No adapter.", ("network-link", "/data/adapters", "[]")));
+        var report = await Run(ollama, Fixtures.Parse(), sources);
+
+        Assert.Equal("no-active-link", (string?)report["answer"]!["class"]);
+        Assert.Equal("""{"class":"no-active-link","basis":[]}""", report["rule"]!.ToJsonString());
+        Assert.Equal("answer now\n\nThe policy's rules decide the class no-active-link because no network-link /data/adapters/* with /status = \"up\".",
+            Content(ollama.Chats.Last(), 4));
+    }
+
+    [Fact]
     public async Task RefusesCallsOutsideTheRegistry()
     {
         var ollama = new FakeOllama();
@@ -123,6 +144,7 @@ public sealed class DiagnosisTests
         Assert.Equal((3, 2), ((int)report["receipt"]!["toolCalls"]!, (int)report["receipt"]!["refusedCalls"]!));
 
         // Without a network-link result the rules cannot decide, so the class stays the model's, advisory and free.
+        Assert.Equal("answer now", Content(answer, 7));
         Assert.Equal("""["citations"]""", report["verified"]!.ToJsonString());
         Assert.Null(report["rule"]);
         Assert.Equal("""["link-up","no-active-link","inconclusive"]""", answer["format"]!["properties"]!["class"]!["enum"]!.ToJsonString());

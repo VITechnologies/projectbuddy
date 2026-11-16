@@ -99,7 +99,7 @@ public static class Diagnosis
         var decision = Rules.Decide(question.Rules, evidence);
         request.Remove("tools");
         request["format"] = AnswerFormat(policy, question, decision.Class);
-        messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = policy.AnswerPrompt });
+        messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = decision.Class is null ? policy.AnswerPrompt : $"{policy.AnswerPrompt}\n\n{Hint(decision)}" });
         JsonObject answer;
         while (true)
         {
@@ -277,14 +277,26 @@ public static class Diagnosis
     private static bool Matches(JsonNode? result, string pointer, JsonNode? value) =>
         (Resolve(result, pointer, out var found) && Same(found, value)) || (Resolve(result!["data"], pointer, out var inData) && Same(inData, value));
 
+    // When the rules decide, the model is shown the facts they rest on (or, for a rule with no facts to show, such as
+    // "no element exists", the rule itself), so it can cite exactly what was found (#304). Grounding is unchanged.
+    internal static string Hint(Decision decision) => decision.Basis.Count > 0
+        ? $"The policy's rules decide the class {decision.Class} from these facts; cite them exactly as written (tool, pointer, value):"
+            + string.Concat(decision.Basis.Select(fact => $"\n- {fact.Tool} {fact.Pointer} = {Show(fact.Value)}"))
+        : $"The policy's rules decide the class {decision.Class} because {Rules.Describe(decision.Rule!)}.";
+
     // Scalars are compared by their JSON text, never converted: a string by its content, a number or boolean by its exact
-    // token, which a cited string may also give ("5" cites 5, models often quote numbers). Comparing text cannot throw on
-    // an exponent no number type holds, and only the evidence's own spelling of a number is accepted.
+    // token, which a cited string may also give ("5" cites 5, models often quote numbers), and an empty list or object by
+    // "[]" or "{}". Comparing text cannot throw on an exponent no number type holds, and only the evidence's own
+    // spelling of a number is accepted.
     internal static bool Same(JsonNode? found, JsonNode? cited) => found switch
     {
         null => cited is null,
         JsonValue value when value.GetValueKind() == JsonValueKind.String => Json.TryString(cited) == value.GetValue<string>(),
         JsonValue value => cited is not null && (cited.ToJsonString() == value.ToJsonString() || Json.TryString(cited) == value.ToJsonString()),
+
+        // An empty list or object is a fact too; its JSON text is cited as a string (#304).
+        JsonArray { Count: 0 } => Json.TryString(cited) == "[]",
+        JsonObject { Count: 0 } => Json.TryString(cited) == "{}",
         _ => false,
     };
 
