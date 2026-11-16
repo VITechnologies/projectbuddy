@@ -9,9 +9,10 @@ release's notes for the exact pinned commit.
 - Fix `projectbuddy-probes network-link` on Windows (#292). .NET also lists
   NDIS filter pseudo-interfaces (QoS Packet Scheduler, WFP filters) and absent
   adapters, which could fill the 16-adapter cap and push out real adapters.
-  - Adapters with no hardware present, or bound to neither IPv4 nor IPv6, are
-    now counted in `omitted` instead of listed.
-  - Live adapters are listed first, physical kinds before virtual ones.
+  - On Windows, adapters bound to neither IPv4 nor IPv6 are now counted in
+    `omitted` instead of listed.
+  - Adapters with a default gateway are listed first, then those that are up,
+    with absent ones last.
   - The README records what a Windows run verified, and that `vm-states` sees
     only the VMs registered to its own account.
 
