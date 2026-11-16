@@ -6,6 +6,14 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-diagnose` raises the answer yield (#304).
+  - When the rules decide, the answer prompt lists the facts they rest on,
+    or, if they rest on none, the rule itself, so the model cites exact
+    pointers.
+  - An empty list or object can be cited as `"[]"` or `"{}"`.
+  - The hint does not change grounding. On the workstation, all six
+    questions gave grounded answers with verified classes.
+
 - `projectbuddy-ask` 0.3.0 adds the `diagnose <question-id>` verb (#298, #290
   slice 4).
   - The peer's forced command runs the deployed `projectbuddy-diagnose`, with

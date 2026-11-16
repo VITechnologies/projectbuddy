@@ -89,7 +89,7 @@ public sealed class GroundTests
 
     private static readonly Question Question = Policy.Questions[0];
 
-    private const string Disk = """{"schema":"projectbuddy/peer-tool-result@1","tool":"disk","truncated":false,"redaction":{},"data":{"drives":[{"name":"C:\\","freePercent":12,"ok":true,"none":null,"a/b":1,"m~n":2,"list":[1]}]}}""";
+    private const string Disk = """{"schema":"projectbuddy/peer-tool-result@1","tool":"disk","truncated":false,"redaction":{},"data":{"drives":[{"name":"C:\\","freePercent":12,"ok":true,"none":null,"a/b":1,"m~n":2,"list":[1],"list0":[],"obj0":{}}]}}""";
 
     private static readonly IReadOnlyList<Evidence> Evidence =
     [
@@ -136,6 +136,11 @@ public sealed class GroundTests
         { Answer(Cite("disk", "/data/drives/1234567890/freePercent", 12)), "matches no result of that tool" },
         { Answer(Cite("disk", "/data/drives/0/freePercent/x", 12)), "matches no result of that tool" },
         { Answer(Cite("ollama", "/data/reachable", true)), "matches no result of that tool" },
+        { Answer(Cite("disk", "/data/drives/0/list", "[1]")), "matches no result" },
+        { Answer(Cite("disk", "/data/drives/0/list", "[]")), "matches no result" },
+        { Answer(Cite("disk", "/data/drives/0/list0", "[ ]")), "matches no result" },
+        { Answer(Cite("disk", "/data/drives/0/obj0", "[]")), "matches no result" },
+        { Answer(Cite("disk", "/data/drives/0/list0", "{}")), "matches no result" },
         { Answer(Cite("disk", "/data/drives/0/freePercent", JsonNode.Parse("1e99999999999"))), "= 1e99999999999 matches no result" },
         { Answer(Cite("disk", "/data/drives/0/freePercent", JsonNode.Parse("12.0"))), "= 12.0 matches no result" },
         { Answer(Cite("disk", "/data/drives/0/ok", JsonNode.Parse("1"))), "matches no result" },
@@ -167,6 +172,8 @@ public sealed class GroundTests
         { "/truncated", "false" },
         { "/tool", "\"disk\"" },
         { "/data/drives/0/list/0", "1" },
+        { "/data/drives/0/list0", "\"[]\"" },
+        { "/drives/0/obj0", "\"{}\"" },
     };
 
     [Theory]

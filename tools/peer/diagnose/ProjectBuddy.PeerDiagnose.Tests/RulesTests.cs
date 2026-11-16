@@ -150,6 +150,8 @@ public sealed class RulesTests
         var any = $$"""[{"class":"a","any":[{{Condition("some", """[{"pointer":"/freePercent","op":"gt","value":99}]""")}},{{Condition("some", """[{"pointer":"/name","op":"eq","value":"D:"},{"pointer":"/label","op":"eq","value":null}]""")}}]}]""";
         var decision = Rules.Decide(Parse(any), [Result("disk", Drives)]);
         Assert.Equal("a", decision.Class);
+        Assert.Equal("a", decision.Rule!.Class);
+        Assert.Null(Rules.Decide(Parse(any), []).Rule);
         Assert.Equal([("disk", "/data/drives/1/name", "\"D:\""), ("disk", "/data/drives/1/label", (string?)null)],
             decision.Basis.Select(fact => (fact.Tool, fact.Pointer, fact.Value?.ToJsonString())));
 

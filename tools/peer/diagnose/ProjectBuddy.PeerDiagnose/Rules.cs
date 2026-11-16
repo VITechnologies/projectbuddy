@@ -19,8 +19,9 @@ public sealed record Rule(string Class, bool All, IReadOnlyList<Condition> Condi
 // A fact a decided class rests on: a concrete pointer in a tool result and the scalar found there.
 public sealed record Basis(string Tool, string Pointer, JsonNode? Value);
 
-// The class the rules decide from the evidence, with its basis; Class is null when the rules cannot decide.
-public sealed record Decision(string? Class, IReadOnlyList<Basis> Basis);
+// The class the rules decide from the evidence, with its basis and the rule that decided it; Class is null when the rules
+// cannot decide.
+public sealed record Decision(string? Class, IReadOnlyList<Basis> Basis, Rule? Rule = null);
 
 // The closed rule language that makes an answer's class machine-checkable (#299). Rules are tried in order and the first
 // that holds decides. A condition is undecided when its tool was not called or failed, or when a truncated result could
@@ -72,13 +73,15 @@ public static class Rules
         var text = new StringBuilder("Classes, decided by the first rule that holds:");
         foreach (var rule in rules)
         {
-            var conditions = rule.Conditions.Select(Describe).ToList();
-            text.Append("\n- ").Append(rule.Class).Append(": ")
-                .Append(conditions.Count == 0 ? "otherwise" : string.Join(rule.All ? " and " : " or ", conditions));
+            text.Append("\n- ").Append(rule.Class).Append(": ").Append(Describe(rule));
         }
 
         return text.ToString();
     }
+
+    // One rule's conditions as prose.
+    public static string Describe(Rule rule) =>
+        rule.Conditions.Count == 0 ? "otherwise" : string.Join(rule.All ? " and " : " or ", rule.Conditions.Select(Describe));
 
     internal static Decision Decide(IReadOnlyList<Rule> rules, IReadOnlyList<Evidence> evidence)
     {
@@ -92,7 +95,7 @@ public static class Rules
 
             if (holds.Value)
             {
-                return new Decision(rule.Class, [.. basis.Take(MaxBasis)]);
+                return new Decision(rule.Class, [.. basis.Take(MaxBasis)], rule);
             }
         }
 

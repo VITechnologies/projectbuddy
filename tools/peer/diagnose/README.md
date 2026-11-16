@@ -49,7 +49,8 @@ out/projectbuddy-diagnose.exe --policy policy.json --question github-unreachable
    against its `data` object. Values are compared by their JSON text and are
    never converted: a string by its content, a number or boolean by its exact
    token (`12.0` does not cite `12`). A cited string also matches a number or
-   boolean whose JSON text it is, so `"5"` cites `5`. Model text in a
+   boolean whose JSON text it is, so `"5"` cites `5`, and an empty list or
+   object is cited as `"[]"` or `"{}"`. Model text in a
    rejection reason is shown as JSON, with control characters escaped, and is
    cut short.
 5. **Class.** The question's **rules** decide the class from the same
@@ -58,6 +59,9 @@ out/projectbuddy-diagnose.exe --policy policy.json --question github-unreachable
      first attempt (#302). The model's class is checked against it anyway, as
      a defence in depth. The report says `"verified": ["citations", "class"]`,
      with the rule and the facts it rests on.
+   - The answer prompt also shows the model those facts, so it can cite them
+     exactly (#304). For a rule with no facts to show (such as "no element
+     exists"), the prompt shows the rule itself.
    - When the rules cannot decide, the class is free, stays the model's
      judgment, and only the citations are verified.
 6. **Repair.** A rejected answer is shown its reason and may answer again, up
