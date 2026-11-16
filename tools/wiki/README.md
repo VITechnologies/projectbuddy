@@ -43,15 +43,54 @@ out/projectbuddy-wiki export-registry --approval <approval record> --importer-pa
 ## Standard
 
 `projectbuddy-wiki` is the reference checker of the ecosystem wiki standard,
-`rsr/ecosystem-wiki-standard@1`. That standard ships in repo-standards-review
-`v0.5.0` (`0cab380`), as `docs/architecture/ecosystem-wiki-standard.md`
-(VITechnologies/projectbuddy#318, #319, #320).
+`rsr/ecosystem-wiki-standard@2`. That standard ships in repo-standards-review
+`v0.6.0` (`d25cfc1`) as `docs/architecture/ecosystem-wiki-standard.md`
+(VITechnologies/projectbuddy#318, #319, #320, #329).
+
+### Wiki profiles
+
+The wiki profile declares a member's governed scopes, and a wiki can supply its
+own in a root `.wiki-profile.json`
+(`rsr/wiki-profile@1`). A wiki without one has projectbuddy's profile, which is
+the table under [Governed projection](#governed-projection). A profile names one
+to three scopes, `system`, `software` and `test`, each once. Each scope gives:
+- `directory`: one plain path segment;
+- `idPrefix`: upper-case words joined by `-`, such as `LBA-REQ` or `T`;
+- `sections`: the ordered section headings, other than `ID`, `Title`,
+  `Page kind` and `Body`, which are the registry text's own keys.
+
+```json
+{"schema": "rsr/wiki-profile@1", "scopes": [
+  {"scope": "software", "directory": "software-requirements", "idPrefix": "LBA-REQ", "sections": ["Requirement", "TestID", "CodeRef", "Status"]},
+  {"scope": "test", "directory": "tests", "idPrefix": "T", "sections": ["Stimulus", "Required observation"]}]}
+```
+
+How the profile changes the projection:
+- **Links and edges:** wiki links count only with one of the profile's
+  prefixes, and edges point only into scopes the profile holds.
+- **Missing system scope:** the test scope's edges point into the software
+  snapshot alone, and `export-registry` exports only the profile's scopes.
+- **Invalid profile:** a profile that is not valid governs nothing. It is the
+  finding `invalid-profile`, which blocks the export.
+
+### Whole-wiki findings
+
+These apply to every Markdown page outside dot-prefixed paths. They follow
+`scripts/Assemble-WikiSpec.py --strict` (#325). They are findings (exit 1),
+but they never block the export.
+
+| Finding | Meaning |
+| --- | --- |
+| `not-utf8` | a page outside the governed and Architecture Packet families is not UTF-8 |
+| `page-not-indexed` | the wiki has a hub, and the page is not an ID page, a hub, a child in a page's final sections index, or marked `<!-- page-kind: note -->` under its title |
+| `page-over-budget` | the page exceeds 16,384 bytes |
 
 The pin is in
 [`Standard.cs`](ProjectBuddy.Wiki/Standard.cs): the standard ID, the RSR
 release and commit, and the ordered finding catalogues copied from that
 release.
-- `project` reports the pin under `standard`.
+- `project` reports the pin under `standard`, and the profile it applied under
+  `profile`.
 - A test reads the installed projection functions after every migration. It
   fails when any catalogue's findings, or their order, differ from the pin.
 - Moving to a newer standard is a deliberate change to that file.

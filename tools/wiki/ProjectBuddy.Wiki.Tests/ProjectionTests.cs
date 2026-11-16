@@ -100,7 +100,7 @@ public sealed class ProjectionTests : IDisposable
         var report = JsonNode.Parse(output)!.AsObject();
         Assert.Equal(commit, (string?)report["commit"]);
         Assert.True((bool)report["exportable"]!);
-        Assert.Equal("projectbuddy-wiki-pages-v1", (string?)report["parserVersion"]);
+        Assert.Equal("projectbuddy-wiki-pages-v2", (string?)report["parserVersion"]);
         Assert.True(JsonNode.DeepEquals(
             JsonNode.Parse("""{"system":{"sections":1},"software":{"sections":1,"retired":1},"test":{"sections":1,"stub":1}}"""), report["pages"]));
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{"verifies":3,"allocates":2,"supersedes":1}"""), report["edges"]));
