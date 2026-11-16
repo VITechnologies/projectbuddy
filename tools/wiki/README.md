@@ -56,7 +56,8 @@ the table under [Governed projection](#governed-projection). A profile names one
 to three scopes, `system`, `software` and `test`, each once. Each scope gives:
 - `directory`: one plain path segment;
 - `idPrefix`: upper-case words joined by `-`, such as `LBA-REQ` or `T`;
-- `sections`: the ordered section headings.
+- `sections`: the ordered section headings, other than `ID`, `Title`,
+  `Page kind` and `Body`, which are the registry text's own keys.
 
 ```json
 {"schema": "rsr/wiki-profile@1", "scopes": [

@@ -18,7 +18,8 @@ $$;
 
 -- Whether a profile is not a valid rsr/wiki-profile@1: exactly the keys schema and scopes; one to three scopes, each
 -- with exactly the string keys scope (system, software or test, once), directory (one plain path segment, once) and
--- idPrefix (upper-case words joined by '-', once), and sections (distinct, single-line, non-blank headings). Each
+-- idPrefix (upper-case words joined by '-', once), and sections (distinct, single-line, non-blank headings other than
+-- the registry text's own keys ID, Title, Page kind and Body). Each
 -- guard is its own statement, so no JSON function sees a value of the wrong type.
 CREATE FUNCTION wiki_v1.profile_is_invalid(p_profile jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
@@ -61,7 +62,8 @@ BEGIN
                 RETURN true;
             END IF;
 
-            IF v_heading #>> '{}' !~ '^[^\n]*[^\s][^\n]*$' THEN
+            -- ID, Title, Page kind and Body are the other keys of a page's registry text, so no section may share them.
+            IF v_heading #>> '{}' !~ '^[^\n]*[^\s][^\n]*$' OR v_heading #>> '{}' IN ('ID', 'Title', 'Page kind', 'Body') THEN
                 RETURN true;
             END IF;
         END LOOP;
@@ -100,9 +102,11 @@ BEGIN
         RETURN;
     END IF;
 
+    -- Any text that does not become a jsonb value (bad syntax, a \u0000 escape, an overflowing number, deep nesting)
+    -- is an invalid profile, never an error of the checker.
     BEGIN
         v_profile := wiki_v1.utf8_text(v_content)::jsonb;
-    EXCEPTION WHEN invalid_text_representation THEN
+    EXCEPTION WHEN OTHERS THEN
         v_profile := NULL;
     END;
 
@@ -291,11 +295,11 @@ LANGUAGE sql STABLE AS $$
     ),
     edges AS (
         SELECT l.linked_id AS from_id, 'verifies' AS edge_type, 'test' AS holder_scope, l.scope AS to_scope, l.page_id AS to_id, l.field, l.path,
-               CASE WHEN NOT EXISTS (SELECT 1 FROM scopes AS x WHERE x.scope = 'test' AND starts_with(l.linked_id, x.id_prefix || '-')) THEN 'link-outside-field' END AS problem
+               CASE WHEN NOT EXISTS (SELECT 1 FROM scopes AS x WHERE x.scope = 'test' AND l.linked_id ~ ('^' || x.id_prefix || '-[0-9]{3,}$')) THEN 'link-outside-field' END AS problem
         FROM links AS l WHERE l.scope IN ('system', 'software') AND l.page_kind = 'sections' AND l.field = 'TestID'
         UNION ALL
         SELECT l.page_id, 'allocates', 'system', 'software', l.linked_id, l.field, l.path,
-               CASE WHEN NOT EXISTS (SELECT 1 FROM scopes AS x WHERE x.scope = 'software' AND starts_with(l.linked_id, x.id_prefix || '-')) THEN 'link-outside-field' END
+               CASE WHEN NOT EXISTS (SELECT 1 FROM scopes AS x WHERE x.scope = 'software' AND l.linked_id ~ ('^' || x.id_prefix || '-[0-9]{3,}$')) THEN 'link-outside-field' END
         FROM links AS l WHERE l.scope = 'system' AND l.page_kind = 'sections' AND l.field = 'CodeRef'
         UNION ALL
         SELECT l.linked_id, 'supersedes', l.scope, l.scope, l.page_id, l.field, l.path,

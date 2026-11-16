@@ -99,6 +99,10 @@ public sealed class ProfileTests : IDisposable
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":[" "]}]}""")]
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A\nB"]}]}""")]
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A","A"]}]}""")]
+    [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A","ID"]}]}""")]
+    [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["Page kind"]}]}""")]
+    [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A\u0000"]}]}""")]
+    [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":1e1000000}""")]
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A"]},{"scope":"software","directory":"e","idPrefix":"S","sections":["A"]}]}""")]
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A"]},{"scope":"test","directory":"d","idPrefix":"S","sections":["A"]}]}""")]
     [InlineData("""{"schema":"rsr/wiki-profile@1","scopes":[{"scope":"software","directory":"d","idPrefix":"R","sections":["A"]},{"scope":"test","directory":"e","idPrefix":"R","sections":["A"]}]}""")]
@@ -114,6 +118,20 @@ public sealed class ProfileTests : IDisposable
         Assert.Equal("{}", report["pages"]!.ToJsonString());
         Assert.Contains("cannot be exported", Assert.Throws<PostgresException>(() => server.Scalar(connection,
             $"SELECT wiki_v1.registry_envelope('{commit}', 'test', '{Identity}', '{{}}')")).MessageText);
+    }
+
+    [Fact]
+    public void ChecksALinkAgainstTheWholeIdOfItsField()
+    {
+        // REQ-X-001 starts with the test prefix REQ followed by '-', but it is a software ID, not a test ID.
+        repo.Write(".wiki-profile.json", """
+                {"schema":"rsr/wiki-profile@1","scopes":[
+                  {"scope":"software","directory":"software-requirements","idPrefix":"REQ-X","sections":["Requirement","TestID"]},
+                  {"scope":"test","directory":"tests","idPrefix":"REQ","sections":["Stimulus"]}]}
+                """)
+            .Write("software-requirements/REQ-X-001.md", "# REQ-X-001\n\n## Requirement\n\nx\n\n## TestID\n\n[[REQ-X-001]]\n");
+        Assert.Equal("software-requirements/REQ-X-001.md|REQ-X-001 verifies REQ-X-001|link-outside-field",
+            string.Join(";", Project().Report["problems"]!.AsArray().Select(problem => $"{problem!["path"]}|{problem["link"]}|{problem["problem"]}")));
     }
 
     [Fact]
