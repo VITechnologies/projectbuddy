@@ -6,6 +6,25 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-diagnose` verifies the answer's class (#299). The policy
+  (`projectbuddy/diagnose-policy@2`) gives each question ordered,
+  machine-checkable rules.
+  - Conditions use `some`, `every` or `none` over JSON-pointer matches, with
+    `*` over arrays, and `eq`/`ne`/`lt`/`le`/`gt`/`ge`/`prefix`/`present`
+    tests.
+  - A condition is undecided when its tool was not called, failed, or was
+    truncated in a way that matters.
+  - When the rules decide, the model's class must match. After a
+    contradiction, the repair attempt's schema allows only the decided class.
+    The report adds `verified: ["citations", "class"]`, the rule with its
+    basis facts, and `receipt.classCorrected`.
+  - The rules reach the model as generated prose.
+  - The shipped rules guard against failed reads that probes report inside
+    their data: services `error`, event-errors `errors`, and vm-states
+    `running: null`.
+  - `projectbuddy-probes services` adds `githubRunner`, decided before
+    redaction can rewrite a runner's name.
+
 - Add `tools/peer/diagnose` (`projectbuddy-diagnose`, #295, #290 slice 3): the
   bounded P4 agent loop. A local model answers one question from a closed
   list by calling only the read-only `projectbuddy-probes` tools.

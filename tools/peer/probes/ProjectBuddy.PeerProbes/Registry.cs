@@ -39,7 +39,7 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
         new("disk", "Fixed drives (no read-only images or pseudo file systems): file system, total and free bytes, and the free share in whole percent.", []),
         new("ollama", "Ollama on loopback: version, installed models with digests (identity is true on the pinned projectbuddy model), and loaded models with memory and context size.", []),
         new("vm-states", "VirtualBox VMs: running or not, state, current snapshot, memory, CPUs and whether VRDE is on.", []),
-        new("services", "The GitHub runner and gitlab-runner services and the ProjectBuddy scheduled tasks: state and start type.", []),
+        new("services", "The GitHub runner (githubRunner true) and gitlab-runner services and the ProjectBuddy scheduled tasks: state and start type.", []),
         new("event-errors", "System and Application error and critical events, counted by provider and event ID (no message text).",
             [new("hours", 1, 72, 24, "How many hours back to count.")]),
     ];
@@ -273,6 +273,9 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
             data["services"] = Array(services.Take(MaxServices), service => new JsonObject
             {
                 ["name"] = service.Name,
+
+                // Decided before redaction, which can rewrite a runner's name (an FQDN becomes <host>).
+                ["githubRunner"] = service.Name.StartsWith("actions.runner.", StringComparison.OrdinalIgnoreCase),
                 ["state"] = service.State,
                 ["startType"] = sources.Run("sc.exe", ["qc", service.Name]) is { ExitCode: 0 } config ? Parsers.StartType(config.Output) : "unknown",
             });

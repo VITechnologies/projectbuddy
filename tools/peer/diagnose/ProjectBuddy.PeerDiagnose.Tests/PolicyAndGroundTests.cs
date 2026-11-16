@@ -17,7 +17,10 @@ public sealed class PolicyTests
         Assert.Equal(new ModelPin("qwen2.5:7b", FakeOllama.Digest), policy.Model);
         Assert.Equal(["github-unreachable", "runner-offline", "ollama-empty", "vm-states", "disk-full", "general-health"], policy.Questions.Select(question => question.Id));
         Assert.All(policy.Questions, question => Assert.Contains("inconclusive", question.Classes));
-        Assert.All(policy.Questions, question => Assert.All(question.Classes, name => Assert.Contains(name, question.Text)));
+        Assert.All(policy.Questions, question => Assert.NotEmpty(question.Rules));
+        Assert.Equal(
+            "Classes, decided by the first rule that holds:\n- inconclusive: no disk /data/drives/* exists\n- disk-low: some disk /data/drives/* with /freePercent < 10\n- disk-ok: otherwise",
+            Rules.Describe(policy.Find("disk-full").Rules));
         Assert.Equal((16384, 384, 42, 4, 2, 6, 12000, 400, 5, 200, 2), (policy.NumCtx, policy.NumPredict, policy.Seed, policy.MaxRounds, policy.MaxCallsPerRound,
             policy.MaxCalls, policy.MaxEvidenceBytes, policy.MaxFindingChars, policy.MaxCitations, policy.MaxValueChars, policy.MaxAnswerAttempts));
     }
@@ -44,12 +47,12 @@ public sealed class PolicyTests
     [MemberData(nameof(Invalid))]
     public void RefusesInvalidPolicies(string change, string message)
     {
-        JsonObject Question(string id) => new() { ["id"] = id, ["text"] = "t", ["classes"] = new JsonArray("a") };
+        JsonObject Question(string id) => new() { ["id"] = id, ["text"] = "t", ["classes"] = new JsonArray("a"), ["rules"] = JsonNode.Parse("""[{"class":"a","all":[]}]""") };
         var refused = Assert.Throws<PeerException>(() => Fixtures.Parse(policy =>
         {
             switch (change)
             {
-                case "schema": policy["schema"] = "projectbuddy/diagnose-policy@2"; break;
+                case "schema": policy["schema"] = "projectbuddy/diagnose-policy@1"; break;
                 case "extra": policy["extra"] = 1; break;
                 case "numCtx": policy["numCtx"] = 1024; break;
                 case "numPredict": policy["numPredict"] = 4096; break;
