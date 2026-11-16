@@ -148,6 +148,16 @@ internal sealed class Database(Options options)
         return JsonNode.Parse((string)command.ExecuteScalar()!)!.AsObject();
     }
 
+    public string Envelope(string commit, string scope, string identity, string targets)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("SELECT wiki_v1.registry_envelope($1, $2, $3::jsonb, $4::jsonb)::text", connection)
+        {
+            Parameters = { new() { Value = commit }, new() { Value = scope }, new() { Value = identity }, new() { Value = targets } },
+        };
+        return (string)command.ExecuteScalar()!;
+    }
+
     public IReadOnlyList<WikiFile> Export(Guid snapshot)
     {
         using var connection = Open(options.Database);
@@ -179,13 +189,13 @@ internal sealed class Database(Options options)
         return changes;
     }
 
-    private NpgsqlConnection Open(string database)
+    internal static NpgsqlConnection Connect(Options options, string database, string user, string password)
     {
         var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder
         {
             Host = options.Host,
             Port = options.Port,
-            Username = options.User,
+            Username = user,
             Password = password,
             Database = database,
             Timeout = 10,
@@ -196,7 +206,9 @@ internal sealed class Database(Options options)
         return connection;
     }
 
-    private static string ReadPassword(string path)
+    private NpgsqlConnection Open(string database) => Connect(options, database, options.User, password);
+
+    internal static string ReadPassword(string path)
     {
         string text;
         try

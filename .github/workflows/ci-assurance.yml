@@ -248,6 +248,8 @@ jobs:
           umask 077
           printf '%s\n' "$PBW_CI_PASSWORD" > "$RUNNER_TEMP/pbw-password"
           export PBW_TEST_HOST=127.0.0.1 PBW_TEST_PORT=5432 PBW_TEST_USER=postgres PBW_TEST_PASSWORD_FILE="$RUNNER_TEMP/pbw-password"
+          # RSR is private, so the registry export tests run against the contract stub of its ingest procedure.
+          export PBW_TEST_REGISTRY_MIGRATIONS="$PWD/ProjectBuddy.Wiki.Tests/RegistryContract"
           dotnet restore ProjectBuddy.Wiki.Tests --locked-mode --nologo
           dotnet test ProjectBuddy.Wiki.Tests --no-restore --nologo --settings coverage.runsettings \
             --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/wiki-coverage"

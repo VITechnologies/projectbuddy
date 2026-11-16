@@ -33,7 +33,11 @@ public sealed record Options(
     string? Out,
     string? Commit,
     string Git,
-    bool CreateDatabase);
+    bool CreateDatabase,
+    string? Approval = null,
+    string? ImporterPasswordFile = null,
+    string Importer = Program.DefaultImporter,
+    string RegistryDatabase = Program.DefaultRegistryDatabase);
 
 // projectbuddy-wiki (#307, #308): a local, append-only copy of a GitHub wiki in PostgreSQL that seeds itself from the
 // wiki's committed bytes and renders the wiki back byte for byte.
@@ -42,9 +46,14 @@ public static partial class Program
     public const string Usage =
         "usage: projectbuddy-wiki migrate [--create-database] | seed --wiki <clone> | render --out <dir> [--commit <sha>] | check --wiki <clone>"
         + " | project [--commit <sha>]"
+        + " | export-registry --approval <file> --importer-password-file <path> [--importer <name>] [--registry-database <name>] [--commit <sha>]"
         + " --password-file <path> [--host <host>] [--port <n>] [--user <name>] [--database <name>] [--git <path>]";
 
     public const string DefaultGit = "/usr/bin/git";
+
+    public const string DefaultImporter = "registry_importer_local";
+
+    public const string DefaultRegistryDatabase = "registry_local";
 
     internal static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -65,6 +74,7 @@ public static partial class Program
                 "seed" => (Commands.Seed(database, git, options.Wiki!), false),
                 "render" => (Commands.Render(database, git, options.Out!, options.Commit), false),
                 "project" => Commands.Project(database, options.Commit),
+                "export-registry" => (Commands.ExportRegistry(database, new Registry(options), Approval.Read(options.Approval!), options.Commit), false),
                 _ => Commands.Check(database, git, options.Wiki!),
             };
             stdout.WriteLine(result.ToJsonString(Output));
@@ -99,9 +109,9 @@ public static partial class Program
 
     internal static Options Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("migrate" or "seed" or "render" or "check" or "project"))
+        if (args.Length == 0 || args[0] is not ("migrate" or "seed" or "render" or "check" or "project" or "export-registry"))
         {
-            throw UsageError("expected a command: migrate, seed, render, check or project");
+            throw UsageError("expected a command: migrate, seed, render, check, project or export-registry");
         }
 
         var command = args[0];
@@ -110,6 +120,7 @@ public static partial class Program
             "migrate" => ["--create-database"],
             "render" => ["--out", "--commit"],
             "project" => ["--commit"],
+            "export-registry" => ["--commit", "--approval", "--importer-password-file", "--importer", "--registry-database"],
             _ => ["--wiki"],
         };
         string[] common = ["--password-file", "--host", "--port", "--user", "--database", "--git"];
@@ -148,16 +159,20 @@ public static partial class Program
             values.TryGetValue("--out", out var output) ? Qualified(output, "--out") : null,
             values.GetValueOrDefault("--commit"),
             Qualified(values.GetValueOrDefault("--git", DefaultGit), "--git"),
-            values.ContainsKey("--create-database"));
+            values.ContainsKey("--create-database"),
+            values.TryGetValue("--approval", out var approval) ? Qualified(approval, "--approval") : null,
+            values.TryGetValue("--importer-password-file", out var importer) ? Qualified(importer, "--importer-password-file") : null,
+            values.GetValueOrDefault("--importer", DefaultImporter),
+            values.GetValueOrDefault("--registry-database", DefaultRegistryDatabase));
 
         if (!HostName().IsMatch(options.Host) && !IPAddress.TryParse(options.Host, out _))
         {
             throw UsageError("--host must be an IP address or a host name");
         }
 
-        if (!Identifier().IsMatch(options.User) || !Identifier().IsMatch(options.Database))
+        if (!new[] { options.User, options.Database, options.Importer, options.RegistryDatabase }.All(Identifier().IsMatch))
         {
-            throw UsageError("--user and --database must be plain identifiers ([a-z_][a-z0-9_]*)");
+            throw UsageError("--user, --database, --importer and --registry-database must be plain identifiers ([a-z_][a-z0-9_]*)");
         }
 
         if (options.Commit is not null && !Git.IsCommit(options.Commit))
@@ -169,6 +184,8 @@ public static partial class Program
         {
             "seed" or "check" when options.Wiki is null => throw UsageError("--wiki is required"),
             "render" when options.Out is null => throw UsageError("--out is required"),
+            "export-registry" when options.Approval is null || options.ImporterPasswordFile is null
+                => throw UsageError("--approval and --importer-password-file are required"),
             _ => options,
         };
     }

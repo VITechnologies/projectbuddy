@@ -120,6 +120,47 @@ internal static class Commands
         return (result, !exportable);
     }
 
+    // Exports a recorded state to the RSR registry, one snapshot per scope in the order software, system, test: each
+    // scope's edges point into the snapshots before it. A scope whose content key the registry holds already is reused,
+    // so exporting unchanged content again, even from a later commit, changes nothing.
+    public static JsonObject ExportRegistry(Database database, Registry registry, Approval approval, string? commit)
+    {
+        var (snapshot, recorded) = Recorded(database, commit);
+        var problems = (int)database.ProjectionReport(snapshot)["problemCount"]!;
+        if (problems > 0)
+        {
+            throw new WikiException(ExitCodes.Refused, $"{problems} pages or links cannot be exported; run project");
+        }
+
+        var identity = new JsonObject
+        {
+            ["source_uuid"] = approval.SourceUuid,
+            ["constellation_uuid"] = approval.ConstellationUuid,
+            ["manifest_digest"] = approval.ManifestDigest,
+            ["source_ref"] = approval.SourceRef,
+        }.ToJsonString();
+        var targets = new JsonObject();
+        var scopes = new JsonObject();
+        foreach (var scope in (string[])["software", "system", "test"])
+        {
+            var text = database.Envelope(recorded, scope, identity, targets.ToJsonString());
+            var envelope = JsonNode.Parse(text)!;
+            var (id, reused) = registry.Find(approval.SourceUuid, scope, (string)envelope["tree_digest"]!, (string)envelope["parser_version"]!, approval.ManifestDigest) is { } found
+                ? (found, true)
+                : registry.Ingest(text);
+            targets[scope] = id.ToString();
+            scopes[scope] = new JsonObject
+            {
+                ["snapshot"] = id.ToString(),
+                ["reused"] = reused,
+                ["nodes"] = envelope["nodes"]!.AsArray().Count,
+                ["edges"] = envelope["edges"]!.AsArray().Count,
+            };
+        }
+
+        return new JsonObject { ["commit"] = recorded, ["snapshot"] = snapshot.ToString(), ["source"] = approval.SourceUuid, ["scopes"] = scopes };
+    }
+
     // The latest recorded state, or the state of a named recorded commit.
     private static (Guid Snapshot, string Commit) Recorded(Database database, string? commit)
     {
