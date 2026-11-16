@@ -1,0 +1,25 @@
+# Managed by the repo-standards-review consumer kit (templates/consumer). Change
+# the answers in .cruft.json and run `cruft update` rather than editing these
+# rules. Add repository-specific rules below the closing line; cruft keeps them.
+#
+# Executable scripts check out with LF on every platform, including Windows with
+# core.autocrlf=true, because a CR breaks their interpreter line. text=auto
+# leaves binary files in script directories untouched.
+*.sh text eol=lf
+.githooks/** text=auto eol=lf
+githooks/** text=auto eol=lf
+git-hooks/** text=auto eol=lf
+.husky/** text=auto eol=lf
+.repo-standards-review/** text eol=lf
+# The kit's root files keep LF too, so a tree that is hashed or packaged has the
+# same bytes on every platform.
+.repo-standards-review.json text eol=lf
+.cruft.json text eol=lf
+vm/** text=auto eol=lf
+docker/** text=auto eol=lf
+scripts/** text=auto eol=lf
+.github/scripts/** text=auto eol=lf
+Run-Pipeline.sh text=auto eol=lf
+# Byte-provenance files keep their exact bytes, whatever the rules above say.
+vm/windows-labview/unattended-template.xml -text
+# End of the repo-standards-review consumer-kit rules.

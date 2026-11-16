@@ -1,0 +1,5 @@
+{
+    "schema": "rsr/consumer-kit@1",
+    "exempt_paths": ["vm/windows-labview/unattended-template.xml"],
+    "manifest_url": "https://raw.githubusercontent.com/svelderrainruiz/repo-standards-review-consumer-kit/refs/tags/{tag}/manifests/{tag}.json"
+}
