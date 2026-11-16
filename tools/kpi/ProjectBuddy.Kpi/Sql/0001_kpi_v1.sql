@@ -27,9 +27,7 @@ CREATE TABLE kpi_v1.sessions (
     session_id kpi_v1.session_id PRIMARY KEY,
     first_at timestamptz NOT NULL,
     last_at timestamptz NOT NULL CHECK (last_at >= first_at),
-    events bigint NOT NULL CHECK (events > 0),
-    -- Merge commands whose repository could not be told (a variable, or a directory that is not a known checkout).
-    unattributed_merges integer NOT NULL DEFAULT 0 CHECK (unattributed_merges >= 0)
+    events bigint NOT NULL CHECK (events > 0)
 );
 
 -- One row per billed model call (session.usage_record). The category is what the call asked for, by the tools it
@@ -58,21 +56,19 @@ CREATE TABLE kpi_v1.tool_calls (
     success boolean,
     PRIMARY KEY (session_id, tool_call_id)
 );
+CREATE INDEX tool_calls_session_started ON kpi_v1.tool_calls (session_id, started_at);
 
--- A command of the session that tried to merge a change, whatever it printed.
-CREATE TABLE kpi_v1.merge_attempts (
-    session_id text NOT NULL REFERENCES kpi_v1.sessions,
-    tool_call_id text NOT NULL,
-    change_ref kpi_v1.work_ref NOT NULL,
-    started_at timestamptz NOT NULL,
-    completed_at timestamptz NOT NULL CHECK (completed_at >= started_at),
-    PRIMARY KEY (session_id, tool_call_id, change_ref)
+-- The repositories whose merged pull or merge requests are the sessions' accepted changes (projectbuddy-kpi track).
+CREATE TABLE kpi_v1.repositories (
+    repository text PRIMARY KEY CHECK (repository ~ '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$'),
+    forge text NOT NULL CHECK (forge IN ('github', 'gitlab')),
+    CHECK (forge = 'gitlab' OR repository ~ '^[^/]+/[^/]+$')
 );
 
--- The forge's answer for each attempted change (projectbuddy-kpi resolve): when it merged, or null if it had not.
+-- Every request a tracked repository merged since the first session (projectbuddy-kpi resolve).
 CREATE TABLE kpi_v1.forge_changes (
     change_ref kpi_v1.work_ref PRIMARY KEY,
-    merged_at timestamptz,
+    merged_at timestamptz NOT NULL,
     checked_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
@@ -142,15 +138,22 @@ CREATE FUNCTION kpi_v1.tier_rate(p_tier text) RETURNS numeric LANGUAGE sql STABL
     SELECT t.usd_per_hour FROM kpi_v1.tiers AS t WHERE t.tier = p_tier;
 $$;
 
--- A change is accepted by the merge attempt during which the forge merged it (within merge_skew_minutes of the
--- command, for clock skew), at that command's completion. A change merged at no attempt (later by auto-merge, or by
--- hand) is not a session's acceptance; one that two attempts bracket is accepted once, by the first.
+-- A change is accepted, at its merge time, by the session active when the forge merged it: one of the session's active
+-- spans lies within merge_skew_minutes of the merge (for clock skew). However it was merged (a merge command, an API
+-- call, a helper script, or auto-merge while the session waited), the forge's record decides. When several sessions
+-- were active, the one whose latest tool call started at or before the merge accepts it. A merge while no session was
+-- active is not a session's acceptance.
 CREATE VIEW kpi_v1.accepted_changes AS
-    SELECT DISTINCT ON (a.change_ref) a.change_ref, a.session_id, a.completed_at AS at, f.merged_at
-    FROM kpi_v1.merge_attempts AS a JOIN kpi_v1.forge_changes AS f USING (change_ref)
-    WHERE f.merged_at BETWEEN a.started_at - kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute'
-                          AND a.completed_at + kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute'
-    ORDER BY a.change_ref, a.completed_at, a.session_id;
+    SELECT f.change_ref, a.session_id, f.merged_at AS at
+    FROM kpi_v1.forge_changes AS f
+    CROSS JOIN LATERAL (
+        SELECT sp.session_id
+        FROM kpi_v1.active_spans AS sp
+        WHERE sp.span && tstzrange(f.merged_at - kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute',
+                                   f.merged_at + kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute', '[]')
+        ORDER BY (SELECT max(t.started_at) FROM kpi_v1.tool_calls AS t
+                  WHERE t.session_id = sp.session_id AND t.started_at <= f.merged_at) DESC NULLS LAST, sp.session_id
+        LIMIT 1) AS a;
 
 -- Each accepted change costs what its session spent after the session's previous accepted change (or the session's
 -- start) up to and including its acceptance: model calls, and the session's active time at the T1 rate.
@@ -225,10 +228,9 @@ CREATE FUNCTION kpi_v1.report() RETURNS jsonb LANGUAGE sql STABLE AS $$
         'unitsByCategory', (SELECT coalesce(jsonb_object_agg(x.category, x.units), '{}') FROM
             (SELECT c.category, sum(c.cost) AS units FROM kpi_v1.model_calls AS c GROUP BY 1) AS x),
         'merges', jsonb_build_object(
-            'attempted', (SELECT count(DISTINCT a.change_ref) FROM kpi_v1.merge_attempts AS a),
-            'unresolved', (SELECT count(DISTINCT a.change_ref) FROM kpi_v1.merge_attempts AS a
-                           WHERE NOT EXISTS (SELECT 1 FROM kpi_v1.forge_changes AS f WHERE f.change_ref = a.change_ref)),
-            'unattributed', (SELECT coalesce(sum(s.unattributed_merges), 0) FROM kpi_v1.sessions AS s)),
+            'trackedRepositories', (SELECT count(*) FROM kpi_v1.repositories),
+            'merged', (SELECT count(*) FROM kpi_v1.forge_changes),
+            'outsideSessions', (SELECT count(*) FROM kpi_v1.forge_changes) - (SELECT count(*) FROM kpi_v1.accepted_changes)),
         'explorationShare', CASE WHEN totals.units > 0 THEN round(totals.explore_units / totals.units, 4) END,
         'acceptedChanges', (SELECT jsonb_build_object(
             'count', count(*),

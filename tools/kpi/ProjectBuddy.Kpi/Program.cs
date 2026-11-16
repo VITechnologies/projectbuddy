@@ -29,7 +29,8 @@ public sealed record Options(string Command, string Host, int Port, string User,
 public static partial class Program
 {
     public const string Usage =
-        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | resolve [--gh <path>] [--glab <path>] | report"
+        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | track --repository <owner/repo|group/project> --forge <github|gitlab>"
+        + " | resolve [--gh <path>] [--glab <path>] | report"
         + " | mark --session <id> --item <ref> | gap --session <id> --item <ref> --kind <code-read|operator-question|failed-run> --fact <text> --belongs-in <document>"
         + " | review --session <id> --item <ref> --round <n> --findings <n> | requirements --item <ref> --count <n>"
         + " | operator --tier <T1-T9> --minutes <n> --activity <prompts|approvals|technician|review|watching|restarts> [--item <ref>] [--note <text>]"
@@ -39,6 +40,7 @@ public static partial class Program
     {
         ["migrate"] = ([], ["--create-database"]),
         ["ingest"] = ([], ["--sessions"]),
+        ["track"] = (["--repository", "--forge"], []),
         ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
         ["mark"] = (["--session", "--item"], []),

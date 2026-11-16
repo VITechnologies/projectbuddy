@@ -15,6 +15,7 @@ stay on the workstation. Only relative figures are ever published.
 dotnet build ProjectBuddy.Kpi -c Release -o out
 out/projectbuddy-kpi migrate --create-database --port 55432 --password-file "$HOME/.config/<instance>/postgres-password"
 out/projectbuddy-kpi ingest --port 55432 --password-file ...
+out/projectbuddy-kpi track --repository owner/repo --forge github --port 55432 --password-file ...
 out/projectbuddy-kpi resolve --port 55432 --password-file ...   # needs gh, and glab for GitLab
 out/projectbuddy-kpi report --port 55432 --password-file ...
 ```
@@ -48,7 +49,8 @@ database that lacks the embedded migrations.
 | --- | --- |
 | `migrate [--create-database]` | Applies the embedded migrations. A migration that changed after it was applied is refused. |
 | `ingest [--sessions <dir>]` | Reads every `<uuid>/events.jsonl` under the sessions directory (default `~/.copilot/session-state`). Facts are keyed by event or tool-call ID, so ingesting again changes nothing. A tool call that has completed since the last ingest is updated, and active spans are derived again. A line that is not a readable event refuses the ingest. |
-| `resolve [--gh <path>] [--glab <path>]` | Asks GitHub (`gh api repos/<owner>/<repo>/pulls/<n>`) or GitLab (`glab api projects/<path>/merge_requests/<n>`) when each attempted change merged. A merged change is not asked again. A failed or unreadable answer is listed in `unresolved` with its reason, and the change stays unresolved. |
+| `track --repository <path> --forge <github\|gitlab>` | Adds a repository whose merged requests are accepted changes: `owner/repo` on GitHub, `group[/subgroup…]/project` on GitLab. |
+| `resolve [--gh <path>] [--glab <path>]` | Lists every request each tracked repository merged since the first session, with `gh api repos/<repo>/pulls?state=closed` or `glab api projects/<path>/merge_requests?state=merged`, newest update first, until updates are older than the first session. Listing again changes nothing. A repository whose listing fails is reported in `unresolved` with its reason, and what was already listed is kept. A tool that needs other credentials for some repositories can run as a wrapper in a second pass, for example `GITLAB_TOKEN=… glab`. |
 | `mark --session <id> --item <ref>` | Attributes the session's calls from now until its next marker to a work item. |
 | `gap --session <id> --item <ref> --kind <kind> --fact <text> --belongs-in <document>` | Records a spec gap: a fact the agent had to discover that the specification should have stated. The kind is `code-read`, `operator-question` or `failed-run`. |
 | `review --session <id> --item <ref> --round <n> --findings <n>` | Records an independent review round and how many findings it produced. |
@@ -75,32 +77,29 @@ such as a malformed item, is a database error.
   - `explore` (any other tool, all read-only);
   - `respond` (no tool).
 - **Tool calls:** start and completion, paired by tool-call ID.
-- **Merge attempts:** every `gh pr merge <n>` and `glab mr merge <n>` in a
-  completed bash command, whatever it printed and however it exited.
-  - The output can't say whether a merge happened: `gh` prints its
-    confirmation only to a terminal, and a blocked merge's advice mentions
-    "merged".
-  - The repository is the one named by `-R` or `--repo`. Otherwise it is the
-    one checked out where the command ran: the directory of the last `cd`
-    before the merge, or the session's own directory.
-  - Every session's `session.start` context maps checkout directories
-    (`gitRoot`) to repositories. A directory seen with two different
-    repositories maps to none.
-  - A merge whose repository can't be determined counts as `unattributed`,
-    for example one that names it with a variable. Text with no number is not
-    a merge.
-- **Accepted changes:** a change is accepted by the attempt during which the
-  forge merged it.
-  - `resolve` supplies the merge time. It must fall within
-    `merge_skew_minutes` (2) of the command's start and completion.
-  - The acceptance time is that command's completion. Each change is
-    accepted once, by the first such attempt.
-  - A change merged at no attempt is not a session's acceptance, for example
-    by auto-merge later or by hand.
 - **Operator messages:** `user.message` events.
 - **Forked sessions:** a fork's log starts with its own `session.start` and
   then repeats its parent's history. Events dated before that start belong to
   the parent and are skipped.
+
+## Accepted changes
+
+An accepted change is a request that a tracked repository merged while a
+session was active. Its merge time from `resolve` must lie within
+`merge_skew_minutes` (2) of one of the session's active spans. The change is
+accepted at that merge time.
+
+- **Why the forge decides:** the logs can't say reliably whether a merge
+  happened. `gh` prints its confirmation only to a terminal, and a blocked
+  merge's advice mentions "merged". Governed tools, helper scripts, API calls
+  and auto-merge merge without a parseable merge command. The forge's record
+  covers them all.
+- **Concurrent sessions:** if several sessions were active, the one whose
+  latest tool call started at or before the merge accepts it.
+- **Outside sessions:** a merge while no session was active, such as an
+  overnight auto-merge, is not a session's acceptance. Its spend stays with the
+  session's next accepted change. The report counts these merges as
+  `outsideSessions`.
 
 ## KPIs
 
@@ -114,9 +113,8 @@ such as a malformed item, is a database error.
 | Exploration share | The share of units spent on `explore` calls. Exploration done through `bash` counts as `run`. |
 
 The report also gives units by initiator, model and category. Under `merges`
-it gives the changes attempted, those `resolve` has not answered for, and the
-unattributed merge commands. These show how complete the accepted changes
-are.
+it gives the tracked repositories, the merges listed, and the merges outside
+sessions.
 
 ## Tests
 
@@ -132,15 +130,16 @@ dotnet test ProjectBuddy.Kpi.Tests --settings coverage.runsettings --collect:"XP
 They write synthetic event logs and cover:
 
 - every command and refusal;
-- every call category and every merge form, including `cd`, `~` and `$HOME`
-  checkouts;
+- every call category;
 - a forked session's repeated history;
-- the forge's answers, through stand-in `gh` and `glab` scripts: merged during
-  an attempt, within the skew, later by auto-merge, open, unreadable or
-  failing;
-- idempotent re-ingest, and completing an open tool call;
+- the forge's listings, through a stand-in `gh` and `glab` script:
+  - paging, and stopping at updates older than the first session;
+  - merges while one session, two sessions or no session was active, and
+    within the skew;
+  - closed unmerged requests, unreadable answers, and a failing or missing
+    tool;
+- idempotent re-ingest and re-listing, and completing an open tool call;
 - overlapping sessions;
-- a change attempted twice;
 - every KPI, with exact values.
 
 CI runs them as `KPI Tool Tests` against the pinned `postgres:16-alpine`

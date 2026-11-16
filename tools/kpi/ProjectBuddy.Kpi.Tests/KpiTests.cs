@@ -108,7 +108,10 @@ public sealed class DatabaseTests : IDisposable
         Cli.Json(["operator", "--tier", "T1", "--minutes", "5", "--activity", "approvals", "--item", "o/r!2", "--note", "release", .. connection]);
         Assert.Equal(4, server.Scalar(connection, "SELECT requirements FROM kpi_v1.requirement_counts"));
         Assert.Equal(2L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.operator_entries"));
-        Assert.Equal("{\"asked\":0,\"merged\":0,\"unresolved\":[]}", Cli.Json(["resolve", .. connection]).ToJsonString());
+        Cli.Json(["track", "--repository", "o/r", "--forge", "github", .. connection]);
+        Assert.Equal("track", (string?)Cli.Json(["track", "--repository", "g/s/p", "--forge", "gitlab", .. connection])["recorded"]);
+        Assert.Contains("violates check constraint", Cli.Run(["track", "--repository", "g/s/p", "--forge", "github", .. connection]).Error);
+        Assert.Equal("{\"since\":null,\"repositories\":[],\"unresolved\":[]}", Cli.Json(["resolve", .. connection]).ToJsonString());
         var (exit, _, error) = Cli.Run(["mark", "--session", Session, "--item", "not a ref", .. connection]);
         Assert.Equal(ExitCodes.Database, exit);
         Assert.Contains("violates check constraint", error);
@@ -132,13 +135,13 @@ public sealed class IngestTests : IDisposable
     private static JsonObject Counts(params string[] tools) => new(tools.Select(tool => new KeyValuePair<string, JsonNode?>(tool, 1)));
 
     [Fact]
-    public void ReadsCallsToolsChangesMessagesAndSpans()
+    public void ReadsCallsToolsMessagesAndSpans()
     {
         // A forked session repeats its parent's history after its own start: those events are skipped.
         var log = new Log()
-            .Event("session.start", 0, new JsonObject { ["context"] = new JsonObject { ["cwd"] = "/w/r", ["gitRoot"] = "/w/r", ["repository"] = "o/r" } })
+            .Event("session.start", 0, [])
             .Call(-30, 15, Counts("view"))
-            .Tool("copied", "bash", -29, "gh pr merge 1 --repo o/r").Done("copied", -28)
+            .Tool("copied", "bash", -29).Done("copied", -28)
             .Event("assistant.message", -27, [])
             .Event("session.start", -26, [])
             .Call(1, 15, Counts("view", "grep"))
@@ -150,17 +153,9 @@ public sealed class IngestTests : IDisposable
             .Call(7, 15, Counts())
             .Call(8, 1.5m, new JsonArray(), initiator: "sub-agent", model: "claude-haiku-5.5")
             .Event("session.usage_record", 9, new JsonObject { ["usage"] = new JsonObject() })
-            .Event("session.usage_record", 9.5, new JsonObject { ["usage"] = new JsonObject { ["cost"] = "x", ["inputTokens"] = "x" } })
-            .Event("tool.execution_start", 9.6, new JsonObject { ["toolCallId"] = "text", ["toolName"] = "bash", ["arguments"] = "gh pr merge 3 --repo o/r" })
-            .Done("text", 9.7)
-            .Tool("merge", "bash", 10, "gh pr merge 5 --repo o/r --merge && glab mr merge 7 --yes -R g/s/p").Done("merge", 11)
-            .Tool("short", "bash", 12, "gh pr merge 6 -R 'o/r' --admin").Done("short", 12)
-            .Tool("failed", "bash", 13, "cd ~/other && gh pr merge 8 --squash 2>&1").Done("failed", 13, success: false)
-            .Tool("cwd", "bash", 14, "gh pr merge 9").Done("cwd", 14)
-            .Tool("unknown", "bash", 14.5, "gh pr merge 10 --repo $R; cd /elsewhere && gh pr merge 11; echo gh pr merge --admin; glab mr merge 12 -R onlyone")
-            .Done("unknown", 14.5)
-            .Event("tool.execution_start", 15, new JsonObject { ["toolCallId"] = "args", ["toolName"] = "bash", ["arguments"] = new JsonObject { ["command"] = 7 } })
-            .Done("args", 15)
+            .Event("session.usage_record", 9.5, new JsonObject { ["usage"] = new JsonObject { ["initiator"] = 5, ["cost"] = "x", ["inputTokens"] = "x" } })
+            .Tool("run", "bash", 10).Done("run", 11)
+            .Tool("failed", "bash", 13).Done("failed", 13, success: false)
             .Tool("view", "view", 16).Done("view", 16)
             .Done("never-started", 17)
             .Tool("open", "ask_user", 18)
@@ -168,29 +163,26 @@ public sealed class IngestTests : IDisposable
             .Raw("")
             .Raw($$"""{"timestamp": "{{Log.Time(20)}}", "type": "assistant.turn_start", "data": {}, "id": "{{Guid.NewGuid()}}"}""")
             .Event("assistant.message", 90, []);
-        var workspaces = Workspaces.From([new Ingest.Context("/h/other", "/h/other", "o/other")], "/h");
-        var session = Ingest.Read(A, log.Reader(), TimeSpan.FromMinutes(30), "log", workspaces)!;
+        var session = Ingest.Read(A, log.Reader(), TimeSpan.FromMinutes(30), "log")!;
 
-        Assert.Equal((Log.Start, Log.Start.AddMinutes(90), 32L), (session.First, session.Last, session.Events));
+        Assert.Equal((Log.Start, Log.Start.AddMinutes(90), 22L), (session.First, session.Last, session.Events));
         Assert.Equal(["explore", "ask", "edit", "delegate", "run", "memory", "respond", "respond", "respond", "respond"], session.Calls.Select(call => call.Category));
         Assert.Equal((0m, 0L), (session.Calls[9].Cost, session.Calls[9].InputTokens));
         Assert.Equal(("sub-agent", "claude-haiku-5.5", 1.5m), (session.Calls[7].Initiator, session.Calls[7].Model, session.Calls[7].Cost));
         Assert.Equal(("unknown", "unknown", 0m, 0L), (session.Calls[8].Initiator, session.Calls[8].Model, session.Calls[8].Cost, session.Calls[8].InputTokens));
-        // Every merge command is an attempt, whatever it printed and however it exited; the forge decides (ForgeTests).
-        Assert.Equal(["o/r#5", "g/s/p!7", "o/r#6", "o/other#8", "o/r#9"], session.Merges.Select(merge => merge.ChangeRef));
-        Assert.Equal((Log.Start.AddMinutes(10), Log.Start.AddMinutes(11)), (session.Merges[1].Started, session.Merges[1].Completed));
-        Assert.Equal(3, session.UnattributedMerges);
-        Assert.Equal(9, session.Tools.Count);
-        Assert.Equal(("ask_user", (DateTimeOffset?)null, (bool?)null), (session.Tools[^1].Tool, session.Tools[^1].Completed, session.Tools[^1].Success));
+        Assert.Equal("unknown", session.Calls[9].Initiator);
+        Assert.Equal(["run", "failed", "view", "open"], session.Tools.Select(tool => tool.Id));
+        Assert.Equal([true, false, true, null], session.Tools.Select(tool => tool.Success));
+        Assert.Equal(("ask_user", (DateTimeOffset?)null), (session.Tools[^1].Tool, session.Tools[^1].Completed));
         Assert.Single(session.Messages);
         Assert.Equal([(Log.Start, Log.Start.AddMinutes(20)), (Log.Start.AddMinutes(90), Log.Start.AddMinutes(90))], session.Spans);
-        Assert.Null(Ingest.Read(A, new StringReader(""), TimeSpan.FromMinutes(30), "log", workspaces));
+        Assert.Null(Ingest.Read(A, new StringReader(""), TimeSpan.FromMinutes(30), "log"));
     }
 
     [Fact]
     public void RefusesALineThatIsNotAnEvent()
     {
-        var refused = Assert.Throws<KpiException>(() => Ingest.Read(A, new Log().Event("x", 0, []).Raw("{not json").Reader(), TimeSpan.FromMinutes(30), "events.jsonl", Workspaces.From([], "/h")));
+        var refused = Assert.Throws<KpiException>(() => Ingest.Read(A, new Log().Event("x", 0, []).Raw("{not json").Reader(), TimeSpan.FromMinutes(30), "events.jsonl"));
         Assert.StartsWith("events.jsonl: line 2 is not a readable event", refused.Message);
     }
 
@@ -199,15 +191,15 @@ public sealed class IngestTests : IDisposable
     {
         var connection = server.Migrated();
         Assert.Equal(ExitCodes.Refused, Cli.Run(["ingest", "--sessions", Path.Combine(root, "missing"), .. connection]).Exit);
-        new Log().Call(0, 15, Counts("view")).Tool("open", "ask_user", 1).Tool("merge", "bash", 2, "gh pr merge 5 --repo o/r").Done("merge", 3).Write(root, A);
+        new Log().Call(0, 15, Counts("view")).Tool("open", "ask_user", 1).Tool("run", "bash", 2).Done("run", 3).Write(root, A);
         new Log().Event("x", 0, []).Write(root, "not-a-session");
         Directory.CreateDirectory(Path.Combine(root, B));
         File.WriteAllText(Path.Combine(root, "cccccccc-0000-4000-8000-000000000003", "events.jsonl") is var empty && Directory.CreateDirectory(Path.GetDirectoryName(empty)!) is not null ? empty : empty, "");
 
         var first = Cli.Json(["ingest", "--sessions", root, .. connection])["sessions"]!.AsArray();
-        Assert.Equal((A, 1, 1), ((string?)first.Single()!["session"], (int)first.Single()!["newModelCalls"]!, (int)first.Single()!["newMergeAttempts"]!));
+        Assert.Equal((A, 1), ((string?)first.Single()!["session"], (int)first.Single()!["newModelCalls"]!));
         var again = Cli.Json(["ingest", "--sessions", root, .. connection])["sessions"]!.AsArray().Single()!;
-        Assert.Equal((0, 0), ((int)again["newModelCalls"]!, (int)again["newMergeAttempts"]!));
+        Assert.Equal(0, (int)again["newModelCalls"]!);
 
         new Log().Done("open", 25).Write(root, A);
         Cli.Json(["ingest", "--sessions", root, .. connection]);
@@ -250,12 +242,14 @@ public sealed class ReportTests : IDisposable
             .Tool("m2", "bash", 5.5, "gh pr merge 2 --repo o/r").Done("m2", 6)
             .Tool("ask", "ask_user", 6).Done("ask", 26)
             .Write(root, A);
-        // Session B overlaps A in time and tries o/r#1 again after it merged: neither counts twice. Its o/r#4 is not
-        // resolved yet, and its bare `gh pr merge 3` has no repository (B has no start context).
-        new Log().Event("x", 1, []).Tool("again", "bash", 7, "gh pr merge 1 --repo o/r").Done("again", 8)
-            .Tool("other", "bash", 7.5, "gh pr merge 4 --repo o/r; gh pr merge 3").Done("other", 7.5).Write(root, B);
+        // Session B overlaps A in time but ran no tool before either merge, so A accepts both. o/r#9 merged while no
+        // session was active.
+        new Log().Event("x", 1, []).Tool("again", "bash", 7, "gh pr merge 1 --repo o/r").Done("again", 8).Write(root, B);
         Cli.Json(["ingest", "--sessions", root, .. connection]);
-        server.Execute(connection, $"INSERT INTO kpi_v1.forge_changes (change_ref, merged_at) VALUES ('o/r#1', '{Log.Time(2.9)}'), ('o/r#2', '{Log.Time(5.9)}')");
+        server.Execute(connection, $"""
+            INSERT INTO kpi_v1.forge_changes (change_ref, merged_at)
+            VALUES ('o/r#1', '{Log.Time(2.9)}'), ('o/r#2', '{Log.Time(5.9)}'), ('o/r#9', '{Log.Time(300)}')
+            """);
 
         // Markers attribute calls to items; o/r#1's first review (findings 2) is after its first call.
         server.Execute(connection, $"""
@@ -277,7 +271,7 @@ public sealed class ReportTests : IDisposable
         Assert.Equal(33m, (decimal)report["unitsByModel"]!["claude-opus-5.5"]!);
         Assert.Equal((15m, 15m, 3m), ((decimal)report["unitsByCategory"]!["explore"]!, (decimal)report["unitsByCategory"]!["edit"]!, (decimal)report["unitsByCategory"]!["run"]!));
         Assert.Equal(0.4545m, (decimal)report["explorationShare"]!);
-        Assert.Equal((3, 1, 1), ((int)report["merges"]!["attempted"]!, (int)report["merges"]!["unresolved"]!, (int)report["merges"]!["unattributed"]!));
+        Assert.Equal((0, 3, 1), ((int)report["merges"]!["trackedRepositories"]!, (int)report["merges"]!["merged"]!, (int)report["merges"]!["outsideSessions"]!));
 
         // o/r#1: calls at 1 and 2 (30 units), 3 minutes of A; o/r#2: the call at 5 (3 units), 3 minutes.
         Assert.Equal(2, (int)report["acceptedChanges"]!["count"]!);
@@ -293,56 +287,10 @@ public sealed class ReportTests : IDisposable
     }
 }
 
-public sealed class WorkspacesTests
-{
-    private static readonly Workspaces Known = Workspaces.From(
-        [null, new Ingest.Context("/x", null, "o/x"), new Ingest.Context("/x", "/x", null), new("/h/other", "/h/other", "o/other"),
-         new("/w/r", "/w/r", "o/r"), new("/w/r/nested", "/w/r/nested", "o/nested"),
-         new("/a", "/a", "o/a"), new("/a", "/a", "o/b"), new("/a", "/a", "o/a")],
-        "/h");
-
-    [Theory]
-    [InlineData(null, "o/r")]
-    [InlineData("~/other", "o/other")]
-    [InlineData("~/other/sub", "o/other")]
-    [InlineData("$HOME/other", "o/other")]
-    [InlineData("${HOME}/other", "o/other")]
-    [InlineData("\"/w/r/nested/x\"", "o/nested")]
-    [InlineData("'/w/r/'", "o/r")]
-    [InlineData("sub", "o/r")]
-    [InlineData("../r/nested", "o/nested")]
-    [InlineData("~", null)]
-    [InlineData("/w/rx", null)]
-    [InlineData("$OTHER/x", null)]
-    [InlineData("/a", null)]
-    [InlineData("/x", null)]
-    public void MapsTheDirectoryACommandRanInToItsRepository(string? directory, string? repository) =>
-        Assert.Equal(repository, Known.Repository(directory, new Ingest.Context("/w/r", "/w/r", "o/r")));
-
-    [Fact]
-    public void NeedsTheSessionForARelativeOrOwnDirectory()
-    {
-        Assert.Null(Known.Repository(null, null));
-        Assert.Null(Known.Repository("sub", null));
-        Assert.Null(Known.Repository("sub", new Ingest.Context(null, null, "o/r")));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("""{"type":"assistant.message","data":{},"timestamp":"2026-11-16T10:00:00.000Z"}""")]
-    [InlineData("{broken \"session.start\"")]
-    [InlineData("""{"type":"user.message","data":{"content":"session.start"}}""")]
-    [InlineData("""{"type":"session.start"}""")]
-    public void ReadsOnlyAStartContext(string? line) => Assert.Null(Ingest.StartContext(line));
-
-    [Fact]
-    public void ReadsTheStartContext() => Assert.Equal(new Ingest.Context("/w/r/sub", "/w/r", "o/r"),
-        Ingest.StartContext("""{"type":"session.start","data":{"context":{"cwd":"/w/r/sub","gitRoot":"/w/r","repository":"o/r"}}}"""));
-}
-
 public sealed class ForgeTests : IDisposable
 {
     private const string A = "aaaaaaaa-0000-4000-8000-000000000001";
+    private const string B = "bbbbbbbb-0000-4000-8000-000000000002";
 
     private readonly Server server = new();
     private readonly string root = Directory.CreateTempSubdirectory("pbk-forge-").FullName;
@@ -353,58 +301,83 @@ public sealed class ForgeTests : IDisposable
         server.Dispose();
     }
 
-    // A stand-in for gh or glab: `<tool> api <path>` prints the answer for a known path and fails for any other.
-    private string Fake(string name, string cases)
+    private static string Name(string path) => string.Concat(path.Select(c => "/?&=%:".Contains(c) ? '_' : c));
+
+    // A stand-in for gh and glab: `<tool> api <path>` prints the answer saved for that path, or fails as a 404.
+    private string Fake()
     {
-        var path = Path.Combine(root, name);
-        File.WriteAllText(path, $"#!/bin/sh\ncase \"$2\" in\n{cases}\n  *) echo 'HTTP 404: Not Found' >&2; echo 'more' >&2; exit 1 ;;\nesac\n");
+        var path = Path.Combine(root, "forge");
+        File.WriteAllText(path, $$"""
+            #!/bin/sh
+            f="{{root}}/answers/$(printf '%s' "$2" | tr '/?&=%:' '______')"
+            if [ -f "$f" ]; then cat "$f"; else echo 'HTTP 404: Not Found' >&2; echo 'more' >&2; exit 1; fi
+
+            """);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+
         return path;
     }
 
+    private void Answer(string path, JsonNode answer) =>
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(root, "answers")).FullName, Name(path)), answer.ToJsonString());
+
+    private static JsonObject Request(string key, long number, double? merged, double updated) =>
+        new() { [key] = number, ["merged_at"] = merged is { } at ? Log.Time(at) : null, ["updated_at"] = Log.Time(updated) };
+
+    private static string GitHub(string repository, int page) =>
+        $"repos/{repository}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page={page}";
+
     [Fact]
-    public void AcceptsAChangeOnlyIfTheForgeMergedItDuringAnAttempt()
+    public void AcceptsWhatTheForgeMergedWhileASessionWasActive()
     {
         var connection = server.Migrated();
         var sessions = Directory.CreateDirectory(Path.Combine(root, "sessions")).FullName;
-        new Log()
-            .Event("session.start", 0, new JsonObject { ["context"] = new JsonObject { ["cwd"] = "/w/r", ["gitRoot"] = "/w/r", ["repository"] = "o/r" } })
-            .Tool("m1", "bash", 2, "gh pr merge 1").Done("m1", 3)
-            .Tool("m7", "bash", 2, "glab mr merge 7 -R g/s/p --yes").Done("m7", 3)
-            .Tool("m2", "bash", 4, "gh pr merge 2 --repo o/r").Done("m2", 4)
-            .Tool("m5", "bash", 5, "gh pr merge 5 --repo o/r --auto").Done("m5", 5)
-            .Tool("bad", "bash", 6, "gh pr merge 3 -R o/r; gh pr merge 4 -R o/r; gh pr merge 6 -R o/r").Done("bad", 6)
-            .Write(sessions, A);
+        new Log().Event("session.start", 0, []).Tool("a1", "bash", 2).Done("a1", 3).Tool("a2", "bash", 6).Done("a2", 6.2).Event("x", 10, []).Write(sessions, A);
+        new Log().Event("session.start", 5, []).Tool("b1", "bash", 7).Done("b1", 8).Event("x", 12, []).Write(sessions, B);
         Cli.Json(["ingest", "--sessions", sessions, .. connection]);
+        foreach (var (repository, forge) in new[] { ("o/r", "github"), ("g/s/p", "gitlab"), ("o/missing", "github"), ("o/bad", "github") })
+        {
+            Cli.Json(["track", "--repository", repository, "--forge", forge, .. connection]);
+        }
 
-        // o/r#1 merged during its attempt; g/s/p!7 1.5 minutes after (within the 2-minute skew); o/r#2 is open; o/r#5
-        // merged an hour later by auto-merge; the answers for o/r#3, #4 and #6 cannot be read.
-        var gh = Fake("gh", $$"""
-              repos/o/r/pulls/1) echo '{"merged_at":"{{Log.Time(2.9)}}"}' ;;
-              repos/o/r/pulls/2) echo '{"merged_at":null}' ;;
-              repos/o/r/pulls/3) echo 'not json' ;;
-              repos/o/r/pulls/5) echo '{"merged_at":"{{Log.Time(60)}}"}' ;;
-              repos/o/r/pulls/6) echo '{"state":"open"}' ;;
-            """);
-        var glab = Fake("glab", $$"""  projects/g%2Fs%2Fp/merge_requests/7) echo '{"merged_at":"{{Log.Time(4.5)}}"}' ;;""");
-        var first = Cli.Json(["resolve", "--gh", gh, "--glab", glab, .. connection]);
-        Assert.Equal((4, 3), ((int)first["asked"]!, (int)first["merged"]!));
-        var unresolved = first["unresolved"]!.AsArray();
-        Assert.Equal(["o/r#3", "o/r#4", "o/r#6"], unresolved.Select(entry => (string)entry!["change"]!));
+        // o/r, page 1 (full): #1 merged while only A was active; #2 while both were, after B's latest tool call; #3 closed
+        // unmerged; #4 while no session was active. Page 2 (full) reaches updates older than the first session, so
+        // listing stops: #102 merged within the skew of A's span but after B's tool call; #101 merged before any session.
+        var first = new JsonArray(Request("number", 1, 2.9, 2.9), Request("number", 2, 7.5, 7.5), Request("number", 3, null, 8), Request("number", 4, 50, 50));
+        var second = new JsonArray(Request("number", 102, 11, 11), Request("number", 101, -10, -10));
+        for (var n = 5; n <= 100; n++)
+        {
+            first.Add(Request("number", n, null, 9));
+            second.Add(Request("number", 100 + n, null, 9));
+        }
+
+        Answer(GitHub("o/r", 1), first);
+        Answer(GitHub("o/r", 2), second);
+        Answer($"projects/g%2Fs%2Fp/merge_requests?state=merged&order_by=updated_at&sort=desc&updated_after={Log.Time(0)[..19]}Z&per_page=100&page=1",
+            new JsonArray(Request("iid", 7, 6.5, 6.5)));
+        Answer(GitHub("o/bad", 1), new JsonObject { ["message"] = "not a list" });
+        var fake = Fake();
+
+        var resolved = Cli.Json(["resolve", "--gh", fake, "--glab", fake, .. connection]);
+        Assert.Equal(Log.Start, (DateTimeOffset)resolved["since"]!);
+        Assert.Equal("""[{"repository":"g/s/p","merged":1},{"repository":"o/r","merged":4}]""", resolved["repositories"]!.ToJsonString());
+        var unresolved = resolved["unresolved"]!.AsArray();
+        Assert.Equal(["o/bad", "o/missing"], unresolved.Select(entry => (string)entry!["repository"]!));
         Assert.StartsWith("unexpected answer: ", (string)unresolved[0]!["reason"]!);
-        Assert.Equal("gh exited 1: HTTP 404: Not Found", (string)unresolved[1]!["reason"]!);
-        Assert.StartsWith("unexpected answer: ", (string)unresolved[2]!["reason"]!);
-        Assert.Equal("g/s/p!7 o/r#1", server.Scalar(connection, "SELECT string_agg(change_ref, ' ' ORDER BY change_ref) FROM kpi_v1.accepted_changes"));
+        Assert.Equal("forge exited 1: HTTP 404: Not Found", (string)unresolved[1]!["reason"]!);
+        Assert.Equal("g/s/p!7=a o/r#1=a o/r#102=b o/r#2=b", server.Scalar(connection,
+            "SELECT string_agg(change_ref || '=' || left(session_id, 1), ' ' ORDER BY change_ref COLLATE \"C\") FROM kpi_v1.accepted_changes"));
         var merges = Cli.Json(["report", .. connection])["merges"]!;
-        Assert.Equal((7, 3, 0), ((int)merges["attempted"]!, (int)merges["unresolved"]!, (int)merges["unattributed"]!));
+        Assert.Equal((4, 5, 1), ((int)merges["trackedRepositories"]!, (int)merges["merged"]!, (int)merges["outsideSessions"]!));
 
-        // Merged changes are not asked again; a forge tool that cannot run leaves the rest unresolved.
-        var second = Cli.Json(["resolve", "--gh", "/nonexistent/gh", "--glab", glab, .. connection]);
-        Assert.Equal(0, (int)second["asked"]!);
-        Assert.Equal(["o/r#2", "o/r#3", "o/r#4", "o/r#6"], second["unresolved"]!.AsArray().Select(entry => (string)entry!["change"]!));
-        Assert.All(second["unresolved"]!.AsArray(), entry => Assert.StartsWith("cannot run /nonexistent/gh: ", (string)entry!["reason"]!));
+        // Listing again changes nothing; a forge tool that cannot run leaves its repositories for the next run.
+        var again = Cli.Json(["resolve", "--gh", "/nonexistent/gh", "--glab", fake, .. connection]);
+        Assert.Equal("""[{"repository":"g/s/p","merged":1}]""", again["repositories"]!.ToJsonString());
+        Assert.Equal(["o/bad", "o/missing", "o/r"], again["unresolved"]!.AsArray().Select(entry => (string)entry!["repository"]!));
+        Assert.All(again["unresolved"]!.AsArray(), entry => Assert.StartsWith("cannot run /nonexistent/gh: ", (string)entry!["reason"]!));
+        Assert.Equal(5L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.forge_changes"));
     }
 }

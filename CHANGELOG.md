@@ -10,10 +10,11 @@ release's notes for the exact pinned commit.
   of #328).
   - It ingests the agent's session event logs into a local PostgreSQL
     `kpi_v1` schema: billed model calls by initiator, model and category; tool
-    calls; merge attempts; operator messages; and active spans. A forked
-    session's repeated parent history is skipped.
-  - `resolve` asks GitHub or GitLab when each attempted change merged. A
-    change counts as accepted only if it merged during an attempt.
+    calls; operator messages; and active spans. A forked session's repeated
+    parent history is skipped.
+  - `track` and `resolve` list the merged requests of tracked GitHub and
+    GitLab repositories. A merge is an accepted change of the session that was
+    active when it merged.
   - It records work markers, spec gaps, reviews, requirement counts and
     operator time by tier.
   - It reports six KPIs in premium units and USD: cost per accepted change,
