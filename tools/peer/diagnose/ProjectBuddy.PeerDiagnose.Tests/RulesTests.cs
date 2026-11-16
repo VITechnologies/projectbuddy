@@ -46,6 +46,8 @@ public sealed class RulesTests
         { One("a", Condition("some", """[{"pointer":"","op":"prefix","value":1}]""")), "a scalar value of the op's type" },
         { One("a", Condition("some", """[{"pointer":"","op":"eq","value":{}}]""")), "a scalar value of the op's type" },
         { One("a", Condition("some", """[{"pointer":"","op":"ne","value":[1]}]""")), "a scalar value of the op's type" },
+        { """[{"class":"a","any":[]}]""", "q rule a has an empty any, which never holds" },
+        { """[{"class":"a","all":[]},{"class":"b","all":[]}]""", "q rule b follows an otherwise rule and can never be reached" },
     };
 
     [Theory]
@@ -115,7 +117,11 @@ public sealed class RulesTests
         Assert.Null(Decide(rules, Result("disk", Drives), Failure("disk")));
         Assert.Equal("c", Decide(rules, Result("disk", """{"drives":[]}""")));
         Assert.Equal("c", Decide(rules, Result("disk", """{"drives":{"0":1}}""")));
-        Assert.Equal("c", Decide(One("a", Condition("every", """[{"pointer":"","op":"present"}]"""))[..^1] + """,{"class":"c","all":[]}]""", Result("disk", """{"drives":[]}""")));
+        var every = One("a", Condition("every", """[{"pointer":"","op":"present"}]"""))[..^1] + """,{"class":"c","all":[]}]""";
+        Assert.Equal("c", Decide(every, Result("disk", """{"drives":[]}""")));
+
+        // A trimmed result may have lost every item, so an empty "every" is undecided there.
+        Assert.Null(Decide(every, Result("disk", """{"drives":[]}""", truncated: true)));
 
         // No rule holds: the class is undecided rather than guessed.
         Assert.Null(Decide(One("a", Condition("some", """[{"pointer":"/freePercent","op":"gt","value":99}]""")), Result("disk", Drives)));
@@ -136,7 +142,6 @@ public sealed class RulesTests
         Assert.Equal("c", Decide(Rule(true, undecided, fails), disk));
         Assert.Null(Decide(Rule(true, holds, undecided), disk));
         Assert.Equal("a", Decide(Rule(true, holds, holds), disk));
-        Assert.Equal("c", Decide(Rule(false), disk));
     }
 
     [Fact]
@@ -159,5 +164,60 @@ public sealed class RulesTests
         // Two results of one tool are read together.
         var both = Rules.Decide(Parse(One("a", Condition("every", """[{"pointer":"/freePercent","op":"ge","value":5}]"""))), [Result("disk", Drives), Result("disk", """{"drives":[{"freePercent":9}]}""")]);
         Assert.Equal(3, both.Basis.Count);
+    }
+
+    private static readonly Policy Shipped = Policy.Parse(File.ReadAllBytes("policy.json"));
+
+    private const string Up = """{"adapters":[{"status":"up","gateways":["<ip>"]}]}""";
+    private const string Ok = """{"drives":[{"freePercent":60}]}""";
+    private const string Reachable = """{"reachable":true,"models":[{"identity":true}]}""";
+    private const string Running = """{"available":true,"services":[{"name":"<host>","githubRunner":true,"state":"RUNNING"}],"tasks":[]}""";
+    private const string Quiet = """{"available":true,"hours":24,"groups":[],"errors":[]}""";
+
+    public static TheoryData<string, string[], string?> ShippedCases() => new()
+    {
+        { "github-unreachable", ["network-link", """{"adapters":[],"omitted":3}"""], "no-active-link" },
+        { "github-unreachable", ["network-link", Up], "link-up" },
+        { "github-unreachable", ["network-link", """{"adapters":[{"status":"up","gateways":[]}]}"""], "no-default-route" },
+        { "github-unreachable", [], null },
+        { "disk-full", ["disk", """{"drives":[]}"""], "inconclusive" },
+        { "disk-full", ["disk", """{"drives":[{"freePercent":5},{"freePercent":60}]}"""], "disk-low" },
+        { "disk-full", ["disk", Ok], "disk-ok" },
+        { "disk-full", ["disk!", Ok], null },
+        { "ollama-empty", ["ollama", """{"reachable":false}"""], "ollama-unreachable" },
+        { "ollama-empty", ["ollama", """{"reachable":true,"models":[]}"""], "no-models" },
+        { "ollama-empty", ["ollama", """{"reachable":true,"models":[{"identity":false},{"identity":true}]}"""], "identity-present" },
+        { "ollama-empty", ["ollama", """{"reachable":true,"models":[{"identity":false}]}"""], "identity-missing" },
+        { "vm-states", ["vm-states", """{"available":false,"reason":"VBoxManage is not installed"}"""], "virtualbox-missing" },
+        { "vm-states", ["vm-states", """{"available":true,"error":"list vms exited 1"}"""], "inconclusive" },
+        { "vm-states", ["vm-states", """{"available":true,"vms":[]}"""], "no-vms-visible" },
+        { "vm-states", ["vm-states", """{"available":true,"vms":[{"running":false},{"running":true}]}"""], "vms-running" },
+        { "vm-states", ["vm-states", """{"available":true,"vms":[{"running":null}]}"""], "inconclusive" },
+        { "vm-states", ["vm-states", """{"available":true,"vms":[{"running":false,"error":"showvminfo exited 1"}]}"""], "no-vm-running" },
+        { "runner-offline", ["services", """{"available":false,"reason":"Windows only"}"""], "inconclusive" },
+        { "runner-offline", ["services", """{"available":true,"services":[],"error":"sc.exe query failed","tasks":[]}"""], "inconclusive" },
+        { "runner-offline", ["services", """{"available":true,"services":[{"name":"gitlab-runner","githubRunner":false,"state":"RUNNING"}],"tasks":[]}"""], "runner-service-missing" },
+        { "runner-offline", ["services", """{"available":true,"services":[{"name":"<host>","githubRunner":true,"state":"STOPPED"}],"tasks":[]}"""], "runner-service-stopped" },
+        { "runner-offline", ["services", Running], null },
+        { "runner-offline", ["services", Running, "event-errors", """{"available":true,"hours":24,"groups":[{"provider":"Microsoft-Windows-Kernel-Power","id":41}],"errors":[]}"""], "recent-crash" },
+        { "runner-offline", ["services", Running, "event-errors", """{"available":true,"hours":24,"groups":[{"provider":"EventLog","id":6008}],"errors":[]}"""], "recent-crash" },
+        { "runner-offline", ["services", Running, "event-errors", """{"available":true,"hours":24,"groups":[],"errors":[{"log":"System","error":"wevtutil query failed"}]}"""], "inconclusive" },
+        { "runner-offline", ["services", Running, "event-errors", Quiet], "runner-service-running" },
+        { "general-health", ["network-link", Up, "disk", Ok, "ollama", Reachable, "services", Running], "healthy" },
+        { "general-health", ["network-link", Up, "disk", """{"drives":[{"freePercent":5}]}"""], "degraded" },
+        { "general-health", ["network-link", Up, "disk", Ok, "ollama", Reachable, "services", """{"available":true,"services":[],"error":"sc.exe query failed","tasks":[]}"""], null },
+        { "general-health", ["network-link", Up, "disk", Ok, "ollama", Reachable, "services", """{"available":false,"reason":"Windows only"}"""], null },
+        { "general-health", ["network-link", Up, "disk", Ok, "services", Running], null },
+    };
+
+    [Theory]
+    [MemberData(nameof(ShippedCases))]
+    public void TheShippedPolicyDecidesOnlyWhatTheEvidenceSupports(string question, string[] results, string? expected)
+    {
+        // A tool name ending in "!" stands for a truncated result.
+        var evidence = Enumerable.Range(0, results.Length / 2)
+            .Select(index => Result(results[2 * index].TrimEnd('!'), results[2 * index + 1], truncated: results[2 * index].EndsWith('!')))
+            .ToList();
+        Assert.Equal(expected, Rules.Decide(Shipped.Find(question).Rules, evidence).Class);
     }
 }

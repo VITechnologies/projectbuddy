@@ -49,7 +49,18 @@ public static class Rules
                 throw Refused($"{question} rule class {name} is not one of its classes");
             }
 
-            rules.Add(new Rule(name, all, [.. Json.Array(rule[all ? "all" : "any"], $"{question} {name} conditions").Select(condition => ParseCondition(condition, $"{question} {name}"))]));
+            if (rules.Count > 0 && rules[^1] is { All: true, Conditions.Count: 0 })
+            {
+                throw Refused($"{question} rule {name} follows an otherwise rule and can never be reached");
+            }
+
+            var conditions = Json.Array(rule[all ? "all" : "any"], $"{question} {name} conditions").Select(condition => ParseCondition(condition, $"{question} {name}")).ToList();
+            if (!all && conditions.Count == 0)
+            {
+                throw Refused($"{question} rule {name} has an empty any, which never holds");
+            }
+
+            rules.Add(new Rule(name, all, conditions));
         }
 
         return rules.Count > 0 ? rules : throw Refused($"{question} needs at least one rule");
@@ -185,7 +196,8 @@ public static class Rules
         return condition.Quantifier switch
         {
             "some" => passing.Count > 0 ? (true, witnesses) : truncated ? (null, []) : (false, []),
-            "every" => elements.Count == 0 || passing.Count < elements.Count ? (false, []) : truncated ? (null, []) : (true, witnesses),
+            // A failing element settles "every"; otherwise a truncated result (even an empty one) may hide a failing one.
+            "every" => passing.Count < elements.Count ? (false, []) : truncated ? (null, []) : elements.Count == 0 ? (false, []) : (true, witnesses),
             _ => passing.Count > 0 ? (false, []) : truncated ? (null, []) : (true, []),
         };
     }

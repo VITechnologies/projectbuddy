@@ -298,7 +298,7 @@ public sealed class RegistryTests
         var result = await Invoke(sources, "services");
         Assert.False(Truncated(result));
         Assert.Equal(
-            """{"available":true,"services":[{"name":"GitLab-Runner","state":"STOPPED","startType":"unknown"},{"name":"ProjectBuddy-GitLabRunner-mprr","state":"RUNNING","startType":"unknown"},{"name":"actions.runner.Org.BUILDHOST-01","state":"RUNNING","startType":"AUTO_START_DELAYED"}],"tasks":"""
+            """{"available":true,"services":[{"name":"GitLab-Runner","githubRunner":false,"state":"STOPPED","startType":"unknown"},{"name":"ProjectBuddy-GitLabRunner-mprr","githubRunner":false,"state":"RUNNING","startType":"unknown"},{"name":"actions.runner.Org.BUILDHOST-01","githubRunner":true,"state":"RUNNING","startType":"AUTO_START_DELAYED"}],"tasks":"""
             + """[{"name":"ProjectBuddy-Bus","state":"Running","lastResult":"267009"},{"name":"ProjectBuddy-Ollama","state":"absent","lastResult":""}]}""",
             Data(result).ToJsonString());
         Assert.DoesNotContain(sources.Calls, call => call.Contains("Spooler", StringComparison.Ordinal) || call.Contains("my-gitlab-runner", StringComparison.Ordinal));

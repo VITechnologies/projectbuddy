@@ -85,7 +85,7 @@
       "rules": [
         {
           "class": "inconclusive",
-          "all": [
+          "any": [
             {
               "tool": "services",
               "pointer": "/data/available",
@@ -95,6 +95,17 @@
                   "pointer": "",
                   "op": "eq",
                   "value": false
+                }
+              ]
+            },
+            {
+              "tool": "services",
+              "pointer": "/data/error",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
                 }
               ]
             }
@@ -109,9 +120,9 @@
               "quantifier": "none",
               "test": [
                 {
-                  "pointer": "/name",
-                  "op": "prefix",
-                  "value": "actions.runner."
+                  "pointer": "/githubRunner",
+                  "op": "eq",
+                  "value": true
                 }
               ]
             }
@@ -126,9 +137,9 @@
               "quantifier": "some",
               "test": [
                 {
-                  "pointer": "/name",
-                  "op": "prefix",
-                  "value": "actions.runner."
+                  "pointer": "/githubRunner",
+                  "op": "eq",
+                  "value": true
                 },
                 {
                   "pointer": "/state",
@@ -173,6 +184,34 @@
                   "pointer": "/id",
                   "op": "eq",
                   "value": 6008
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "inconclusive",
+          "any": [
+            {
+              "tool": "event-errors",
+              "pointer": "/data/available",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "tool": "event-errors",
+              "pointer": "/data/errors/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
                 }
               ]
             }
@@ -323,6 +362,23 @@
                   "pointer": "/running",
                   "op": "eq",
                   "value": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "inconclusive",
+          "all": [
+            {
+              "tool": "vm-states",
+              "pointer": "/data/vms/*",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "/running",
+                  "op": "eq",
+                  "value": null
                 }
               ]
             }
@@ -480,6 +536,29 @@
                   "pointer": "",
                   "op": "eq",
                   "value": true
+                }
+              ]
+            },
+            {
+              "tool": "services",
+              "pointer": "/data/available",
+              "quantifier": "some",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "eq",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "tool": "services",
+              "pointer": "/data/error",
+              "quantifier": "none",
+              "test": [
+                {
+                  "pointer": "",
+                  "op": "present"
                 }
               ]
             }

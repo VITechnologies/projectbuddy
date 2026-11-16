@@ -19,6 +19,11 @@ release's notes for the exact pinned commit.
     The report adds `verified: ["citations", "class"]`, the rule with its
     basis facts, and `receipt.classCorrected`.
   - The rules reach the model as generated prose.
+  - The shipped rules guard against failed reads that probes report inside
+    their data: services `error`, event-errors `errors`, and vm-states
+    `running: null`.
+  - `projectbuddy-probes services` adds `githubRunner`, decided before
+    redaction can rewrite a runner's name.
 
 - Add `tools/peer/diagnose` (`projectbuddy-diagnose`, #295, #290 slice 3): the
   bounded P4 agent loop. A local model answers one question from a closed

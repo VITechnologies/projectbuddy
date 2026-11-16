@@ -119,6 +119,15 @@ decides the class.
 
   Rules combine in three values. An undecided rule before the deciding one,
   or no rule holding, leaves the class undecided.
+- **Parse checks:** an empty `any` (which never holds) and any rule after an
+  "otherwise" rule (which is unreachable) are refused.
+- **Failures inside data:** some probes report a failed read inside a normal
+  result: `services` sets `error`, `event-errors` lists `errors`, and
+  `vm-states` gives `running: null`. The shipped rules test for these with
+  explicit `inconclusive` rules placed before any rule they could mislead.
+  `healthy` also requires `services` to be available with no error.
+- Tests run the **shipped policy** on probe-shaped results, failures
+  included, so it decides only what the evidence supports.
 
 | Question | Classes |
 |---|---|
