@@ -6,6 +6,22 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-kpi` measures the cost of AI-assisted work (#330, milestone K
+  of #328).
+  - It ingests the agent's session event logs into a local PostgreSQL
+    `kpi_v1` schema: billed model calls by initiator, model and category; tool
+    calls; operator messages; and active spans. A forked session's repeated
+    parent history is skipped.
+  - `track` and `resolve` list the merged requests of tracked GitHub and
+    GitLab repositories. A merge is an accepted change of the session that was
+    active when it merged.
+  - It records work markers, spec gaps, reviews, requirement counts and
+    operator time by tier.
+  - It reports six KPIs in premium units and USD: cost per accepted change,
+    cost per requirement, first-pass yield, rework, spec-gap rate and
+    exploration share.
+  - CI runs its tests as `KPI Tool Tests` at 100% line and branch coverage.
+
 - Move the RSR consumer kit, the standards scan pin and the compliance stamp
   to RSR v0.6.0 (#332, north star M2). Re-certification passes all 5 required
   gates.
