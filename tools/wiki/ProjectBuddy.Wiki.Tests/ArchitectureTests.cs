@@ -52,6 +52,23 @@ public sealed class ArchitectureTests : IDisposable
     }
 
     [Fact]
+    public void ImplementsExactlyThePinnedStandard()
+    {
+        // Every finding-like literal the projection SQL can report, less the literals that are not findings, must be the
+        // pinned standard's catalogue: a finding added, renamed or dropped without moving the pin fails here.
+        string[] notFindings = ["projectbuddy-wiki-pages-v1", "software-requirements", "system-requirements"];
+        var sql = string.Concat(Database.Migrations().Where(migration => migration.Version >= 3).Select(migration => migration.Sql));
+        var literals = System.Text.RegularExpressions.Regex.Matches(sql, "'([a-z]+(?:-[a-z0-9]+)+)'").Select(match => match.Groups[1].Value);
+        Assert.Equal(
+            Standard.PageFindings.Concat(Standard.ArchitectureFindings).Concat(Standard.EdgeFindings).Distinct().Order(StringComparer.Ordinal),
+            literals.Except(notFindings).Distinct().Order(StringComparer.Ordinal));
+
+        var (_, report, _) = Project();
+        Assert.Equal("""{"id":"rsr/ecosystem-wiki-standard@1","rsrRelease":"v0.5.0","rsrCommit":"0cab3803284aafc66f786d7a1114d58fc04fc5e6"}""",
+            report["standard"]!.ToJsonString());
+    }
+
+    [Fact]
     public void RefusesADatabaseThatIsNotMigrated()
     {
         var unmigrated = server.NewDatabase();
