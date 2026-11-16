@@ -71,6 +71,14 @@ selected packed-library build. Configuration validity requires deterministic
 checks and local Ollama review; native-build proof remains separate. It does
 not register projects, overwrite existing outputs, or enable cleanup.
 
+### Wiki Working Copy
+
+The [wiki working-copy CLI](tools/wiki/README.md) keeps a local, append-only
+copy of the GitHub wiki in PostgreSQL. It seeds the copy from the wiki's
+committed bytes, renders it back byte for byte, and checks for drift. It is
+the base for local AI-assisted wiki regeneration (#307); it never publishes
+to the wiki.
+
 ## What's in this engine
 
 ### VM provisioning (`vm/windows-labview/`, `vm/ubuntu-labview/`)
