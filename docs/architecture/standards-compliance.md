@@ -18,8 +18,11 @@ compliance posture was assessed against.
 
 `v0.5.0` adds the ecosystem wiki standard, `rsr/ecosystem-wiki-standard@1`.
 `projectbuddy-wiki` is its reference checker (#318, #319, #320), and this
-repository's wiki conforms to it with zero findings. The release does not
-change the heuristic `release-gate` scoring.
+repository's wiki conforms to it with zero findings. The
+`release-gate` scoring changed between `v0.2.23` and `v0.5.0`: RSR added the
+`scripts-not-lf-pinned` contradiction, which flags executable scripts that do
+not check out with LF. This repository satisfies it through the consumer kit's
+line-ending rules, adopted with this re-certification.
 
 Re-certification against `v0.5.0` on 2026-11-16 found no regression in the 5
 required gates. All still `PASS` at High confidence (99-100%), and DoD remains
@@ -42,6 +45,131 @@ had refused the wiki:
 
 The workflow itself re-runs on the fork's `standards-review-local` runner
 after the next fork-main sync.
+
+## Semantic-audit history (assessed at `v0.2.23`)
+
+`v0.2.23` added a canonical multi-model semantic-audit mode
+(`scripts/semantic_audit.py`), which extracts real standards clause text
+live from the local PDF corpus and delegates it to independent models
+rather than relying on pattern-match heuristics alone; it does not change
+the heuristic `release-gate` scoring logic itself. Re-certification
+against `v0.2.23` found no regression in the 5 required gates (all still
+`PASS`, High confidence 99-100%) and caught a second instance of the same
+self-referential false-positive bug class this document already fixed
+once: `CHANGELOG.md`'s own v0.3.22 entry (describing the first fix)
+quoted the exact literal CI-context string the DoD rule detects, which
+was itself re-triggering a false DoD `PASS` -- rephrased the same way,
+without reproducing the matched string, restoring the real, correctly
+`FAIL (not required)` DoD state reflected below.
+
+A follow-on full 5-area semantic-audit pass (same `v0.2.23` tooling, 3
+independent models) found and fixed a cluster of real documentation/code
+defects spanning REQ/ARCH/DOC (see `v0.3.26`'s `CHANGELOG.md` entry), and
+surfaced one still-open, high-severity finding needing an operator
+decision (`#62`: `provision-ubuntu-vm.yml` has never been successfully
+dispatched and references 3 scripts that have never existed). None of
+these affect the 5 required gates below -- the heuristic scanner has no
+rule that would have caught any of them, which is the entire reason the
+semantic-audit capability was built.
+
+A third, verification-focused semantic-audit pass (same 3 models,
+explicitly asked to confirm whether `v0.3.26`'s fixes actually held up,
+not just re-describe the original findings) found that most fixes were
+genuinely SOLID, but several single-pass corrections had residual gaps
+or were incomplete (a `trap` installed after, not before, a credential
+file's creation; a corrected claim left standing in the wiki Architecture
+Packet after being fixed only in `README.md`/`docs/`; an activation
+precondition described as enforced when it is actually only a documented
+convention) -- see `v0.3.27`'s `CHANGELOG.md` entry. This reinforces the
+practical value of a dedicated verification pass after any
+semantic-audit-driven fix round, not just the initial audit.
+
+A fourth pass (same 3 models, explicitly asked to verify `v0.3.27`'s
+fixes and hunt for anything neither prior round caught) found that the
+`v0.3.27` CHANGELOG's claim of fixing all 5 REQ-017 credential-cleanup
+sites was itself false -- only 1 of 5 had actually been moved, caught
+independently by 2 of the 3 models and confirmed via an automated
+scanner rather than manual re-reading. It also found and corrected the
+root cause of `#62` (one of its two "missing" scripts was a genuine,
+accidentally-dropped-during-extraction file, now restored and verified
+locally; the other was confirmed as an intentional, disclosed,
+consumer-vendored exception, not a bug), an expression-injection
+anti-pattern in `release.yml` (reproduced as a real bash syntax error
+using live CHANGELOG content), and filed 3 new issues (`#68`, `#69`,
+`#70`) -- see `v0.3.28`'s `CHANGELOG.md` entry. Every pass this session
+has run has found at least one real defect the prior pass's own fixes
+either missed or introduced; the standing rule remains in effect: run a
+dedicated verification pass after every semantic-audit fix round.
+
+A fifth pass (same 3 models, verifying `v0.3.28`) found that `v0.3.28`'s
+own `vm-fleet-status.yml` fix was itself incomplete (stopped a `jq`
+crash but left the workflow failing 100% of the time regardless, a
+GitHub Actions platform behavior around zero-entry `strategy.matrix`
+that the fix didn't account for -- independently confirmed by all 3
+models via real run-history queries, not just code reading), that the
+wiki Architecture Packet directly contradicted `v0.3.28`'s own restored-
+script fix in the same round it was made, and that `v0.3.28` itself
+introduced a documented GitFlow exception (a post-release-branch direct-
+to-`main` fix) while fixing an unrelated workflow-injection bug. Also
+found a previously-unnoticed false claim dating back to `v0.3.24`
+(a removed script's "zero consumers" claim, contradicted by a real
+consumer repo still calling it -- `#76`) and a safety check
+(`release.yml`'s duplicate-tag rejection) that had been dead code since
+that workflow's introduction, caught only by empirically re-testing the
+fix in real CI rather than trusting the code. See `v0.3.29`'s
+`CHANGELOG.md` entry and `#77` for the remaining lower-severity items.
+Every one of the 4 verification passes run so far has found at least one
+real defect the prior pass's own fixes either missed or introduced --
+the standing rule remains in full effect.
+
+A sixth pass (same 3 models, verifying `v0.3.29`) found significantly
+fewer new defects than prior rounds -- an expected sign of convergence
+after 6 rounds of hardening the same spec/doc surface -- but still a
+genuine process violation and several real sibling-location drift
+instances: `v0.3.29`'s own fix to `ADR-0001` had edited its accepted
+Decision/Consequences text in place, directly violating this repo's own
+Decision Record convention ("never edited after acceptance," per
+`docs/information-item-map.md`) -- reverted to the original accepted
+text, with the genuinely useful new content moved into a proper,
+append-only Addendum section instead. Also found: 2 more dangling
+`docs/projectbuddy-consumption.md` references round 5 missed when fixing
+2 sibling instances of the identical gap; `.github/skills/projectbuddy-identity/`
+and `standards-compliance-recheck.yml` still carrying overclaims already
+corrected in `README.md`/`standards-compliance.md` themselves; a wiki
+citation of an ephemeral workflow run ID as sole evidence, directly
+contradicting that same SRS's own stated evidence-citation principle;
+and REQ-010/REQ-013 updated in one sibling location (SRS or RTM) but not
+the other. Two new `#68` evidence sites were added (a Windows-family
+hardcoded-identifier instance, and a broader schema-namespace-identifier
+pattern spanning 11 files, flagged with a nuance that it may be a
+namespace-naming choice rather than the same class of bug). See `v0.3.30`'s
+`CHANGELOG.md` entry and `#80` for the remaining lower-severity items.
+Every one of the 5 verification passes run so far has found at least one
+real defect the prior pass's own fixes either missed or introduced --
+the standing rule remains in full effect, though the shrinking defect
+count each round suggests the spec/doc surface is converging toward
+stability.
+
+After 6 audit rounds, the operator reprioritized from "audit and file
+issues" to "act as operator and resolve the accumulated backlog."
+`v0.3.31` resolved all 9 issues the 6 rounds had filed: genericized
+every real `REQ-001` violation and formally scoped the 2 disclosed
+exceptions; fixed the `guestHostname`/`guestFullName` batch-collision
+gap with a live-verified derivation fallback; aligned
+`ALLOW_PACKAGE_DRIFT`'s default across all 3 pipeline flavors (a real
+behavior change, disclosed as such); wired a real CI caller for
+`toolchain-smoke-test.yml` and authored real Pester fixture tests for
+both `Test-SbomArtifact.ps1` and the restored `Install-VerifiedNugetPackage.ps1`;
+merged the redundant `REQ-018`/`REQ-019` pair; repointed 3 dangling doc
+references instead of authoring unneeded new docs; filled in the
+remaining Architecture Packet component gaps; and made 2 forward-looking
+process decisions, both now recorded here and in `docs/cm/cm-plan.md`/
+`docs/release/release-procedure.md`: adopt lightweight Document Control
+blocks across core docs (explicitly declining a full formal ISO
+29119-3 test-plan rewrite as disproportionate for this repo's current
+maturity), and tag the wiki repository at each release boundary going
+forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
+`CHANGELOG.md` entry for the full, per-issue resolution detail.
 
 ## Current gate status (as of the version above)
 
