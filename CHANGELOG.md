@@ -11,8 +11,8 @@ release's notes for the exact pinned commit.
     or, if they rest on none, the rule itself, so the model cites exact
     pointers.
   - An empty list or object can be cited as `"[]"` or `"{}"`.
-  - Grounding is unchanged. On the workstation, all six questions gave
-    grounded answers with verified classes.
+  - The hint does not change grounding. On the workstation, all six
+    questions gave grounded answers with verified classes.
 
 - `projectbuddy-ask` 0.3.0 adds the `diagnose <question-id>` verb (#298, #290
   slice 4).

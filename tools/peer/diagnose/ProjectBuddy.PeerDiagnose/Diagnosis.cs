@@ -99,7 +99,7 @@ public static class Diagnosis
         var decision = Rules.Decide(question.Rules, evidence);
         request.Remove("tools");
         request["format"] = AnswerFormat(policy, question, decision.Class);
-        messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = decision.Class is null ? policy.AnswerPrompt : $"{policy.AnswerPrompt}\n\n{Hint(decision)}" });
+        messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = decision.Class is null ? policy.AnswerPrompt : $"{policy.AnswerPrompt}\n\n{Hint(decision, policy.MaxValueChars)}" });
         JsonObject answer;
         while (true)
         {
@@ -279,10 +279,15 @@ public static class Diagnosis
 
     // When the rules decide, the model is shown the facts they rest on (or, for a rule with no facts to show, such as
     // "no element exists", the rule itself), so it can cite exactly what was found (#304). Grounding is unchanged.
-    internal static string Hint(Decision decision) => decision.Basis.Count > 0
-        ? $"The policy's rules decide the class {decision.Class} from these facts; cite them exactly as written (tool, pointer, value):"
-            + string.Concat(decision.Basis.Select(fact => $"\n- {fact.Tool} {fact.Pointer} = {Show(fact.Value)}"))
-        : $"The policy's rules decide the class {decision.Class} because {Rules.Describe(decision.Rule!)}.";
+    // Facts are shown in full, and only those short enough to cite: the model is told to copy them exactly.
+    internal static string Hint(Decision decision, int maxValueChars)
+    {
+        var facts = decision.Basis.Where(fact => Json.TryString(fact.Value) is not { } text || text.Length <= maxValueChars).ToList();
+        return facts.Count > 0
+            ? $"The policy's rules decide the class {decision.Class} from these facts; cite them exactly as written (tool, pointer, value):"
+                + string.Concat(facts.Select(fact => $"\n- {fact.Tool} {fact.Pointer} = {fact.Value?.ToJsonString(Readable) ?? "null"}"))
+            : $"The policy's rules decide the class {decision.Class} because {Rules.Describe(decision.Rule!)}.";
+    }
 
     // Scalars are compared by their JSON text, never converted: a string by its content, a number or boolean by its exact
     // token, which a cited string may also give ("5" cites 5, models often quote numbers), and an empty list or object by

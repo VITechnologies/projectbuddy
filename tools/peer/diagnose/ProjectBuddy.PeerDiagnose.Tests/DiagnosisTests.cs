@@ -128,6 +128,16 @@ public sealed class DiagnosisTests
     }
 
     [Fact]
+    public void ShowsOnlyFactsShortEnoughToCite()
+    {
+        var rule = new Rule("a", true, []);
+        var facts = new List<Basis> { new("disk", "/data/x", JsonValue.Create(new string('y', 17))), new("disk", "/data/n", JsonValue.Create(5)), new("disk", "/data/z", null) };
+        Assert.Equal("The policy's rules decide the class a from these facts; cite them exactly as written (tool, pointer, value):\n- disk /data/n = 5\n- disk /data/z = null",
+            Diagnosis.Hint(new Decision("a", facts, rule), 16));
+        Assert.Equal("The policy's rules decide the class a because otherwise.", Diagnosis.Hint(new Decision("a", [facts[0]], rule), 16));
+    }
+
+    [Fact]
     public async Task RefusesCallsOutsideTheRegistry()
     {
         var ollama = new FakeOllama();
