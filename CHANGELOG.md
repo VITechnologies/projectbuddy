@@ -6,6 +6,16 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Fix `projectbuddy-probes network-link` on Windows (#292). .NET also lists
+  NDIS filter pseudo-interfaces (QoS Packet Scheduler, WFP filters) and absent
+  adapters, which could fill the 16-adapter cap and push out real adapters.
+  - On Windows, adapters bound to neither IPv4 nor IPv6 are now counted in
+    `omitted` instead of listed.
+  - Adapters with a default gateway are listed first, then those that are up,
+    with absent ones last.
+  - The README records what a Windows run verified, and that `vm-states` sees
+    only the VMs registered to its own account.
+
 - Add `tools/peer/probes` (`projectbuddy-probes`, #292, #290 slice 2): the
   closed list of read-only tools the P4 diagnostics agent may call on the
   peer.

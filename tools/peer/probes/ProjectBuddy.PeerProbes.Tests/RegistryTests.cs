@@ -93,14 +93,67 @@ public sealed class RegistryTests
         var result = await Invoke(sources, "network-link");
         Assert.False(Truncated(result));
         Assert.Equal(
-            """{"adapters":[{"name":"Ethernet","kind":"ethernet","status":"down","speedMbps":0,"ipv4":true,"ipv6":true,"gateways":[]},{"name":"Wi-Fi","kind":"wifi","status":"up","speedMbps":866,"ipv4":true,"ipv6":false,"gateways":["192.168.1.1","fe80::1"]}]}""",
+            """{"adapters":[{"name":"Wi-Fi","kind":"wifi","status":"up","speedMbps":866,"ipv4":true,"ipv6":false,"gateways":["192.168.1.1","fe80::1"]},{"name":"Ethernet","kind":"ethernet","status":"down","speedMbps":0,"ipv4":true,"ipv6":true,"gateways":[]}],"omitted":0}""",
             Data(result).ToJsonString());
         Assert.Equal("{}", result.Envelope["redaction"]!.ToJsonString());
 
+        // The cap keeps the live physical link and drops the down adapter last in order.
         sources.AdapterList.AddRange(Enumerable.Range(0, Registry.MaxAdapters).Select(index => new Adapter($"vEthernet {index:D2}", "other", "up", 10000, true, true, [])));
         var capped = await Invoke(sources, "network-link");
         Assert.True(Truncated(capped));
-        Assert.Equal(Registry.MaxAdapters, Data(capped)["adapters"]!.AsArray().Count);
+        var kept = Data(capped)["adapters"]!.AsArray();
+        Assert.Equal(Registry.MaxAdapters, kept.Count);
+        Assert.Equal("Wi-Fi", (string?)kept[0]!["name"]);
+        Assert.DoesNotContain(kept, adapter => (string?)adapter!["name"] == "Ethernet");
+    }
+
+    [Fact]
+    public async Task LeavesOutAdaptersThatCarryNoTraffic()
+    {
+        // The shape .NET reports on a Windows 11 laptop with Hyper-V, VirtualBox and Bluetooth: virtual switches report
+        // as Ethernet, so the default route, not the kind, decides what comes first.
+        var sources = Windows();
+        sources.AdapterList.AddRange(
+        [
+            new("6to4 Adapter", "tunnel", "notpresent", 0, false, false, []),
+            new("Bluetooth Network Connection", "ethernet", "down", 3, true, true, []),
+            new("Ethernet", "ethernet", "up", 100, true, false, []),
+            new("Ethernet (Kernel Debugger)", "ethernet", "notpresent", 0, false, false, []),
+            new("Ethernet 2", "ethernet", "notpresent", 0, true, true, []),
+            new("Ethernet-QoS Packet Scheduler-0000", "ethernet", "up", 100, false, false, []),
+            new("Ethernet-WFP 802.3 MAC Layer LightWeight Filter-0000", "ethernet", "up", 100, false, false, []),
+            new("Local Area Connection 2", "other", "down", 1000, true, true, []),
+            new("Teredo Tunneling Pseudo-Interface", "tunnel", "up", 0, false, true, []),
+            new("VirtualBox Host-Only Ethernet Adapter", "ethernet", "up", 1000, true, true, []),
+            new("vEthernet (Default Switch)", "ethernet", "up", 10000, true, true, []),
+            new("Wi-Fi", "wifi", "up", 866, true, true, ["192.168.1.1"]),
+            new("Mystery", "fddi", "up", 100, true, false, []),
+        ]);
+        var data = Data(await Invoke(sources, "network-link"));
+        Assert.Equal(
+            ["Wi-Fi", "Ethernet", "VirtualBox Host-Only Ethernet Adapter", "vEthernet (Default Switch)", "Teredo Tunneling Pseudo-Interface", "Mystery",
+                "Bluetooth Network Connection", "Local Area Connection 2", "Ethernet 2"],
+            data["adapters"]!.AsArray().Select(adapter => (string?)adapter!["name"]));
+        Assert.Equal(4, (int)data["omitted"]!);
+
+        // The cap keeps the default-route link even when more virtual Ethernet switches are up.
+        sources.AdapterList.AddRange(Enumerable.Range(0, Registry.MaxAdapters).Select(index => new Adapter($"vEthernet {index:D2}", "ethernet", "up", 10000, true, true, [])));
+        var capped = await Invoke(sources, "network-link");
+        Assert.True(Truncated(capped));
+        Assert.Equal("Wi-Fi", (string?)Data(capped)["adapters"]![0]!["name"]);
+    }
+
+    [Fact]
+    public async Task ListsUnaddressedAdaptersOffWindows()
+    {
+        // Off Windows, Supports(IPv4/IPv6) means "has an address": an unplugged NIC has none and must still be listed.
+        var sources = Windows();
+        sources.IsWindows = false;
+        sources.AdapterList.Add(new Adapter("enp3s0", "ethernet", "down", 0, false, false, []));
+        sources.AdapterList.Add(new Adapter("lo", "loopback", "up", 0, true, true, []));
+        var data = Data(await Invoke(sources, "network-link"));
+        Assert.Equal("enp3s0", (string?)Assert.Single(data["adapters"]!.AsArray())!["name"]);
+        Assert.Equal(0, (int)data["omitted"]!);
     }
 
     [Fact]
