@@ -29,7 +29,7 @@ public sealed record Options(string Command, string Host, int Port, string User,
 public static partial class Program
 {
     public const string Usage =
-        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | report"
+        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | resolve [--gh <path>] [--glab <path>] | report"
         + " | mark --session <id> --item <ref> | gap --session <id> --item <ref> --kind <code-read|operator-question|failed-run> --fact <text> --belongs-in <document>"
         + " | review --session <id> --item <ref> --round <n> --findings <n> | requirements --item <ref> --count <n>"
         + " | operator --tier <T1-T9> --minutes <n> --activity <prompts|approvals|technician|review|watching|restarts> [--item <ref>] [--note <text>]"
@@ -39,6 +39,7 @@ public static partial class Program
     {
         ["migrate"] = ([], ["--create-database"]),
         ["ingest"] = ([], ["--sessions"]),
+        ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
         ["mark"] = (["--session", "--item"], []),
         ["gap"] = (["--session", "--item", "--kind", "--fact", "--belongs-in"], []),
@@ -67,6 +68,7 @@ public static partial class Program
             {
                 "migrate" => database.Migrate(options.Values.ContainsKey("--create-database")),
                 "ingest" => Ingest.Run(database, options.Get("--sessions")!),
+                "resolve" => Forge.Resolve(database, options.Get("--gh") ?? "gh", options.Get("--glab") ?? "glab"),
                 "report" => database.Report(),
                 _ => database.Record(options),
             };

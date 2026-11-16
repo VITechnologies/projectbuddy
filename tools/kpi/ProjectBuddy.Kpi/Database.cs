@@ -132,9 +132,10 @@ internal sealed class Database(Options options)
         }
 
         Run("""
-            INSERT INTO kpi_v1.sessions (session_id, first_at, last_at, events) VALUES ($1, $2, $3, $4)
-            ON CONFLICT (session_id) DO UPDATE SET first_at = EXCLUDED.first_at, last_at = EXCLUDED.last_at, events = EXCLUDED.events
-            """, session.Id, session.First, session.Last, session.Events);
+            INSERT INTO kpi_v1.sessions (session_id, first_at, last_at, events, unattributed_merges) VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (session_id) DO UPDATE SET first_at = EXCLUDED.first_at, last_at = EXCLUDED.last_at, events = EXCLUDED.events,
+                unattributed_merges = EXCLUDED.unattributed_merges
+            """, session.Id, session.First, session.Last, session.Events, session.UnattributedMerges);
         var calls = Run("""
             INSERT INTO kpi_v1.model_calls (event_id, session_id, at, initiator, model, cost, input_tokens, output_tokens, cache_read_tokens, category)
             SELECT c.id, $1, c.at, c.initiator, c.model, c.cost, c.input, c.output, c.cache_read, c.category
@@ -153,12 +154,13 @@ internal sealed class Database(Options options)
             WHERE kpi_v1.tool_calls.completed_at IS NULL
             """, session.Id, session.Tools.Select(t => t.Id).ToArray(), session.Tools.Select(t => t.Tool).ToArray(),
             session.Tools.Select(t => t.Started).ToArray(), session.Tools.Select(t => t.Completed).ToArray(), session.Tools.Select(t => t.Success).ToArray());
-        var acceptances = Run("""
-            INSERT INTO kpi_v1.acceptances (session_id, tool_call_id, change_ref, at)
-            SELECT $1, a.id, a.ref, a.at FROM unnest($2::text[], $3::text[], $4::timestamptz[]) AS a(id, ref, at)
+        var merges = Run("""
+            INSERT INTO kpi_v1.merge_attempts (session_id, tool_call_id, change_ref, started_at, completed_at)
+            SELECT $1, m.id, m.ref, m.started, m.completed
+            FROM unnest($2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[]) AS m(id, ref, started, completed)
             ON CONFLICT DO NOTHING
-            """, session.Id, session.Acceptances.Select(a => a.ToolCallId).ToArray(), session.Acceptances.Select(a => a.ChangeRef).ToArray(),
-            session.Acceptances.Select(a => a.At).ToArray());
+            """, session.Id, session.Merges.Select(m => m.ToolCallId).ToArray(), session.Merges.Select(m => m.ChangeRef).ToArray(),
+            session.Merges.Select(m => m.Started).ToArray(), session.Merges.Select(m => m.Completed).ToArray());
         Run("""
             INSERT INTO kpi_v1.operator_messages (event_id, session_id, at)
             SELECT m.id, $1, m.at FROM unnest($2::uuid[], $3::timestamptz[]) AS m(id, at) ON CONFLICT DO NOTHING
@@ -174,9 +176,41 @@ internal sealed class Database(Options options)
             ["session"] = session.Id,
             ["events"] = session.Events,
             ["newModelCalls"] = calls,
-            ["newAcceptances"] = acceptances,
+            ["newMergeAttempts"] = merges,
+            ["unattributedMerges"] = session.UnattributedMerges,
             ["activeSpans"] = session.Spans.Count,
         };
+    }
+
+    // The changes the sessions tried to merge that the forge has not reported merged.
+    public List<string> UnmergedChanges()
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("""
+            SELECT DISTINCT a.change_ref FROM kpi_v1.merge_attempts AS a LEFT JOIN kpi_v1.forge_changes AS f USING (change_ref)
+            WHERE f.merged_at IS NULL ORDER BY 1
+            """, connection);
+        using var reader = command.ExecuteReader();
+        var changes = new List<string>();
+        while (reader.Read())
+        {
+            changes.Add(reader.GetString(0));
+        }
+
+        return changes;
+    }
+
+    public void RecordForge(string change, DateTimeOffset? mergedAt)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("""
+            INSERT INTO kpi_v1.forge_changes (change_ref, merged_at) VALUES ($1, $2)
+            ON CONFLICT (change_ref) DO UPDATE SET merged_at = EXCLUDED.merged_at, checked_at = clock_timestamp()
+            """, connection)
+        {
+            Parameters = { new() { Value = change }, new() { Value = (object?)mergedAt ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.TimestampTz } },
+        };
+        command.ExecuteNonQuery();
     }
 
     public JsonObject Record(Options record)

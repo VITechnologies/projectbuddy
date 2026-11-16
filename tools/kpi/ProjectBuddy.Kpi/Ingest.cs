@@ -5,22 +5,27 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.Kpi;
 
-// Reads the agent's session event logs (<sessions>/<session id>/events.jsonl): billed model calls, tool calls, accepted
-// changes, operator messages, and the session's active spans.
+// Reads the agent's session event logs (<sessions>/<session id>/events.jsonl): billed model calls, tool calls, merge
+// attempts, operator messages, and the session's active spans. A forked session's log begins with its own session.start
+// and then repeats its parent's history; events dated before that start belong to the parent and are skipped.
 internal static partial class Ingest
 {
     public sealed record ModelCall(Guid EventId, DateTimeOffset At, string Initiator, string Model, decimal Cost, long InputTokens, long OutputTokens, long CacheReadTokens, string Category);
 
     public sealed record ToolCall(string Id, string Tool, DateTimeOffset Started, DateTimeOffset? Completed, bool? Success);
 
-    public sealed record Acceptance(string ToolCallId, string ChangeRef, DateTimeOffset At);
+    // A command that tried to merge a change. Whether, and when, the change merged is the forge's answer (see Forge).
+    public sealed record MergeAttempt(string ToolCallId, string ChangeRef, DateTimeOffset Started, DateTimeOffset Completed);
 
     public sealed record Session(
-        string Id, DateTimeOffset First, DateTimeOffset Last, long Events, List<ModelCall> Calls, List<ToolCall> Tools,
-        List<Acceptance> Acceptances, List<(Guid Id, DateTimeOffset At)> Messages, List<(DateTimeOffset Start, DateTimeOffset End)> Spans);
+        string Id, DateTimeOffset First, DateTimeOffset Last, long Events, List<ModelCall> Calls, List<ToolCall> Tools, List<MergeAttempt> Merges,
+        int UnattributedMerges, List<(Guid Id, DateTimeOffset At)> Messages, List<(DateTimeOffset Start, DateTimeOffset End)> Spans);
+
+    // A session's working directory and the repository checked out there, from its session.start.
+    public sealed record Context(string? Cwd, string? GitRoot, string? Repository);
 
     // Lines of these types are parsed in full; for all others only the event time is read.
-    private static readonly string[] Parsed = ["\"session.usage_record\"", "\"tool.execution_start\"", "\"tool.execution_complete\"", "\"user.message\""];
+    private static readonly string[] Parsed = ["\"session.start\"", "\"session.usage_record\"", "\"tool.execution_start\"", "\"tool.execution_complete\"", "\"user.message\""];
 
     public static JsonObject Run(Database database, string root)
     {
@@ -30,17 +35,16 @@ internal static partial class Ingest
         }
 
         var idle = TimeSpan.FromMinutes((double)database.Setting("idle_gap_minutes"));
+        var files = Directory.EnumerateDirectories(root).Order(StringComparer.Ordinal)
+            .Where(directory => SessionId().IsMatch(Path.GetFileName(directory)))
+            .Select(directory => Path.Combine(directory, "events.jsonl")).Where(File.Exists).ToList();
+        var workspaces = Workspaces.From(files.Select(file => StartContext(File.ReadLines(file).FirstOrDefault())),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         var sessions = new JsonArray();
-        foreach (var directory in Directory.EnumerateDirectories(root).Order(StringComparer.Ordinal))
+        foreach (var file in files)
         {
-            var file = Path.Combine(directory, "events.jsonl");
-            if (!SessionId().IsMatch(Path.GetFileName(directory)) || !File.Exists(file))
-            {
-                continue;
-            }
-
             using var reader = new StreamReader(file);
-            if (Read(Path.GetFileName(directory), reader, idle, file) is { } session)
+            if (Read(Path.GetFileName(Path.GetDirectoryName(file))!, reader, idle, file, workspaces) is { } session)
             {
                 sessions.Add(database.Store(session));
             }
@@ -49,14 +53,17 @@ internal static partial class Ingest
         return new JsonObject { ["sessions"] = sessions };
     }
 
-    public static Session? Read(string id, TextReader reader, TimeSpan idle, string source)
+    public static Session? Read(string id, TextReader reader, TimeSpan idle, string source, Workspaces workspaces)
     {
         var calls = new List<ModelCall>();
         var started = new Dictionary<string, (string Tool, DateTimeOffset At, string? Command)>(StringComparer.Ordinal);
         var tools = new List<ToolCall>();
-        var acceptances = new List<Acceptance>();
+        var merges = new List<MergeAttempt>();
+        var unattributed = 0;
         var messages = new List<(Guid, DateTimeOffset)>();
         var times = new List<DateTimeOffset>();
+        DateTimeOffset? floor = null;
+        Context? context = null;
         string? line;
         var number = 0;
         while ((line = reader.ReadLine()) is not null)
@@ -81,16 +88,31 @@ internal static partial class Ingest
         {
             if (!Parsed.Any(type => line.Contains(type, StringComparison.Ordinal)) && FastTime(line) is { } fast)
             {
-                times.Add(fast);
+                if (!(fast < floor))
+                {
+                    times.Add(fast);
+                }
+
                 return;
             }
 
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             var at = root.GetProperty("timestamp").GetDateTimeOffset();
-            times.Add(at);
+            var type = root.GetProperty("type").GetString();
             var data = root.GetProperty("data");
-            switch (root.GetProperty("type").GetString())
+            if (type == "session.start" && floor is null)
+            {
+                (floor, context) = (at, ContextOf(data));
+            }
+
+            if (at < floor)
+            {
+                return;
+            }
+
+            times.Add(at);
+            switch (type)
             {
                 case "session.usage_record":
                     calls.Add(Call(root.GetProperty("id").GetGuid(), at, data.GetProperty("usage")));
@@ -103,11 +125,12 @@ internal static partial class Ingest
                     var callId = data.GetProperty("toolCallId").GetString()!;
                     if (started.Remove(callId, out var start))
                     {
-                        var success = data.GetProperty("success").GetBoolean();
-                        tools.Add(new(callId, start.Tool, start.At, at, success));
-                        if (success && start.Command is { } command && Merged().IsMatch(Text(data, "result", "content") ?? ""))
+                        tools.Add(new(callId, start.Tool, start.At, at, data.GetProperty("success").GetBoolean()));
+                        if (start.Command is { } command)
                         {
-                            acceptances.AddRange(Changes(command).Select(change => new Acceptance(callId, change, at)));
+                            var (changes, unknown) = Changes(command, directory => workspaces.Repository(directory, context));
+                            merges.AddRange(changes.Select(change => new MergeAttempt(callId, change, start.At, at)));
+                            unattributed += unknown;
                         }
                     }
 
@@ -139,14 +162,64 @@ internal static partial class Ingest
         }
 
         spans.Add((first, last));
-        return new Session(id, times[0], times[^1], times.Count, calls, tools, acceptances, messages, spans);
+        return new Session(id, times[0], times[^1], times.Count, calls, tools, merges, unattributed, messages, spans);
     }
 
-    // The change references merged by a command: `gh pr merge <n> ... --repo <owner/repo>` and
-    // `glab mr merge <n> ... -R|--repo <owner/repo>`. A merge without its repository cannot be attributed and is skipped.
-    public static IEnumerable<string> Changes(string command) =>
-        GhMerge().Matches(command).Select(match => $"{match.Groups["repo"].Value}#{match.Groups["n"].Value}")
-            .Concat(GlabMerge().Matches(command).Select(match => $"{match.Groups["repo"].Value}!{match.Groups["n"].Value}"));
+    // The changes a command tried to merge: `gh pr merge <n>` and `glab mr merge <n>`, in the repository named by -R or
+    // --repo, else in the one checked out where the command ran (the last `cd` before it, or the session's own directory).
+    // A merge whose repository cannot be told is counted, not attributed; text without a number (prose) is not a merge.
+    public static (List<string> Changes, int Unattributed) Changes(string command, Func<string?, string?> repositoryIn)
+    {
+        var changes = new List<string>();
+        var unattributed = 0;
+        foreach (Match merge in Merge().Matches(command))
+        {
+            var arguments = merge.Groups["args"].Value;
+            var number = Number().Match(arguments);
+            if (!number.Success)
+            {
+                continue;
+            }
+
+            var github = merge.Groups["tool"].Value == "gh pr";
+            var option = RepositoryOption().Match(arguments);
+            var repository = option.Success
+                ? option.Groups["repo"].Value.Trim('"', '\'')
+                : repositoryIn(Cd().Matches(command[..merge.Index]).LastOrDefault()?.Groups["dir"].Value);
+            if (repository is not null && (github ? GitHubRepository() : GitLabRepository()).IsMatch(repository))
+            {
+                changes.Add($"{repository}{(github ? '#' : '!')}{number.Groups[1].Value}");
+            }
+            else
+            {
+                unattributed++;
+            }
+        }
+
+        return (changes, unattributed);
+    }
+
+    public static Context? StartContext(string? line)
+    {
+        if (line is null || !line.Contains("\"session.start\"", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            return Text(root, "type") == "session.start" && root.TryGetProperty("data", out var data) ? ContextOf(data) : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static Context ContextOf(JsonElement data) =>
+        new(Text(data, "context", "cwd"), Text(data, "context", "gitRoot"), Text(data, "context", "repository"));
 
     // What a model call asked for, by the tools it requested.
     public static string Category(JsonElement usage)
@@ -201,12 +274,21 @@ internal static partial class Ingest
     [GeneratedRegex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")]
     private static partial Regex SessionId();
 
-    [GeneratedRegex(@"(?i)\bmerged\b")]
-    private static partial Regex Merged();
+    [GeneratedRegex(@"\b(?<tool>gh pr|glab mr) merge\b(?<args>[^\n;&|]*)")]
+    private static partial Regex Merge();
 
-    [GeneratedRegex(@"\bgh pr merge (?<n>[0-9]+)\b[^\n;&|]*?--repo[ =](?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)")]
-    private static partial Regex GhMerge();
+    [GeneratedRegex(@"(?:^|\s)([0-9]+)(?=\s|$)")]
+    private static partial Regex Number();
 
-    [GeneratedRegex(@"\bglab mr merge (?<n>[0-9]+)\b[^\n;&|]*?(?:-R|--repo)[ =](?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)")]
-    private static partial Regex GlabMerge();
+    [GeneratedRegex(@"(?:^|\s)(?:-R|--repo)[ =](?<repo>\S+)")]
+    private static partial Regex RepositoryOption();
+
+    [GeneratedRegex(@"(?:^|[\s;&|(])cd\s+(?<dir>""[^""]*""|'[^']*'|[^\s;&|)]+)")]
+    private static partial Regex Cd();
+
+    [GeneratedRegex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")]
+    private static partial Regex GitHubRepository();
+
+    [GeneratedRegex("^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")]
+    private static partial Regex GitLabRepository();
 }

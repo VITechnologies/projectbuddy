@@ -4,11 +4,15 @@
 
 CREATE SCHEMA kpi_v1;
 
+-- A work item or change: owner/repo#n on GitHub, group[/subgroup...]/project!n on GitLab.
+CREATE DOMAIN kpi_v1.work_ref AS text CHECK (VALUE ~ '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+[#!][0-9]+$');
+CREATE DOMAIN kpi_v1.session_id AS text CHECK (VALUE ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 CREATE TABLE kpi_v1.settings (
-    key text PRIMARY KEY CHECK (key IN ('usd_per_unit', 'idle_gap_minutes', 'prompt_cap_minutes')),
+    key text PRIMARY KEY CHECK (key IN ('usd_per_unit', 'idle_gap_minutes', 'prompt_cap_minutes', 'merge_skew_minutes')),
     value numeric NOT NULL CHECK (value > 0)
 );
-INSERT INTO kpi_v1.settings VALUES ('usd_per_unit', 0.04), ('idle_gap_minutes', 30), ('prompt_cap_minutes', 10);
+INSERT INTO kpi_v1.settings VALUES ('usd_per_unit', 0.04), ('idle_gap_minutes', 30), ('prompt_cap_minutes', 10), ('merge_skew_minutes', 2);
 
 CREATE TABLE kpi_v1.tiers (
     tier text PRIMARY KEY CHECK (tier ~ '^T[1-9]$'),
@@ -20,10 +24,12 @@ INSERT INTO kpi_v1.tiers VALUES
     ('T3', 'engineer running runbooks', 75), ('T4', 'technician', 45);
 
 CREATE TABLE kpi_v1.sessions (
-    session_id text PRIMARY KEY CHECK (session_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    session_id kpi_v1.session_id PRIMARY KEY,
     first_at timestamptz NOT NULL,
     last_at timestamptz NOT NULL CHECK (last_at >= first_at),
-    events bigint NOT NULL CHECK (events > 0)
+    events bigint NOT NULL CHECK (events > 0),
+    -- Merge commands whose repository could not be told (a variable, or a directory that is not a known checkout).
+    unattributed_merges integer NOT NULL DEFAULT 0 CHECK (unattributed_merges >= 0)
 );
 
 -- One row per billed model call (session.usage_record). The category is what the call asked for, by the tools it
@@ -53,13 +59,21 @@ CREATE TABLE kpi_v1.tool_calls (
     PRIMARY KEY (session_id, tool_call_id)
 );
 
--- A change accepted (merged) by a successful command of the session.
-CREATE TABLE kpi_v1.acceptances (
+-- A command of the session that tried to merge a change, whatever it printed.
+CREATE TABLE kpi_v1.merge_attempts (
     session_id text NOT NULL REFERENCES kpi_v1.sessions,
     tool_call_id text NOT NULL,
-    change_ref text NOT NULL CHECK (change_ref ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$'),
-    at timestamptz NOT NULL,
+    change_ref kpi_v1.work_ref NOT NULL,
+    started_at timestamptz NOT NULL,
+    completed_at timestamptz NOT NULL CHECK (completed_at >= started_at),
     PRIMARY KEY (session_id, tool_call_id, change_ref)
+);
+
+-- The forge's answer for each attempted change (projectbuddy-kpi resolve): when it merged, or null if it had not.
+CREATE TABLE kpi_v1.forge_changes (
+    change_ref kpi_v1.work_ref PRIMARY KEY,
+    merged_at timestamptz,
+    checked_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
 CREATE TABLE kpi_v1.operator_messages (
@@ -78,17 +92,17 @@ CREATE TABLE kpi_v1.active_spans (
 -- Recorded by the agent. A marker attributes the session's calls from its time to the next marker to its work item.
 CREATE TABLE kpi_v1.work_markers (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    session_id text NOT NULL CHECK (session_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    session_id kpi_v1.session_id NOT NULL,
     at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    item text NOT NULL CHECK (item ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$')
+    item kpi_v1.work_ref NOT NULL
 );
 
 -- A fact the agent had to discover that the specification should have stated.
 CREATE TABLE kpi_v1.spec_gaps (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    session_id text NOT NULL CHECK (session_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    session_id kpi_v1.session_id NOT NULL,
     at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    item text NOT NULL CHECK (item ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$'),
+    item kpi_v1.work_ref NOT NULL,
     kind text NOT NULL CHECK (kind IN ('code-read', 'operator-question', 'failed-run')),
     fact text NOT NULL CHECK (btrim(fact) <> ''),
     belongs_in text NOT NULL CHECK (btrim(belongs_in) <> '')
@@ -96,16 +110,16 @@ CREATE TABLE kpi_v1.spec_gaps (
 
 CREATE TABLE kpi_v1.reviews (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    session_id text NOT NULL CHECK (session_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    session_id kpi_v1.session_id NOT NULL,
     at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    item text NOT NULL CHECK (item ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$'),
+    item kpi_v1.work_ref NOT NULL,
     round integer NOT NULL CHECK (round >= 1),
     findings integer NOT NULL CHECK (findings >= 0),
     UNIQUE (item, round)
 );
 
 CREATE TABLE kpi_v1.requirement_counts (
-    item text PRIMARY KEY CHECK (item ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$'),
+    item kpi_v1.work_ref PRIMARY KEY,
     requirements integer NOT NULL CHECK (requirements > 0)
 );
 
@@ -116,7 +130,7 @@ CREATE TABLE kpi_v1.operator_entries (
     tier text NOT NULL REFERENCES kpi_v1.tiers,
     minutes numeric NOT NULL CHECK (minutes > 0),
     activity text NOT NULL CHECK (activity IN ('prompts', 'approvals', 'technician', 'review', 'watching', 'restarts')),
-    item text CHECK (item ~ '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[#!][0-9]+$'),
+    item kpi_v1.work_ref,
     note text
 );
 
@@ -128,12 +142,15 @@ CREATE FUNCTION kpi_v1.tier_rate(p_tier text) RETURNS numeric LANGUAGE sql STABL
     SELECT t.usd_per_hour FROM kpi_v1.tiers AS t WHERE t.tier = p_tier;
 $$;
 
--- A change is accepted once, at its first acceptance: the same merge can appear in several sessions' logs, or be
--- printed again by a later command.
+-- A change is accepted by the merge attempt during which the forge merged it (within merge_skew_minutes of the
+-- command, for clock skew), at that command's completion. A change merged at no attempt (later by auto-merge, or by
+-- hand) is not a session's acceptance; one that two attempts bracket is accepted once, by the first.
 CREATE VIEW kpi_v1.accepted_changes AS
-    SELECT DISTINCT ON (a.change_ref) a.change_ref, a.session_id, a.at
-    FROM kpi_v1.acceptances AS a
-    ORDER BY a.change_ref, a.at, a.session_id;
+    SELECT DISTINCT ON (a.change_ref) a.change_ref, a.session_id, a.completed_at AS at, f.merged_at
+    FROM kpi_v1.merge_attempts AS a JOIN kpi_v1.forge_changes AS f USING (change_ref)
+    WHERE f.merged_at BETWEEN a.started_at - kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute'
+                          AND a.completed_at + kpi_v1.setting('merge_skew_minutes')::float8 * interval '1 minute'
+    ORDER BY a.change_ref, a.completed_at, a.session_id;
 
 -- Each accepted change costs what its session spent after the session's previous accepted change (or the session's
 -- start) up to and including its acceptance: model calls, and the session's active time at the T1 rate.
@@ -207,6 +224,11 @@ CREATE FUNCTION kpi_v1.report() RETURNS jsonb LANGUAGE sql STABLE AS $$
             (SELECT c.model, sum(c.cost) AS units FROM kpi_v1.model_calls AS c GROUP BY 1) AS x),
         'unitsByCategory', (SELECT coalesce(jsonb_object_agg(x.category, x.units), '{}') FROM
             (SELECT c.category, sum(c.cost) AS units FROM kpi_v1.model_calls AS c GROUP BY 1) AS x),
+        'merges', jsonb_build_object(
+            'attempted', (SELECT count(DISTINCT a.change_ref) FROM kpi_v1.merge_attempts AS a),
+            'unresolved', (SELECT count(DISTINCT a.change_ref) FROM kpi_v1.merge_attempts AS a
+                           WHERE NOT EXISTS (SELECT 1 FROM kpi_v1.forge_changes AS f WHERE f.change_ref = a.change_ref)),
+            'unattributed', (SELECT coalesce(sum(s.unattributed_merges), 0) FROM kpi_v1.sessions AS s)),
         'explorationShare', CASE WHEN totals.units > 0 THEN round(totals.explore_units / totals.units, 4) END,
         'acceptedChanges', (SELECT jsonb_build_object(
             'count', count(*),
