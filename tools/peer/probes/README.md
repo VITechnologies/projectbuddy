@@ -25,7 +25,7 @@ out/projectbuddy-probes.exe run-all --deny-list <private deny list>
 
 | Tool | Arguments | Reads | Reports |
 |---|---|---|---|
-| `network-link` | none | .NET `NetworkInterface` | Per adapter (loopback left out): name, kind (`ethernet`, `wifi`, `tunnel`, `other`), status, speed in Mbit/s, IPv4 and IPv6 binding, default gateways. No MAC addresses. |
+| `network-link` | none | .NET `NetworkInterface` | Per adapter: name, kind (`ethernet`, `wifi`, `tunnel`, `other`), status, speed in Mbit/s, IPv4 and IPv6 binding, default gateways. No MAC addresses. Some adapters are counted in `omitted` instead of listed: loopback, adapters with no hardware present, and NDIS filter pseudo-interfaces bound to neither IPv4 nor IPv6. Adapters that are up come first, physical kinds before virtual ones, so the cap never cuts a working link. |
 | `disk` | none | .NET `DriveInfo`, fixed and ready drives | Name, file system, total and free bytes. Read-only images (`squashfs` and similar) and kernel pseudo file systems are left out. |
 | `ollama` | none | Ollama on loopback: `/api/version`, `/api/tags`, `/api/ps` | Version; installed models by digest and name, with `identity: true` on the pinned `projectbuddy` model; loaded models with size, VRAM and context length. `{"reachable": false}` when Ollama does not answer. |
 | `vm-states` | none | `VBoxManage list vms`, `list runningvms`, `showvminfo --machinereadable` | Per VM: name, UUID, running (`null` when the running list failed), state and its change time, OS type, memory, CPUs, VRDE on or off, current snapshot name and UUID. |
@@ -134,15 +134,22 @@ projectbuddy-probes run-all [--hours <1-72>]
 | 2 | Usage error |
 | 3 | Refused: unknown tool, bad arguments, an unreadable or invalid deny list, or a non-loopback `--ollama` |
 
-## Assumptions to confirm on the peer
+## Verified on Windows
 
-The parsers are tested on synthetic samples. The first live run on the peer
-(gated by its own approval) confirms the following:
-- `sc.exe` and `schtasks.exe` print English field names. `schtasks` columns
-  are found by header name.
-- `wevtutil` output decodes as UTF-8.
-- `NetworkInterface.Supports(IPv6)` reflects IPv6 being unbound from an
-  adapter.
+A live run on a Windows 11 machine (#292) confirmed the following:
+- `sc.exe` and `schtasks.exe` field names parse.
+- `wevtutil` output parses completely.
+- `NetworkInterface.Supports(IPv6)` is false on an adapter whose IPv6 binding
+  is removed.
+
+It also showed two Windows behaviours that now shape the tools:
+- **.NET lists NDIS filter pseudo-interfaces and absent adapters** (QoS Packet
+  Scheduler, WFP filters, kernel debugger, old ports) beside the real ones.
+  They can fill the adapter cap and push out a real adapter. `network-link`
+  now leaves them out and counts them in `omitted`.
+- **`vm-states` sees only the VMs registered to the account that runs it.**
+  VirtualBox keeps a VM registry per user, so a tool run under a service
+  account does not see VMs registered by an interactive user.
 
 ## Tests
 

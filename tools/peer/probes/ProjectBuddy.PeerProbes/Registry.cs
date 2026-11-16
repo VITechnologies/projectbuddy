@@ -35,7 +35,7 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
 
     public static readonly IReadOnlyList<ToolSpec> Tools =
     [
-        new("network-link", "Network adapters: kind, state, speed, IPv4 and IPv6 binding, and default gateways.", []),
+        new("network-link", "Network adapters that are present and bound to IPv4 or IPv6, live ones first: kind, state, speed, IPv4 and IPv6 binding, and default gateways.", []),
         new("disk", "Fixed drives (no read-only images or pseudo file systems): file system, total and free bytes.", []),
         new("ollama", "Ollama on loopback: version, installed models with digests, and loaded models with memory and context size.", []),
         new("vm-states", "VirtualBox VMs: running or not, state, current snapshot, memory, CPUs and whether VRDE is on.", []),
@@ -132,9 +132,16 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
         return values;
     }
 
+    // Windows lists NDIS filter pseudo-interfaces (QoS Packet Scheduler, WFP filters) and absent adapters beside the
+    // real ones. An adapter with no hardware present, or bound to neither IPv4 nor IPv6, carries no traffic, so it is
+    // counted in "omitted" rather than listed. Adapters that are up come first, physical kinds before virtual ones, so
+    // the cap never cuts a working link.
     private (JsonObject, bool, string[]) NetworkLink()
     {
-        var adapters = sources.Adapters().Where(adapter => adapter.Kind != "loopback").OrderBy(adapter => adapter.Name, StringComparer.Ordinal).ToList();
+        var all = sources.Adapters().Where(adapter => adapter.Kind != "loopback").ToList();
+        var adapters = all.Where(adapter => adapter.Status != "notpresent" && (adapter.Ipv4 || adapter.Ipv6))
+            .OrderBy(adapter => adapter.Status == "up" ? 0 : 1).ThenBy(adapter => KindOrder(adapter.Kind))
+            .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).ToList();
         var data = new JsonObject
         {
             ["adapters"] = Array(adapters.Take(MaxAdapters), adapter => new JsonObject
@@ -147,6 +154,7 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
                 ["ipv6"] = adapter.Ipv6,
                 ["gateways"] = Array(adapter.Gateways.Order(StringComparer.Ordinal), gateway => JsonValue.Create(gateway)),
             }),
+            ["omitted"] = all.Count - adapters.Count,
         };
         return (data, adapters.Count > MaxAdapters, ["adapters"]);
     }
@@ -382,6 +390,15 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
 
     private static string Failure(string tool, string reason) =>
         new JsonObject { ["schema"] = Schema, ["tool"] = tool, ["truncated"] = true, ["error"] = reason }.ToJsonString(Output);
+
+    private static int KindOrder(string kind) => kind switch
+    {
+        "ethernet" => 0,
+        "wifi" => 1,
+        "other" => 2,
+        "tunnel" => 3,
+        _ => 4,
+    };
 
     private static JsonObject Unavailable() => new() { ["available"] = false, ["reason"] = "Windows only" };
 
