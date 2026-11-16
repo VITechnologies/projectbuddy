@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.PeerAsk;
 
-// The forced command on the peer: answers one allow-listed, read-only verb as bounded JSON.
+// The forced command on the peer: answers one allow-listed, read-only verb, or one diagnose question, as bounded JSON.
 public static partial class Serve
 {
     public const int MaxOutputBytes = 16 * 1024;
@@ -18,9 +18,17 @@ public static partial class Serve
     public static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(5);
     public static readonly IReadOnlyList<string> Verbs = ["identity", "vbox", "disk", "ollama", "lbabus"];
 
+    // "diagnose <question-id>" (#298): the peer's diagnostics agent answers one question from its pinned policy's closed
+    // list, which projectbuddy-diagnose itself checks. A model answer takes seconds, and its first load longer.
+    public const string DiagnoseVerb = "diagnose";
+    public const string DiagnosisSchema = "projectbuddy/peer-diagnosis@1";
+    public const int MaxReasonChars = 400;
+    public static readonly TimeSpan DiagnoseTimeout = TimeSpan.FromSeconds(180);
+
     public static int Execute(string? command, IProcessRunner runner, IHostFacts facts, TextWriter stdout, TextWriter stderr)
     {
-        if (command is null || !Verbs.Contains(command))
+        var question = Question(command);
+        if (command is null || (question is null && !Verbs.Contains(command)))
         {
             stderr.WriteLine(RefusedMessage);
             return ExitCodes.Refused;
@@ -29,7 +37,12 @@ public static partial class Serve
         byte[] json;
         try
         {
-            json = Render(command, runner, facts);
+            json = question is null ? Render(command, runner, facts) : RenderDiagnosis(question, runner, facts);
+        }
+        catch (DiagnosisRefusedException)
+        {
+            stderr.WriteLine(RefusedMessage);
+            return ExitCodes.Refused;
         }
         catch (Exception)
         {
@@ -48,7 +61,76 @@ public static partial class Serve
         return 0;
     }
 
-    public static byte[] Render(string verb, IProcessRunner runner, IHostFacts facts)
+    public static byte[] Render(string verb, IProcessRunner runner, IHostFacts facts) => Envelope(verb, writer =>
+    {
+        switch (verb)
+        {
+            case "identity":
+                writer.WriteString("platform", facts.Platform);
+                writer.WriteNumber("osBuild", facts.OsBuild);
+                writer.WriteNumber("uptimeSeconds", facts.UptimeSeconds);
+                break;
+            case "vbox":
+                WriteVbox(writer, runner, facts.VBoxManagePath);
+                break;
+            case "disk":
+                WriteDisk(writer, facts);
+                break;
+            case "ollama":
+                WriteOllama(writer, runner, facts.OllamaPath);
+                break;
+            default:
+                WriteTool(writer, runner, facts.LbabusPath);
+                break;
+        }
+    });
+
+    // The question named by "diagnose <question-id>", or null for any other command.
+    public static string? Question(string? command) =>
+        command is not null && DiagnoseCommand().Match(command) is { Success: true } match ? match.Groups[1].Value : null;
+
+    // Runs the deployed projectbuddy-diagnose with its pinned policy and the deny list: no shell, fixed paths. Its report
+    // is already redacted and grounded; "no advice" (exit 6) is a normal answer with its reason, and an unknown question
+    // or an unusable deny list (exit 3) is refused.
+    public static byte[] RenderDiagnosis(string question, IProcessRunner runner, IHostFacts facts)
+    {
+        var result = runner.Run(facts.DiagnosePath, ["--policy", facts.DiagnosePolicyPath, "--question", question, "--deny-list", facts.DenyListPath], DiagnoseTimeout);
+        if (result is { Started: true, TimedOut: false, ExitCode: 3 })
+        {
+            throw new DiagnosisRefusedException();
+        }
+
+        if (result is not { Started: true, TimedOut: false, ExitCode: 0 or 6 })
+        {
+            throw new InvalidOperationException("projectbuddy-diagnose did not answer");
+        }
+
+        using var report = result.ExitCode == 0 ? JsonDocument.Parse(result.Stdout) : null;
+        return Envelope(DiagnoseVerb, writer =>
+        {
+            writer.WriteString("question", question);
+            writer.WriteBoolean("advice", report is not null);
+            if (report is not null)
+            {
+                writer.WritePropertyName("report");
+                report.RootElement.WriteTo(writer);
+            }
+            else
+            {
+                writer.WriteString("reason", Reason(result.Stderr));
+            }
+        });
+    }
+
+    internal static string Reason(string stderr)
+    {
+        const string prefix = "projectbuddy-diagnose: ";
+        var line = stderr.Split('\n', 2)[0].Trim();
+        line = line.StartsWith(prefix, StringComparison.Ordinal) ? line[prefix.Length..] : line;
+        return line.Length <= MaxReasonChars ? line : line[..MaxReasonChars];
+    }
+
+    private static byte[] Envelope(string verb, Action<Utf8JsonWriter> data)
     {
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
@@ -58,27 +140,7 @@ public static partial class Serve
             writer.WriteString("tool", Versions.Tool);
             writer.WriteString("verb", verb);
             writer.WriteStartObject("data");
-            switch (verb)
-            {
-                case "identity":
-                    writer.WriteString("platform", facts.Platform);
-                    writer.WriteNumber("osBuild", facts.OsBuild);
-                    writer.WriteNumber("uptimeSeconds", facts.UptimeSeconds);
-                    break;
-                case "vbox":
-                    WriteVbox(writer, runner, facts.VBoxManagePath);
-                    break;
-                case "disk":
-                    WriteDisk(writer, facts);
-                    break;
-                case "ollama":
-                    WriteOllama(writer, runner, facts.OllamaPath);
-                    break;
-                default:
-                    WriteTool(writer, runner, facts.LbabusPath);
-                    break;
-            }
-
+            data(writer);
             writer.WriteEndObject();
             writer.WriteEndObject();
         }
@@ -199,4 +261,10 @@ public static partial class Serve
 
     [GeneratedRegex("^\"(.*)\" \\{([0-9a-fA-F-]+)\\}$")]
     private static partial Regex VmLine();
+
+    // The id starts with a letter or digit, so it can never read as an option; \z, unlike $, admits no trailing newline.
+    [GeneratedRegex("^diagnose ([a-z0-9][a-z0-9-]{0,63})\\z")]
+    private static partial Regex DiagnoseCommand();
+
+    private sealed class DiagnosisRefusedException : Exception;
 }

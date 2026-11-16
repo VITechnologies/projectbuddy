@@ -3,7 +3,7 @@ namespace ProjectBuddy.PeerAsk;
 public static class Program
 {
     public const string Usage =
-        "usage: projectbuddy-ask serve | ask <verb> --host <address> --user <name> --identity <file> --known-hosts <file> [--connect-timeout <seconds>] [--ssh <path>] | --version";
+        "usage: projectbuddy-ask serve | ask <verb> | ask diagnose <question-id> --host <address> --user <name> --identity <file> --known-hosts <file> [--connect-timeout <seconds>] [--ssh <path>] | --version";
 
     public static int Main(string[] args) =>
         Run(args, Environment.GetEnvironmentVariable, new SystemProcessRunner(), new SystemFacts(), File.Exists, Console.Out, Console.Error);
@@ -40,7 +40,7 @@ public static class Program
 
 public static class Versions
 {
-    public const string Tool = "0.2.0";
+    public const string Tool = "0.3.0";
     public const string Schema = "projectbuddy/peer-ask@1";
 }
 

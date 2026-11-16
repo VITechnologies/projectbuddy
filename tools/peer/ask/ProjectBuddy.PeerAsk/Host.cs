@@ -23,6 +23,12 @@ public interface IHostFacts
     string OllamaPath { get; }
     string LbabusPath { get; }
     string SshPath { get; }
+
+    // projectbuddy-diagnose, its pinned policy, and the operator's deny list: fixed paths, deployed by the operator.
+    string DiagnosePath { get; }
+    string DiagnosePolicyPath { get; }
+    string DenyListPath { get; }
+
     IReadOnlyList<Volume> FixedVolumes();
 }
 
@@ -135,6 +141,18 @@ public sealed class SystemFacts : IHostFacts
     public string SshPath => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", "ssh.exe")
         : "/usr/bin/ssh";
+
+    public string DiagnosePath => Path.Combine(DiagnoseDirectory, OperatingSystem.IsWindows() ? "projectbuddy-diagnose.exe" : "projectbuddy-diagnose");
+
+    public string DiagnosePolicyPath => Path.Combine(DiagnoseDirectory, "policy.json");
+
+    public string DenyListPath => OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-link", "redaction-denylist.json")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-link", "redaction-denylist.json");
+
+    private static string DiagnoseDirectory => OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "diagnose")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-ask", "diagnose");
 
     public IReadOnlyList<Volume> FixedVolumes() =>
         DriveInfo.GetDrives()

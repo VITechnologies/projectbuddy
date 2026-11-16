@@ -11,7 +11,10 @@ public static partial class Ask
     public const int DefaultConnectTimeout = 5;
     public static readonly TimeSpan CommandAllowance = TimeSpan.FromSeconds(30);
 
-    public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh);
+    // The peer allows diagnose its own timeout; the client waits a little longer, so the peer's answer arrives first.
+    public static readonly TimeSpan DiagnoseAllowance = Serve.DiagnoseTimeout + TimeSpan.FromSeconds(20);
+
+    public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh, string? Question = null);
 
     public static int Execute(string[] args, IProcessRunner runner, string defaultSsh, Func<string, bool> fileExists, TextWriter stdout, TextWriter stderr)
     {
@@ -23,9 +26,9 @@ public static partial class Ask
             return ExitCodes.Usage;
         }
 
-        var timeout = TimeSpan.FromSeconds(options.ConnectTimeout) + CommandAllowance;
+        var timeout = TimeSpan.FromSeconds(options.ConnectTimeout) + (options.Question is null ? CommandAllowance : DiagnoseAllowance);
         var result = runner.Run(options.Ssh, SshArguments(options), timeout);
-        var (code, message) = Classify(result, options.Verb);
+        var (code, message) = Classify(result, options.Verb, options.Question);
         if (code == 0)
         {
             stdout.WriteLine(result.Stdout.Trim());
@@ -46,7 +49,17 @@ public static partial class Ask
         }
 
         var verb = args[0];
-        if (!Serve.Verbs.Contains(verb))
+        string? question = null;
+        if (verb == Serve.DiagnoseVerb)
+        {
+            question = args.Length > 1 ? Serve.Question($"{verb} {args[1]}") : null;
+            if (question is null)
+            {
+                problem = "diagnose needs a question id: a letter or digit, then [a-z0-9-], at most 64 characters";
+                return null;
+            }
+        }
+        else if (!Serve.Verbs.Contains(verb))
         {
             problem = $"unknown verb '{verb}'";
             return null;
@@ -54,7 +67,7 @@ public static partial class Ask
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         string[] known = ["--host", "--user", "--identity", "--known-hosts", "--connect-timeout", "--ssh"];
-        for (var i = 1; i < args.Length; i += 2)
+        for (var i = question is null ? 1 : 2; i < args.Length; i += 2)
         {
             if (!known.Contains(args[i]) || i + 1 >= args.Length || values.ContainsKey(args[i]))
             {
@@ -111,7 +124,7 @@ public static partial class Ask
             return null;
         }
 
-        return new Options(verb, host, values["--user"], values["--identity"], values["--known-hosts"], connectTimeout, ssh);
+        return new Options(verb, host, values["--user"], values["--identity"], values["--known-hosts"], connectTimeout, ssh, question);
     }
 
     public static IReadOnlyList<string> SshArguments(Options options) =>
@@ -140,6 +153,7 @@ public static partial class Ask
         "-o", "LogLevel=ERROR",
         "-l", options.User,
         "--", options.Host, options.Verb,
+        .. options.Question is null ? Array.Empty<string>() : [options.Question],
     ];
 
     public static readonly IReadOnlyList<string> HostKeyPhrases =
@@ -153,7 +167,7 @@ public static partial class Ask
         "Connection reset", "Could not resolve hostname",
     ];
 
-    public static (int Code, string Message) Classify(ProcessResult result, string verb)
+    public static (int Code, string Message) Classify(ProcessResult result, string verb, string? question = null)
     {
         if (!result.Started)
         {
@@ -168,7 +182,7 @@ public static partial class Ask
         switch (result.ExitCode)
         {
             case 0:
-                return Validate(result.Stdout, verb);
+                return Validate(result.Stdout, verb, question);
             case ExitCodes.Refused:
                 return (ExitCodes.PeerRefused, "refused: the peer refused the request");
             case ExitCodes.OutputLimit:
@@ -202,7 +216,7 @@ public static partial class Ask
         return (ExitCodes.SshError, $"ssh-error: {detail}");
     }
 
-    private static (int Code, string Message) Validate(string stdout, string verb)
+    private static (int Code, string Message) Validate(string stdout, string verb, string? question)
     {
         if (Encoding.UTF8.GetByteCount(stdout) > Serve.MaxOutputBytes + 2)
         {
@@ -216,7 +230,8 @@ public static partial class Ask
             if (root.ValueKind == JsonValueKind.Object
                 && root.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.String && schema.GetString() == Versions.Schema
                 && root.TryGetProperty("verb", out var answered) && answered.ValueKind == JsonValueKind.String && answered.GetString() == verb
-                && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+                && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+                && (question is null || IsDiagnosis(data, question)))
             {
                 return (0, "");
             }
@@ -227,6 +242,17 @@ public static partial class Ask
 
         return (ExitCodes.Protocol, "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb");
     }
+
+    // A diagnose answer names its question and either carries a grounded report or says why there is no advice.
+    private static bool IsDiagnosis(JsonElement data, string question) =>
+        data.TryGetProperty("question", out var answered) && answered.ValueKind == JsonValueKind.String && answered.GetString() == question
+        && data.TryGetProperty("advice", out var advice) && advice.ValueKind is JsonValueKind.True or JsonValueKind.False
+        && (advice.ValueKind == JsonValueKind.True
+            ? data.TryGetProperty("report", out var report) && report.ValueKind == JsonValueKind.Object
+                && report.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.String && schema.GetString() == Serve.DiagnosisSchema
+                && report.TryGetProperty("verified", out var verified) && verified.ValueKind == JsonValueKind.Array
+                && verified.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "citations")
+            : data.TryGetProperty("reason", out var reason) && reason.ValueKind == JsonValueKind.String);
 
     [GeneratedRegex("^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")]
     private static partial Regex HostName();
