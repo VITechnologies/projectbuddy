@@ -1,10 +1,14 @@
 # `tools/wiki/`: `projectbuddy-wiki`
 
 `projectbuddy-wiki` keeps a local working copy of the projectbuddy GitHub wiki
-in PostgreSQL. It is slice 1
-([#308](https://github.com/VITechnologies/projectbuddy/issues/308)) of
+in PostgreSQL. It also projects the requirement and test pages into the RSR
+requirement registry. It serves
 [#307](https://github.com/VITechnologies/projectbuddy/issues/307), local
-AI-assisted generation and regeneration of the wiki.
+AI-assisted generation and regeneration of the wiki:
+- slice 1, [#308](https://github.com/VITechnologies/projectbuddy/issues/308):
+  the working copy;
+- slice 2, [#309](https://github.com/VITechnologies/projectbuddy/issues/309):
+  the governed projection and its registry envelopes.
 
 The published wiki is canonical. The database is a rebuildable copy that seeds
 itself from the wiki's committed bytes. It renders the wiki back byte for
@@ -13,8 +17,15 @@ re-reading the wiki. Rebuilding the copy loses nothing: the wiki still holds
 every byte.
 
 It is a .NET 10 command-line tool. The logic lives in PL/pgSQL procedures in
-the schema `wiki_v1` ([`Sql/0001_wiki_v1.sql`](ProjectBuddy.Wiki/Sql/0001_wiki_v1.sql)),
-and the CLI only reads git and moves bytes.
+the schema `wiki_v1`:
+- [`Sql/0001_wiki_v1.sql`](ProjectBuddy.Wiki/Sql/0001_wiki_v1.sql): the
+  working copy;
+- [`Sql/0002_ingest_parent_check.sql`](ProjectBuddy.Wiki/Sql/0002_ingest_parent_check.sql):
+  a faster file-and-directory check for `ingest_snapshot`;
+- [`Sql/0003_wiki_projection.sql`](ProjectBuddy.Wiki/Sql/0003_wiki_projection.sql):
+  the projection.
+
+The CLI only reads git and moves bytes.
 
 ```bash
 dotnet build ProjectBuddy.Wiki -c Release -o out
@@ -22,6 +33,7 @@ out/projectbuddy-wiki migrate --create-database --port 55432 --password-file "$H
 out/projectbuddy-wiki seed --wiki "$HOME/repos/projectbuddy.wiki" --port 55432 --password-file ...
 out/projectbuddy-wiki check --wiki "$HOME/repos/projectbuddy.wiki" --port 55432 --password-file ...
 out/projectbuddy-wiki render --out /tmp/wiki-render --port 55432 --password-file ...
+out/projectbuddy-wiki project --port 55432 --password-file ...
 ```
 
 ## Commands
@@ -34,6 +46,7 @@ Every command prints one JSON object on standard output.
 | `seed --wiki <clone>` | Records the clone's `HEAD` commit. A recorded commit changes nothing (`up-to-date`). Otherwise only bytes the database does not hold yet are stored. The result counts what was added, modified and deleted since the previous state. |
 | `check --wiki <clone>` | Compares the clone's `HEAD` tree with the latest recorded state, byte for byte. It lists at most 100 differences plus their total. Drift exits 1. |
 | `render --out <dir> [--commit <sha>]` | Writes the latest recorded state, or the state of a recorded commit, as files. |
+| `project [--commit <sha>]` | Reports the [governed projection](#governed-projection) of the latest recorded state, or of a recorded commit: pages per scope and kind, trace edges per type, and at most 100 pages or links that cannot be exported, plus their total. Any such page or link exits 1. |
 
 `seed` and `check` read the **committed** tree (`git ls-tree` and
 `git cat-file`), not the working tree. Uncommitted edits in the clone are
@@ -87,7 +100,7 @@ paths must be fully qualified.
 | Code | Meaning |
 | --- | --- |
 | 0 | done; `check` found no drift |
-| 1 | `check` found drift |
+| 1 | a finding: `check` found drift, or `project` found pages or links that cannot be exported |
 | 2 | usage error |
 | 3 | refused (git, the clone, the render target, an unrecorded commit, or a file-system error) |
 | 5 | database error |
@@ -125,6 +138,113 @@ can never silently differ from the source. Advisory locks serialize
 concurrent `migrate` runs, including the first one, which creates the
 database.
 
+## Governed projection
+
+The files under three directories are governed. Each directory holds one
+registry scope:
+
+| Directory | Scope | IDs | Sections, in order | Marker kind |
+| --- | --- | --- | --- | --- |
+| `system-requirements/` | system | `SYS-REQ-NNN` | Requirement, Rationale, Fit Criterion, Verification, Source, Priority, TestID, TestArtifact, CodeRef, Status | `retired` |
+| `software-requirements/` | software | `REQ-NNN` | the same | `retired` |
+| `tests/` | test | `TEST-NNN` | Stimulus, Required observation | `stub` |
+
+`wiki_v1.parse_page` accepts exactly one layout, and `wiki_v1.render_page`
+writes it. Rendering a parsed page therefore always gives its bytes back, and
+#310's drafts can edit fields and render them deterministically. A page with
+sections is:
+
+```text
+# <id>[: <title>]
+
+## <heading>
+
+<body>
+
+## <heading>
+
+<body>
+```
+
+It ends with one newline. A body may be empty or hold any text that is not
+another `\n\n## ` heading. A marker page is
+`# <id>[: <title>]\n\n<!-- page-kind: <kind> -->\n<body>\n`. `sections` is
+never a marker kind, because it names the layout with sections.
+
+The projection is computed from the stored bytes by immutable functions and
+is never stored beside them, so it cannot disagree with them. The governed
+functions are:
+- `governed_pages(snapshot)`: each page's kind, sections and registry text, or
+  its problem;
+- `governed_edges(snapshot)`: each trace edge, or its problem;
+- `projection_report(snapshot)`: the summary that `project` prints.
+
+A page that cannot be governed is listed with one of these problems, never
+dropped:
+
+| Problem | Meaning |
+| --- | --- |
+| `unexpected-file` | not `<directory>/<name>.md` |
+| `not-utf8` | the bytes are not UTF-8 |
+| `no-id-heading` | no `# <ID>` first line |
+| `not-canonical` | not the canonical layout |
+| `id-does-not-match-path` | the heading's ID is not the file name |
+| `id-outside-scope` | the ID's prefix belongs to another directory |
+| `id-too-long` | the ID exceeds the registry's 128 characters |
+| `unexpected-sections` | the headings differ from the directory's |
+| `unexpected-page-kind` | a marker kind other than the directory's |
+| `text-too-long` | the registry text exceeds the registry's 16,384 characters |
+
+### Trace edges
+
+Edges come from wiki links: `[[ID]]`, `[[ID|label]]` or `[[ID#section]]`.
+
+| Edge | From the field | Held by the scope |
+| --- | --- | --- |
+| `TEST verifies SYS-REQ` or `REQ` | the requirement's `TestID` | test |
+| `SYS-REQ allocates REQ` | the system requirement's `CodeRef` | system |
+| `REQ supersedes` a retired `REQ`; `SYS-REQ supersedes` a retired `SYS-REQ` | the retired page's links | the page's own |
+
+An edge is a problem when:
+- its link has the wrong kind for its field (`link-outside-field`);
+- a retired page links another scope, or links itself (`link-outside-scope`);
+- either end is not a governed page (`dangling-link`).
+
+### Registry envelopes
+
+`wiki_v1.registry_envelope(commit, scope, identity, targets)` builds the
+`rsr/registry-snapshot@1` envelope that RSR's
+`registry_v1.ingest_snapshot(jsonb)` accepts:
+- **Nodes:** one per page. A retired page's `status` is `superseded`; every
+  other page is `active`. Its `text` follows RSR's convention: the page's
+  fields (`ID`, `Title`, its sections, or `Page kind` and `Body`) as compact
+  JSON with keys in code-point order, byte-identical to Python
+  `json.dumps(..., sort_keys=True, separators=(",", ":"), ensure_ascii=False)`.
+  Its `content_digest` is that text's SHA-256, and its `location` is the page's
+  path.
+- **Ingest order:** an edge's two ends must already be registry nodes, so the
+  scopes are ingested in the order software, then system, then test. `targets`
+  names the registry snapshots that a scope's edges point into: software needs
+  none, system needs `software`, and test needs `software` and `system`.
+- **Identity:** `identity` names the registered source: `source_uuid`,
+  `constellation_uuid`, `manifest_digest` and `source_ref`. The wiki
+  publishes on `master`.
+- **Idempotency:** the registry's idempotency key includes the
+  `tree_digest`. That is the SHA-256 of
+  `projectbuddy/wiki-scope-tree@1\n<scope>\n<parser version>\n`, followed by
+  `<path>\t<sha256>\n` for each of the scope's files and
+  `target\t<scope>\t<uuid>\n` for each target. A changed page or target
+  therefore gives a new key. The commit is not part of the key.
+- **Reuse before ingesting:** a later commit with the same governed content
+  has the same key but a different `source_revision`, and the registry
+  refuses a changed payload under an existing key. The exporter therefore
+  looks the key up first and reuses the existing snapshot, as RSR's
+  `registry_local_bootstrap.py` does. That snapshot keeps the revision that
+  first introduced its content.
+- **Fail closed:** any page or edge problem refuses every scope. The registry
+  never holds part of a wiki. An envelope over the registry's limits (10,000
+  nodes, 50,000 edges or 16 MiB) is refused too.
+
 ## Round-trip proof
 
 On the workstation, against the projectbuddy wiki (352 files, 593,340 bytes):
@@ -136,6 +256,22 @@ On the workstation, against the projectbuddy wiki (352 files, 593,340 bytes):
 5. `render` into the recorded clone left every file unchanged;
 6. `render` into the clone's `.git`, and into the projectbuddy repository, was
    refused (exit 3), and `git fsck` of the clone stayed clean.
+
+At wiki commit `d21fe10`, `project` reported in 0.28 s:
+- **Pages:** 35 system pages; 132 software pages plus 1 retired; 95 test
+  pages plus 38 stubs.
+- **Edges:** 243 `verifies`, 127 `allocates` and 1 `supersedes`, with no
+  problems.
+- **Round trip:** all 301 pages re-rendered byte for byte, and every registry
+  text matched Python's `json.dumps`.
+
+RSR's migrations at `1ac2f2a`, applied to a scratch database with a
+synthetic source (`allowed_refs: ["master"]`), gave this:
+- **Ingest:** `ingest_snapshot` accepted all three envelopes (software 301 KB).
+  A second run reused all three.
+- **Queries:** `find_requirements` found the items by ID and by text, and
+  `dependency_lineage` from `SYS-REQ-001` followed `allocates` and `verifies`
+  edges.
 
 ## Tests
 
@@ -156,7 +292,10 @@ timeouts. They cover:
 - every render target and pruning, including a clone's `.git`, its
   subdirectories, and a file replacing a directory and the reverse;
 - an inherited `GIT_DIR`, and paths that are not valid UTF-8;
-- concurrent first migrations.
+- concurrent first migrations;
+- every page kind and edge type;
+- every projection problem, the envelopes of each scope with their exact node
+  texts, and every envelope refusal.
 
 CI runs them as `Wiki Tool Tests` against the same pinned
 `postgres:16-alpine` image, at 100% line and branch coverage.

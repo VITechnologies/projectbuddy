@@ -38,9 +38,7 @@ internal static class Commands
     // so a file can replace a directory and a directory a file.
     public static JsonObject Render(Database database, Git git, string target, string? commit)
     {
-        var snapshot = commit is null
-            ? database.Latest()?.Id ?? throw new WikiException(ExitCodes.Refused, "nothing is recorded yet; run seed first")
-            : database.CommitSnapshot(commit) ?? throw new WikiException(ExitCodes.Refused, $"commit {commit} is not recorded");
+        var (snapshot, _) = Recorded(database, commit);
         var mode = Target(database, git, target);
         var files = database.Export(snapshot).Select(file => (Path: Path.GetFullPath(Path.Combine(target, file.Path.Replace('/', Path.DirectorySeparatorChar))), file.Content)).ToList();
         var expected = files.Select(file => file.Path).ToHashSet(StringComparer.Ordinal);
@@ -79,13 +77,13 @@ internal static class Commands
     }
 
     // Compares the wiki clone's HEAD with the latest recorded state, byte for byte: no drift means the database renders
-    // exactly the published wiki.
-    public static JsonObject Check(Database database, Git git, string wiki)
+    // exactly the published wiki. Drift is a finding.
+    public static (JsonObject Result, bool Drift) Check(Database database, Git git, string wiki)
     {
         var commit = git.Head(wiki) ?? throw new WikiException(ExitCodes.Refused, $"{wiki} is not a git work tree with a commit");
         if (database.Latest() is not { } latest)
         {
-            return new JsonObject { ["commit"] = commit, ["drift"] = true, ["reason"] = "nothing is recorded yet; run seed first" };
+            return (new JsonObject { ["commit"] = commit, ["drift"] = true, ["reason"] = "nothing is recorded yet; run seed first" }, true);
         }
 
         var published = git.Tree(wiki, commit).ToDictionary(file => file.Path, file => file.Content, StringComparer.Ordinal);
@@ -95,7 +93,7 @@ internal static class Commands
                 : published[path].AsSpan().SequenceEqual(recorded[path]) ? null : "different"))
             .Where(item => item.Change is not null)
             .ToList();
-        return new JsonObject
+        return (new JsonObject
         {
             ["commit"] = commit,
             ["snapshot"] = latest.Id.ToString(),
@@ -103,7 +101,35 @@ internal static class Commands
             ["drift"] = differences.Count > 0,
             ["differenceCount"] = differences.Count,
             ["differences"] = new JsonArray([.. differences.Take(MaxListed).Select(item => (JsonNode)new JsonObject { ["path"] = item.Path, ["change"] = item.Change })]),
-        };
+        }, differences.Count > 0);
+    }
+
+    // Reports the governed projection of a recorded state (wiki_v1.projection_report): its pages per scope and kind, its
+    // trace edges per type, and every page or link that keeps it out of the registry, which is a finding.
+    public static (JsonObject Result, bool NotExportable) Project(Database database, string? commit)
+    {
+        var (snapshot, recorded) = Recorded(database, commit);
+        var result = new JsonObject { ["commit"] = recorded, ["snapshot"] = snapshot.ToString() };
+        foreach (var (name, value) in database.ProjectionReport(snapshot))
+        {
+            result[name] = value!.DeepClone();
+        }
+
+        var exportable = (int)result["problemCount"]! == 0;
+        result["exportable"] = exportable;
+        return (result, !exportable);
+    }
+
+    // The latest recorded state, or the state of a named recorded commit.
+    private static (Guid Snapshot, string Commit) Recorded(Database database, string? commit)
+    {
+        if (commit is null)
+        {
+            var latest = database.Latest() ?? throw new WikiException(ExitCodes.Refused, "nothing is recorded yet; run seed first");
+            return (latest.Id, latest.Commit);
+        }
+
+        return (database.CommitSnapshot(commit) ?? throw new WikiException(ExitCodes.Refused, $"commit {commit} is not recorded"), commit);
     }
 
     private static string Target(Database database, Git git, string target)

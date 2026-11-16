@@ -141,6 +141,13 @@ internal sealed class Database(Options options)
         return command.ExecuteScalar() as Guid?;
     }
 
+    public JsonObject ProjectionReport(Guid snapshot)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("SELECT wiki_v1.projection_report($1)::text", connection) { Parameters = { new() { Value = snapshot } } };
+        return JsonNode.Parse((string)command.ExecuteScalar()!)!.AsObject();
+    }
+
     public IReadOnlyList<WikiFile> Export(Guid snapshot)
     {
         using var connection = Open(options.Database);
