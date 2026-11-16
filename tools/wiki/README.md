@@ -23,7 +23,10 @@ the schema `wiki_v1`:
 - [`Sql/0002_ingest_parent_check.sql`](ProjectBuddy.Wiki/Sql/0002_ingest_parent_check.sql):
   a faster file-and-directory check for `ingest_snapshot`;
 - [`Sql/0003_wiki_projection.sql`](ProjectBuddy.Wiki/Sql/0003_wiki_projection.sql):
-  the projection.
+  the projection;
+- [`Sql/0004_architecture_projection.sql`](ProjectBuddy.Wiki/Sql/0004_architecture_projection.sql):
+  the Architecture Packet projection
+  ([#315](https://github.com/VITechnologies/projectbuddy/issues/315)).
 
 The CLI only reads git and moves bytes.
 
@@ -39,7 +42,9 @@ out/projectbuddy-wiki export-registry --approval <approval record> --importer-pa
 
 ## Commands
 
-Every command prints one JSON object on standard output.
+Every command prints one JSON object on standard output. Every command but
+`migrate` first checks that the database has all the migrations this tool
+embeds, and otherwise refuses with "run migrate" (exit 3).
 
 | Command | What it does |
 | --- | --- |
@@ -197,6 +202,34 @@ dropped:
 | `unexpected-page-kind` | a marker kind other than the directory's |
 | `text-too-long` | the registry text exceeds the registry's 16,384 characters |
 
+### Architecture Packet
+
+`Architecture-Packet.md` and the `architecture/*.md` pages have one canonical
+layout of their own. `wiki_v1.parse_architecture_page` and
+`wiki_v1.render_architecture_page` give the bytes back, so #310's drafts can
+edit a page's title, body or children and render it deterministically.
+
+A page is `# <title>\n\n<body>\n`. A **hub** ends instead with the index
+block that `scripts/Assemble-WikiSpec.py` fills:
+`\n\n<!-- sections -->\n`, then `- [[<child>]]\n` per child, then
+`<!-- /sections -->\n`. A hub may have no body, and table markers stay in the
+body.
+
+These pages have no registry scope. `project` reports them under
+`architecture`, with the counts of pages and hubs, and lists their problems
+under `architectureProblems`. Those problems are findings (exit 1), but they
+never keep the requirement and test pages out of the registry.
+
+| Problem | Meaning |
+| --- | --- |
+| `unexpected-file` | not `Architecture-Packet.md` or `architecture/<name>.md` |
+| `not-utf8` | the bytes are not UTF-8 |
+| `no-title` | no `# <title>` line followed by a blank line |
+| `not-canonical` | a title with nothing after it |
+| `no-final-newline` | the page does not end with a newline |
+| `misplaced-index-marker` | a `<!-- sections -->` or `<!-- /sections -->` marker outside a hub's final index block, which needs a blank line before it |
+| `dangling-child` | a hub child names no Markdown page outside dot directories, the pages `Assemble-WikiSpec.py` resolves |
+
 ### Trace edges
 
 Edges come from wiki links: `[[ID]]`, `[[ID|label]]` or `[[ID#section]]`.
@@ -302,6 +335,9 @@ At wiki commit `d21fe10`, `project` reported in 0.28 s:
   problems.
 - **Round trip:** all 301 pages re-rendered byte for byte, and every registry
   text matched Python's `json.dumps`.
+- **Architecture Packet:** 43 pages, 6 of them hubs. The 34 canonical pages
+  re-render byte for byte. The 9 `Native-Qualification-*` pages are listed as
+  `no-final-newline`.
 
 RSR's migrations at `1ac2f2a`, applied to a scratch database with a
 synthetic source (`allowed_refs: ["master"]`), gave this:

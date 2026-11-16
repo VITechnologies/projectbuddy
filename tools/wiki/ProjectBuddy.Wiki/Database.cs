@@ -109,6 +109,25 @@ internal sealed class Database(Options options)
         return new JsonObject { ["database"] = options.Database, ["created"] = created, ["applied"] = applied, ["present"] = present };
     }
 
+    // Every command but migrate needs the schema this tool embeds; an older database is refused rather than misread.
+    public void EnsureMigrated()
+    {
+        using var connection = Open(options.Database);
+        using var exists = new NpgsqlCommand($"SELECT to_regclass('{MigrationTable}') IS NOT NULL", connection);
+        var applied = 0L;
+        if ((bool)exists.ExecuteScalar()!)
+        {
+            using var count = new NpgsqlCommand($"SELECT count(*) FROM {MigrationTable}", connection);
+            applied = (long)count.ExecuteScalar()!;
+        }
+
+        var embedded = Migrations().Count;
+        if (applied < embedded)
+        {
+            throw new WikiException(ExitCodes.Refused, $"the database has {applied} of {embedded} migrations; run migrate");
+        }
+    }
+
     public Ingested Ingest(string commit, IReadOnlyList<WikiFile> files)
     {
         using var connection = Open(options.Database);
