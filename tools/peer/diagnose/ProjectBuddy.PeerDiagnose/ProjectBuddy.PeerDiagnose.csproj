@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>projectbuddy-diagnose</AssemblyName>
+    <RootNamespace>ProjectBuddy.PeerDiagnose</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <IsTrimmable>true</IsTrimmable>
+    <Version>0.1.0</Version>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+    <!-- projectbuddy-probes is referenced as a library (its registry and sources), never run as a separate process. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ProjectBuddy.PeerDiagnose.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../ollama/ProjectBuddy.PeerOllama/ProjectBuddy.PeerOllama.csproj" />
+    <ProjectReference Include="../../redact/ProjectBuddy.PeerRedact/ProjectBuddy.PeerRedact.csproj" />
+    <ProjectReference Include="../../probes/ProjectBuddy.PeerProbes/ProjectBuddy.PeerProbes.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -36,7 +36,7 @@ public static class Program
             }
 
             var ollama = OllamaClient.RequireLoopback(cli.Ollama);
-            var registry = new Registry(sources(cli, ollama), LoadRedactor(cli.DenyList, host).Redact, new ProbeOptions(cli.Identity));
+            var registry = new Registry(sources(cli, ollama), HostRedactor.Load(cli.DenyList, host.Machine, host.User).Redact, new ProbeOptions(cli.Identity));
             if (cli.Command == "run")
             {
                 output.WriteLine(await registry.InvokeAsync(cli.Tool!, cli.Arguments));
@@ -95,28 +95,6 @@ public static class Program
             })]),
         })]),
     }.ToJsonString(Registry.Output);
-
-    // The host's own machine and account names are always private; an unreadable deny list refuses rather than
-    // redacting with fewer terms.
-    internal static Redactor LoadRedactor(string? denyList, (string Machine, string User) host)
-    {
-        if (denyList is null)
-        {
-            return Redactor.ForHost([], host.Machine, host.User);
-        }
-
-        byte[] bytes;
-        try
-        {
-            bytes = File.ReadAllBytes(denyList);
-        }
-        catch (Exception error)
-        {
-            throw new RedactionException($"the deny list cannot be read: {error.GetType().Name}");
-        }
-
-        return Redactor.ForHost(Redactor.ParseDenyList(bytes), host.Machine, host.User);
-    }
 
     internal static Cli Parse(string[] args)
     {

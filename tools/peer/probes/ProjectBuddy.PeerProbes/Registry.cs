@@ -36,8 +36,8 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
     public static readonly IReadOnlyList<ToolSpec> Tools =
     [
         new("network-link", "Network adapters, default-route and live ones first: kind, state, speed, IPv4 and IPv6 binding, and default gateways.", []),
-        new("disk", "Fixed drives (no read-only images or pseudo file systems): file system, total and free bytes.", []),
-        new("ollama", "Ollama on loopback: version, installed models with digests, and loaded models with memory and context size.", []),
+        new("disk", "Fixed drives (no read-only images or pseudo file systems): file system, total and free bytes, and the free share in whole percent.", []),
+        new("ollama", "Ollama on loopback: version, installed models with digests (identity is true on the pinned projectbuddy model), and loaded models with memory and context size.", []),
         new("vm-states", "VirtualBox VMs: running or not, state, current snapshot, memory, CPUs and whether VRDE is on.", []),
         new("services", "The GitHub runner and gitlab-runner services and the ProjectBuddy scheduled tasks: state and start type.", []),
         new("event-errors", "System and Application error and critical events, counted by provider and event ID (no message text).",
@@ -171,6 +171,9 @@ public sealed class Registry(ISources sources, Func<string, Redaction> redact, P
                 ["format"] = drive.Format,
                 ["totalBytes"] = drive.TotalBytes,
                 ["freeBytes"] = drive.FreeBytes,
+
+                // Computed here, not by a model: whole percent, rounded down.
+                ["freePercent"] = drive.TotalBytes > 0 ? drive.FreeBytes * 100 / drive.TotalBytes : null,
             }),
         };
         return (data, drives.Count > MaxDrives, ["drives"]);

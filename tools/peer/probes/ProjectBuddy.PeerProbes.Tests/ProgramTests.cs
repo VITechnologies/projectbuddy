@@ -185,7 +185,7 @@ public sealed class ProgramTests
     [Fact]
     public void LoadsTheHostNamesWithoutADenyList()
     {
-        var redaction = Program.LoadRedactor(null, Host).Redact("""{"name":"builder on BUILDHOST-01"}""");
+        var redaction = HostRedactor.Load(null, "BUILDHOST-01", "builder").Redact("""{"name":"builder on BUILDHOST-01"}""");
         Assert.DoesNotContain("builder", redaction.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("BUILDHOST-01", redaction.Text, StringComparison.Ordinal);
     }
