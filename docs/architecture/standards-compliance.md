@@ -171,7 +171,7 @@ maturity), and tag the wiki repository at each release boundary going
 forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
 `CHANGELOG.md` entry for the full, per-issue resolution detail.
 
-## Current gate status (as of the version above)
+## Current gate status (as of the stamped `v0.5.0`)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
