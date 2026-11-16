@@ -6,6 +6,12 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-diagnose` constrains the class from the first attempt when the
+  policy's rules decide it (#302). The answer schema allows only the decided
+  class, so the model's attempts go to the finding and citations. The check
+  remains as a defence in depth. `receipt.classCorrected` is removed; the
+  report's `verified` and `rule` already say the rules decided the class.
+
 - `projectbuddy-diagnose` verifies the answer's class (#299). The policy
   (`projectbuddy/diagnose-policy@2`) gives each question ordered,
   machine-checkable rules.

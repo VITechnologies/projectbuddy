@@ -53,20 +53,16 @@ out/projectbuddy-diagnose.exe --policy policy.json --question github-unreachable
    rejection reason is shown as JSON, with control characters escaped, and is
    cut short.
 5. **Class.** The question's **rules** decide the class from the same
-   evidence (see [Class rules](#class-rules-299)). When they decide, the
-   model's class must equal that class, and the report says
-   `"verified": ["citations", "class"]`, with the rule and the facts it rests
-   on. When they cannot decide, the class stays the model's judgment and only
-   the citations are verified.
+   evidence (see [Class rules](#class-rules-299)).
+   - When they decide, the answer schema allows **only** that class from the
+     first attempt (#302). The model's class is checked against it anyway, as
+     a defence in depth. The report says `"verified": ["citations", "class"]`,
+     with the rule and the facts it rests on.
+   - When the rules cannot decide, the class is free, stays the model's
+     judgment, and only the citations are verified.
 6. **Repair.** A rejected answer is shown its reason and may answer again, up
-   to `maxAnswerAttempts`.
-   - After a class contradiction, the repair's answer schema allows only the
-     decided class. The finding and citations are still the model's, still
-     grounded.
-   - `receipt.classCorrected` records that this happened.
-
-   After the last attempt the tool gives **no advice** (exit 6) and never a
-   guess.
+   to `maxAnswerAttempts`. After that the tool gives **no advice** (exit 6) and
+   never a guess.
 
 Every request must provably fit half the context (`TruncationGuard.Fits`). If
 one does not, nothing from the run is trusted (exit 6).
@@ -147,7 +143,7 @@ decides the class.
  "rule":{"class":"disk-low","basis":[{"tool":"disk","pointer":"/data/drives/0/freePercent","value":5}]},
  "evidence":[{"tool":"disk","arguments":{},"sha256":"…"}],
  "model":{"name":"qwen2.5:7b","digest":"…"},"ollamaVersion":"…","policySha256":"…",
- "receipt":{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"classCorrected":false,"evidenceBytes":306,"maxPromptTokens":758,"outputTokens":185,"seconds":5.2}}
+ "receipt":{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"evidenceBytes":306,"maxPromptTokens":758,"outputTokens":185,"seconds":5.2}}
 ```
 
 - No tool output leaves except the cited values, which were already redacted.
