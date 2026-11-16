@@ -80,6 +80,8 @@ public sealed partial class Redactor
 
     internal int OutputLimit { get; init; } = MaxOutputChars;
 
+    internal int InputLimit { get; init; } = MaxInputChars;
+
     // The peer's own machine and account names are always private, whatever the operator's list says.
     public static Redactor ForHost(IEnumerable<string> denyTerms, string machineName, string userName) =>
         new(denyTerms, wholeWordTerms: new[] { machineName, userName }.Where(name => name.Trim().Length >= MinTermLength));
@@ -109,7 +111,7 @@ public sealed partial class Redactor
     public Redaction Redact(string text)
     {
         // Over the input cap, only text that is already redacted (settled) is accepted, never partly redacted.
-        var settledOnly = text.Length > MaxInputChars;
+        var settledOnly = text.Length > InputLimit;
         if (text.Length > OutputLimit)
         {
             throw new RedactionException($"evidence over {MaxInputChars} characters is refused, not partly redacted");
@@ -191,6 +193,7 @@ public sealed partial class Redactor
         result = Apply(result, "secret", Authorization(), match => match.Groups["key"].Value + match.Groups["quote"].Value + match.Groups["scheme"].Value + "<secret>");
         result = Apply(result, "secret", Bearer(), match => match.Groups["scheme"].Value + "<secret>");
         result = Apply(result, "secret", XmlSecret(), match => SecretWord().IsMatch(match.Groups["name"].Value) ? match.Groups["key"].Value + Requote(match.Groups["value"].Value) : match.Value);
+        result = Apply(result, "secret", XmlNamedSecret(), match => SecretWord().IsMatch(match.Groups["name"].Value) ? match.Groups["key"].Value + Requote(match.Groups["value"].Value) : match.Value);
         result = Apply(result, "secret", Command(), RedactCommand);
         result = Apply(result, "secret", SecureString(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Credential(), match => match.Groups["head"].Value
@@ -198,15 +201,21 @@ public sealed partial class Redactor
         result = Apply(result, "secret", FlagSecret(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Registry(), match => SecretToClose(match.Groups["key"].Value, match.Groups["value"].Value));
         result = Apply(result, "secret", XmlElement(), RedactXmlElement);
-        result = Apply(result, "secret", XmlValueChild(), match => SecretName().IsMatch(LocalName(match.Groups["tag"].Value)) ? match.Groups["head"].Value + "<secret>" : match.Value);
+        result = Apply(result, "secret", XmlValueChild(), match => SecretName().IsMatch(LocalName(match.Groups["tag"].Value))
+            || (match.Groups["named"].Success && SecretName().IsMatch(match.Groups["named"].Value)) ? match.Groups["head"].Value + "<secret>" : match.Value);
+        result = Apply(result, "secret", XmlValueNear(), match => match.Groups["head"].Value + "<secret>");
+        result = Apply(result, "secret", ToolSecret(), match => match.Groups["head"].Value + Requote(match.Groups["value"].Value, "<secret>"));
         result = Apply(result, "secret", XmlNameValue(), match => SecretName().IsMatch(match.Groups["name"].Value.Trim()) ? match.Groups["head"].Value + "<secret>" : match.Value);
         result = Apply(result, "secret", PsObject(), RedactPsObject);
+        result = Apply(result, "secret", DictionaryEntry(), match => SecretName().IsMatch(match.Groups["name"].Value) && !Redacted(match.Groups["value"].Value) ? match.Groups["head"].Value + "<secret>" : match.Value);
         result = Apply(result, "secret", ProcessRecord(), RedactProcessRecord);
         result = Apply(result, "secret", ProcessRecordArgumentsFirst(), RedactProcessRecord);
         result = Apply(result, "secret", Record(), RedactRecord);
         result = Apply(result, "secret", RecordValueFirst(), RedactRecord);
         result = Apply(result, "secret", CsvBlock(), RedactCsv);
         result = Apply(result, "secret", LineAssignment(), RedactAssignment);
+        result = Apply(result, "secret", TableAssignment(), RedactAssignment);
+        result = Apply(result, "secret", EnvAssignment(), RedactAssignment);
         result = Apply(result, "secret", QuotedAssignment(), match => match.Groups["key"].Value + "<secret>");
         result = Apply(result, "secret", Assignment(), RedactAssignment);
         result = Apply(result, "secret", SasSignature(), _ => "sig=<secret>");
@@ -400,7 +409,7 @@ public sealed partial class Redactor
 
         var stack = new List<JsonFrame>();
         var edits = new SortedDictionary<int, (int End, string Text)>();
-        int stringStart = -1, stringEnd = -1, previous = -1, unterminatedUntil = -1;
+        int stringStart = -1, stringEnd = -1, previous = -1, unterminatedUntil = -1, rejectedUntil = -1;
 
         // Frames are always finished before they are dropped, so a stray closer or the depth cap never skips a pair.
         void Reset()
@@ -422,7 +431,11 @@ public sealed partial class Redactor
             }
 
             var top = stack.Count > 0 ? stack[^1] : null;
-            if (character == '"')
+            if (character == '"' && index < rejectedUntil)
+            {
+                // A quote inside a string that was rejected is escaped text of that string.
+            }
+            else if (character == '"')
             {
                 // Once a quote finds no closing quote before the line end, no later quote on that line can: the escape
                 // pairing from here on is the same, so the line is not scanned again.
@@ -440,7 +453,12 @@ public sealed partial class Redactor
                     top.ExpectValue = false;
                     index = unterminatedUntil - 1;
                 }
-                else if (end > 0 && (top is { ExpectValue: true } || ClosesJsonString(text, end)))
+                else if (end > 0 && !(top is { ExpectValue: true } || ClosesJsonString(text, end)))
+                {
+                    // Not JSON: the quotes inside it are escaped text, and the scan goes on after its opening quote.
+                    rejectedUntil = end - 1;
+                }
+                else if (end > 0)
                 {
                     if (top is { ExpectValue: true })
                     {
@@ -910,6 +928,12 @@ public sealed partial class Redactor
         return quote + "<secret>" + quote;
     }
 
+    private static string Requote(string value, string placeholder)
+    {
+        var quote = value.Length >= 2 && value[0] is '"' or '\'' && value[^1] == value[0] ? value[0].ToString() : "";
+        return quote + placeholder + quote;
+    }
+
     // A value that runs to the line end stops at the close of a JSON string, which stays.
     private static string SecretToClose(string key, string value)
     {
@@ -1018,9 +1042,11 @@ public sealed partial class Redactor
     }
 
     // A name that holds a secret: any prefix before a secret word (DB_PASSWORD, ACTIONS_RUNNER_INPUT_TOKEN), a
-    // *_KEY qualified as a secret key (AZURE_STORAGE_KEY, SIGNING_KEY; not cache_key or Public-Key), or pw, pass or pat
-    // as a whole final part ($pw, db_pass, AZURE_DEVOPS_EXT_PAT; not bypass). An assembly's PublicKeyToken is public.
-    private const string SecretKey = @"(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|passphrase|secret|(?<!PublicKey)token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)|[A-Za-z0-9_.-]*(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas)[_.-]?key|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass|pat)))";
+    // Any *_KEY (AZURE_OPENAI_KEY, COSMOS_KEY) except a deny-list of keys that name data, not secrets (cache_key,
+    // primary_key's peers sort_key and partition_key, PROJECT_KEY, Public-Key), a camelCase key with a secret qualifier
+    // (storageKey), a secret word with a value suffix ($passwordText, tokenValue), docker config's "auth", or pw, pass or
+    // pat as a whole final part ($pw, db_pass, AZURE_DEVOPS_EXT_PAT; not bypass). An assembly's PublicKeyToken is public.
+    private const string SecretKey = @"(?:[A-Za-z0-9_.-]*(?:password|passwd|pwd|passphrase|secret|(?<!PublicKey)token|api[_-]?key|access[_-]?key|account[_-]?key|shared[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)(?:text|value|string|plain(?:text)?|clear(?:text)?|bytes|b64|base64)?|[A-Za-z0-9_.-]*(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas|primary|secondary)key|[A-Za-z0-9_.-]*(?<!(?:cache|sort|partition|foreign|project|registry|public|idempotency|row|hash|range|lookup|index|unique|composite|surrogate|natural|routing|shard|group|correlation|dedup|dedupe|object|message|map|dict|field|column|table|sequence|order|join|entity|cluster|distribution|sharding|tag|label|attribute|metadata|bucket|item|record|cursor|search_index|primary_partition))[_.-]key|auth|(?<short>(?:[A-Za-z0-9_.-]*[_.-])?(?:pw|pass|pat)))";
 
     private const string AuthSchemes = "Bearer|Basic|Digest|token|Negotiate|NTLM|SharedKey|SharedKeyLite|ApiKey|SSWS|AWS4-HMAC-SHA256";
 
@@ -1115,6 +1141,10 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<key>" + WordStart + @"key\s*=\s*(?<name>" + Quoted + @")\s+value\s*=\s*)(?<value>" + Quoted + ")", RegexOptions.IgnoreCase)]
     private static partial Regex XmlSecret();
 
+    // The same with name= (Spring <property name="password" value="x"/>, .cscfg <Setting name="ApiKey" value="x"/>).
+    [GeneratedRegex(@"(?<key>" + WordStart + @"name\s*=\s*(?<name>" + Quoted + @")\s+value\s*=\s*)(?<value>" + Quoted + ")", RegexOptions.IgnoreCase)]
+    private static partial Regex XmlNamedSecret();
+
     [GeneratedRegex(@"(?<command>" + WordStart + @"(?:net(?:\.exe)?[ \t]+(?:use|user)|docker(?:\.exe)?(?:[ \t]+--?[A-Za-z][\w-]{0,40}(?:[ \t=]+[^\s-]\S{0,200})?){0,4}?[ \t]+login|(?:schtasks|sqlcmd|bcp|osql|psexec(?:64)?|certutil|7z[ar]?)(?:\.exe)?)\b)(?<args>" + LineRest + ")", RegexOptions.IgnoreCase)]
     private static partial Regex Command();
 
@@ -1149,7 +1179,7 @@ public sealed partial class Redactor
     // quote, so a multi-word password never leaks a word; elsewhere a ";" ends it. Both are capped at 256 characters.
     // A value that starts with a PowerShell credential cmdlet ($pw = Read-Host ...) is code, not a secret, and a number
     // after the short keys pw and pass is a count (Pass: 9). A reg query type column (REG_SZ) is never the value.
-    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + ")" + SecretKey + @"(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|[ \t]{2,}(?=\S)(?![:=]|REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @"|[{\[])(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<ctx>(?<=;[ \t]{0,8}))?(?<key>(?:(?<![A-Za-z0-9_.-])|" + AfterEscape + ")" + SecretKey + @"(?:\\{0,3}""|\\{1,2}u0022)?)(?<separator>\s*[:=]\s*|(?<![^A-Za-z0-9](?:pw|pass|pat)|^(?:pw|pass|pat))[ \t]{2,}(?=\S)(?![:=]|REG_[A-Z0-9_]+[ \t]))(?!" + Placeholder + @"|[{\[])(?(short)(?![0-9]+(?![\w.])))(?<value>" + Quoted + @"|'[^'\r\n]*'|(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?(ctx)(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}|(?:(?:" + NotClosing + @"(?:\\[^\r\n]|[^;\r\n\\])){1,256}?(?=;)|(?:" + NotClosing + @"(?:\\[^\s]|[^\s,;\\]))+)))", RegexOptions.IgnoreCase)]
     private static partial Regex Assignment();
 
     // reg query rows (name, type, data) and netsh "Key Content : x": the data runs to the end of the line. Numeric types
@@ -1160,12 +1190,26 @@ public sealed partial class Redactor
     // At the start of a line (after an optional log timestamp, as in GitHub Actions logs), an unquoted secret key
     // (GPG_PASSPHRASE=correct horse, export X=..., YAML "password: a b", an env table row "X    a b") takes the rest of
     // the line, quotes and brackets included, so a value with spaces or an unclosed quote never leaks a word.
-    [GeneratedRegex(@"(?<key>^[ \t]*(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.]+Z?[ \t]+)?(?:(?:export|set|ENV)[ \t]+|-[ \t]+)?" + SecretKey + @")(?<separator>[ \t]*[=:][ \t]*|[ \t]{2,}(?![=:]|REG_))(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?<value>[^\s][^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>^[ \t]*" + LogPrefix + @"(?:(?:export|set|ENV)[ \t]+|-[ \t]+)?" + SecretKey + @")(?<separator>[ \t]*[=:][ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?!(?:Get|Read|ConvertTo|ConvertFrom|New|Import|Unprotect)-[A-Z])(?<value>[^\s][^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex LineAssignment();
+
+    // A two-column table row (Get-ChildItem env:, set): the value is everything after the gap, when no second gap
+    // follows (kubectl's "db-password   Opaque   1   5d" and a header "Token   Type   Expires" are not rows). The short
+    // keys pw, pass and pat are left to the other rules (Jest's " PASS  src/App.test.js").
+    [GeneratedRegex(@"(?<key>^[ \t]*" + LogPrefix + SecretKey + @")(?<![^A-Za-z0-9](?:pw|pass|pat)|^(?:pw|pass|pat))(?<separator>[ \t]{2,})(?![=:]|REG_)(?!" + Placeholder + @")(?<value>[^\s](?:(?![ \t]{2})[^\r\n])*)(?=[ \t]*(?:\r|\n|$))", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex TableAssignment();
+
+    // A Dockerfile ENV with a space: ENV DB_PASSWORD Sup3r S3cret.
+    [GeneratedRegex(@"(?<key>^[ \t]*ENV[ \t]+" + SecretKey + @")(?<separator>[ \t]+)(?![=:])(?!" + Placeholder + @")(?<value>[^\s][^\r\n]*)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex EnvAssignment();
+
+    // A log line's prefix: [2026-11-15 10:00:00Z INFO Runner] (the runner's _diag), and an ISO or Python timestamp with
+    // an optional level (2026-11-15T10:00:00.1234567Z, 2026-11-15 10:00:00,123 INFO).
+    private const string LogPrefix = @"(?:\[[^\]\r\n]{1,100}\][ \t]+)?(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.,]+Z?(?:[ \t]+(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL))?[ \t]+)?";
 
     // A secret key that opens a quoted string ("GPG_PASSPHRASE=a b c" in docker inspect Env, docker run -e "X=a b",
     // \"X=a b\" in escaped JSON, 'X=a b') takes the value to the closing quote of the same spelling.
-    [GeneratedRegex(@"(?<key>(?<![\w\\""])""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>(?:[^""\\\r\n]|\\[^\r\n])+)(?="")|(?<key>(?<!\\)\\""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>(?:[^""\\\r\n]|\\(?!"")[^\r\n])+)(?=\\"")|(?<key>(?<![\w'])'" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?>[^'\r\n]+)(?=')", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<key>(?<![\w\\""])""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?>(?:[^""\\\r\n]|\\[^\r\n])+)(?="")|(?<key>(?<!\\)\\""" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?>(?:[^""\\\r\n]|\\(?!"")[^\r\n])+)(?=\\"")|(?<key>(?<![\w'])'" + SecretKey + @"[ \t]*=[ \t]*)(?!" + Placeholder + @")(?(short)(?![0-9]+(?![\w.])))(?>[^'\r\n]+)(?=')", RegexOptions.IgnoreCase)]
     private static partial Regex QuotedAssignment();
 
     [GeneratedRegex(@"(?<=[?&;]|\\u00(?:26|3[Ff]|3[Bb]))sig=(?:[^&\s""'<>;\\]|\\(?!""))+", RegexOptions.IgnoreCase)]
@@ -1281,7 +1325,7 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:\\(?![\\""])|(?<![\\\w:])\\\\[A-Za-z0-9._$-]+\\(?![\\""])")]
     private static partial Regex RawPath();
 
-    [GeneratedRegex(@"password|passwd|pwd|passphrase|secret|(?<!publickey)token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass|pat)$|(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas)[_.-]?key(?:$|[_.-])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"password|passwd|pwd|passphrase|secret|(?<!publickey)token|api[_-]?key|access[_-]?key|account[_-]?key|private[_-]?key|client[_-]?secret|credential|(?:^|[_.-])(?:pw|pass|pat)$|(?:storage|signing|encryption|decryption|master|license|licence|product|subscription|deploy|deployment|ssh|gpg|pgp|hmac|jwt|session|crypto|cipher|aes|admin|service|app|client|function|webhook|sas|primary|secondary)key(?:$|[_.-])|(?<!(?:cache|sort|partition|foreign|project|registry|public|idempotency|row|hash|range|lookup|index|unique|composite|surrogate|natural|routing|shard|group|correlation|dedup|dedupe|object|message|map|dict|field|column|table|sequence|order|join|entity|cluster|distribution|sharding|tag|label|attribute|metadata|bucket|item|record|cursor|search_index|primary_partition))[_.-]key(?:$|[_.-])", RegexOptions.IgnoreCase)]
     private static partial Regex SecretName();
 
     [GeneratedRegex(@"^(?:--?[A-Za-z0-9_-]*(?:token|password|passwd|pwd|passphrase|secret|pat|api-?key|pw|pass(?:in|out)?)|/[A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|pass))$", RegexOptions.IgnoreCase)]
@@ -1296,17 +1340,37 @@ public sealed partial class Redactor
     [GeneratedRegex(@"^\s*(?:true|false)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex Flag();
 
+    // A tag's attributes, with any Name/N/Key attribute captured as "named"; bounded, so an unclosed tag ("count<limit")
+    // never makes the scan run on to the end of the text.
+    private const string XmlAttributes = @"(?:[ \t\r\n][^<>]{0,1000}?\b(?:Name|N|Key)[ \t]*=[ \t]*[""'](?<named>[^""'<>]{0,200})[""'][^<>]{0,1000}|[ \t\r\n][^<>]{0,1000})?";
+
     // An element with text content: the element name or a Name/N/Key attribute names the secret.
-    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})(?:[ \t\r\n][^<>]*?\b(?:Name|N|Key)[ \t]*=[ \t]*[""'](?<named>[^""'<>]*)[""'][^<>]*|[ \t\r\n][^<>]*)?>)(?<value>(?=\s*[^\s<])(?>[^<]+))(?<close></\k<tag>>)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})" + XmlAttributes + @">)(?<value>(?=\s*[^\s<])(?>[^<]+))(?<close></\k<tag>>)", RegexOptions.IgnoreCase)]
     private static partial Regex XmlElement();
 
     // An unattend.xml secret element holding a <Value> child: <AdministratorPassword><Value>x</Value>.
-    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})(?:[ \t\r\n][^<>]*)?>\s*<Value(?:[ \t\r\n][^<>]*)?>)(?=\s*[^\s<])(?>[^<]+)(?=</Value>)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<head><(?<tag>[A-Za-z_][\w.:-]{0,100})" + XmlAttributes + @">\s*<Value(?:[ \t\r\n][^<>]{0,1000})?>)(?=\s*[^\s<])(?>[^<]+)(?=</Value>)", RegexOptions.IgnoreCase)]
     private static partial Regex XmlValueChild();
 
+    // A <Value> seen without its parent (grep -A1, Select-String -Context, Get-Content | ConvertTo-Json): next after a
+    // secret-named element (no other tag between, within 300 characters), or followed by unattend.xml's <PlainText>.
+    [GeneratedRegex(@"(?<head>(?:(?<=<(?:[A-Za-z_][\w.:-]{0,100})?(?:Password|Passwd|Secret|Token|Credential|Key)(?:[ \t][^<>]{0,200})?>[^<]{0,300})|(?=<Value>[^<]{0,1000}</Value>[\s\S]{0,300}?<PlainText>))<Value>)(?=\s*[^\s<])(?>[^<]+)(?=</Value>)", RegexOptions.IgnoreCase)]
+    private static partial Regex XmlValueNear();
+
     // ConvertTo-Xml and CLIXML Name/Value siblings: <S N="Name">DB_PASSWORD</S> ... <S N="Value">x</S>.
-    [GeneratedRegex(@"(?<head><(?<t1>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]*?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Name|Key)[""'][^<>]*>(?<name>[^<]*)</\k<t1>>(?:\s*<[^<>/]*>[^<]*</[^<>]*>){0,8}?\s*<(?<t2>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]*?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Value|VariableValue|Data)[""'][^<>]*>)(?=\s*[^\s<])(?>[^<]+)(?=</\k<t2>>)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<head><(?<t1>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]{0,1000}?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Name|Key)[""'][^<>]{0,1000}>(?<name>[^<]{0,1000})</\k<t1>>(?:\s*<[^<>/]{0,1000}>[^<]{0,1000}</[^<>]{0,1000}>){0,8}?\s*<(?<t2>[A-Za-z][\w.:-]{0,100})[ \t\r\n][^<>]{0,1000}?\b(?:Name|N)[ \t]*=[ \t]*[""'](?:Value|VariableValue|Data)[""'][^<>]{0,1000}>)(?=\s*[^\s<])(?>[^<]+)(?=</\k<t2>>)", RegexOptions.IgnoreCase)]
     private static partial Regex XmlNameValue();
+
+    // A DictionaryEntry printed as [NAME, value]: CLIXML's <ToString>, Format-List's {[PATH, ...], [DB_PASSWORD, x]}.
+    // The value runs to the closing "]" without crossing another "[" or "]", so the scan is linear.
+    [GeneratedRegex(@"(?<head>\[(?<name>[A-Za-z_][\w.-]{0,100}),[ \t]+)(?<value>(?>[^\[\]\r\n]*))(?=\](?:[ \t]*(?:</|,[ \t]*\[|\.\.\.|…|\}|\r|\n|$)))")]
+    private static partial Regex DictionaryEntry();
+
+    // Tools that set a secret by name: setx NAME value, [Environment]::SetEnvironmentVariable("NAME", "value"),
+    // Set-Item env:NAME value, New-Item -Path env:NAME -Value x, gh secret set NAME --body x,
+    // az keyvault secret set ... --value x.
+    [GeneratedRegex(@"(?<head>\bsetx(?:\.exe)?[ \t]+(?:""|')?" + SecretKey + @"(?:""|')?[ \t]+|\bSetEnvironmentVariable[ \t]*\([ \t]*[""']" + SecretKey + @"[""'][ \t]*,[ \t]*|\benv:" + SecretKey + @"(?:[ \t]+-Value)?[ \t]+|\bgh[ \t]+secret[ \t]+set\b[^\r\n]{0,200}?[ \t](?:--body|-b)(?:[ \t]+|=)|\baz[ \t]+keyvault[ \t]+secret[ \t]+set\b[^\r\n]{0,400}?[ \t]--value(?:[ \t]+|=))(?!-|" + Placeholder + @")(?<value>""[^""\r\n]*""|'[^'\r\n]*'|[^\s""',;)]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex ToolSecret();
 
     [GeneratedRegex(@"@\{[^{}\r\n]*\}", RegexOptions.NonBacktracking)]
     private static partial Regex PsObject();

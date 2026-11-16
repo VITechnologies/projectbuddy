@@ -279,19 +279,32 @@ public class RedactorTests
     [Fact]
     public void OversizedEvidenceIsRefusedWhole()
     {
+        // The output cap is checked before any work, so the real size costs nothing.
         Assert.Throws<RedactionException>(() => Plain().Redact(new string('a', Redactor.MaxOutputChars + 1)));
-        Assert.Throws<RedactionException>(() => Plain().Redact(string.Concat(Enumerable.Repeat("1.2.3.4 ", Redactor.MaxInputChars / 8 + 1))));
+        Assert.Throws<RedactionException>(() => new Redactor([]) { InputLimit = 8, OutputLimit = 40 }.Redact("1.2.3.4 1.2.3.4"));
         Assert.Throws<RedactionException>(() => new Redactor(["abc"]) { OutputLimit = 20 }.Redact("abc abc abc"));
     }
 
     [Fact]
     public void RedactedOutputOverTheInputCapIsAcceptedOnlyWhenSettled()
     {
+        var redactor = new Redactor(["abc"]) { InputLimit = 16, OutputLimit = 48 };
+        var once = redactor.Redact("abc abc abc abc").Text;
+        Assert.True(once.Length > 16);
+        Assert.Equal(once, redactor.Redact(once).Text);
+        Assert.Equal("aaaaaaaaaaaaaaaaa", new Redactor([]) { InputLimit = 16, OutputLimit = 48 }.Redact(new string('a', 17)).Text);
+    }
+
+    // The same at the real caps, run in Release outside the coverage job (Category=Performance).
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void RedactedOutputOverTheRealInputCapIsAcceptedOnlyWhenSettled()
+    {
         var redactor = new Redactor(["abc"]);
         var once = redactor.Redact(string.Concat(Enumerable.Repeat("abc ", Redactor.MaxInputChars / 4))).Text;
         Assert.True(once.Length > Redactor.MaxInputChars);
         Assert.Equal(once, redactor.Redact(once).Text);
-        Assert.Equal(Redactor.MaxInputChars + 1, Plain().Redact(new string('a', Redactor.MaxInputChars + 1)).Text.Length);
+        Assert.Throws<RedactionException>(() => Plain().Redact(string.Concat(Enumerable.Repeat("1.2.3.4 ", Redactor.MaxInputChars / 8 + 1))));
     }
 
     [Fact]
@@ -302,7 +315,7 @@ public class RedactorTests
     }
 
     // Each shape once made a rule backtrack quadratically, or is the worst case of one; input up to the cap must stay
-    // well inside interactive time.
+    // well inside interactive time. Run in Release outside the coverage job (Category=Performance).
     [Theory]
     [InlineData("", "a.")]
     [InlineData("", "a-")]
@@ -361,13 +374,19 @@ public class RedactorTests
     [InlineData("", "@{Name=DB_PASSWORD; Value=x}")]
     [InlineData("", "'DB_PASSWORD=a ")]
     [InlineData("", "{\"FileName\":\"sqlcmd\",\"Arguments\":\"-P a\"},")]
+    [InlineData("level=info msg=\"{", "\\\"k\\\":\\\"v\\\",")]
+    [InlineData("<a", " N=\"Name\"")]
+    [InlineData("", "[DB_PASSWORD, x")]
+    [InlineData("", "setx DB_PASSWORD a ")]
+    [InlineData("", "[x] DB_PASSWORD=a\n")]
+    [Trait("Category", "Performance")]
     public void LargeAdversarialInputsStayFast(string head, string unit, int pad = 0, char padding = ' ')
     {
         unit = new string(padding, pad) + unit;
         var text = head + string.Concat(Enumerable.Repeat(unit, (Redactor.MaxInputChars - head.Length) / unit.Length));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         Plain().Redact(text);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"{head}{unit}: {watch.Elapsed}");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"{head}{unit}: {watch.Elapsed}");
     }
 
     [Fact]
@@ -524,6 +543,7 @@ public class RedactorTests
 
     [Theory]
     [InlineData("<Settings><Value>shown</Value></Settings>", "<Settings><Value>shown</Value></Settings>")]
+    [InlineData("<add name=\"Server\" value=\"db01\"/>", "<add name=\"Server\" value=\"db01\"/>")]
     [InlineData("<Password><Value>Sup3r</Value></Password>", "<Password><Value><secret></Value></Password>")]
     [InlineData("{\"FileName\":\"C:/tools/\",\"Arguments\":\"-P x\"}", "{\"FileName\":\"<path>\",\"Arguments\":\"-P x\"}")]
     [InlineData("FileName  : \nArguments : -P x", "FileName  : \nArguments : -P x")]

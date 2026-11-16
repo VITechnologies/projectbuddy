@@ -112,17 +112,30 @@ than as `key=value`. When the name holds a secret word (the assignment keys, plu
     `<AdministratorPassword><Value>…</Value>` (unattend.xml, whose secret
     elements hold a `<Value>` child).
   - An element whose `Name`, `N` or `Key` attribute names one:
-    `<Property Name="Password">…</Property>` (`ConvertTo-Xml`) or
-    `<S N="Password">…</S>` (CLIXML).
+    `<Property Name="Password">…</Property>` (`ConvertTo-Xml`), `<S N="Password">…</S>`
+    (CLIXML), or a `<value>` child of `<setting name="ApiToken">` (.NET settings).
+  - A `name="…" value="…"` pair, as well as `key="…" value="…"`: Spring
+    `<property>`, `.cscfg` `<Setting>`, `<add name=…>`.
+  - A `<Value>` seen without its parent, as `grep -A1`, `Select-String -Context`
+    or `Get-Content | ConvertTo-Json` show it. That means a `<Value>` right after a
+    secret-named element (no other tag between, within 300 characters) or one
+    followed by unattend.xml's `<PlainText>`. A `<Value>` seen alone
+    (`Select-String` without context) carries no hint and stays.
   - Name/Value siblings in either serializer: `<S N="Name">DB_PASSWORD</S>`
     followed, within eight elements, by `<S N="Value">…</S>`. Only this order is
     read; it is the order PowerShell writes.
+  - Tag attributes are read up to 1000 characters, so an unclosed tag in prose
+    (`count<limit`) never makes the scan run on.
   - A `true`/`false` value is a setting, not a secret
     (`<RequirePassword>true</RequirePassword>`). Any other value of a secret-named
     element is hidden, numbers included (`<PasswordExpires>2026</PasswordExpires>`).
 - **PowerShell object strings:** in `@{Name=DB_PASSWORD; Value=…}`, the value
   beside a secret name is hidden, and so is any member keyed by one
   (`@{Password=a b; User=x}`).
+- **Printed dictionary entries:** `[NAME, value]` (CLIXML's
+  `<ToString>[DB_PASSWORD, …]</ToString>`, Format-List's
+  `Environment : {[PATH, …], [DB_PASSWORD, …]}`). The value runs to the closing
+  `]` without crossing another bracket, so a value holding `[` or `]` is cut there.
 - **CSV tables** whose header row names a `Name`/`Key` column and a
   `Value`/`VariableValue`/`Data` column (`ConvertTo-Csv`, `wmic … /format:csv`
   with its `\r\r\n` line ends). A row with more fields than the header holds a
@@ -140,23 +153,44 @@ than as `key=value`. When the name holds a secret word (the assignment keys, plu
     Format-List record (`FileName :` and `Arguments :` within sixteen lines, in
     either order), it is read as the `FileName` program's command line.
 
-Secret names also include `passphrase`, and a final `_PAT` part
-(`AZURE_DEVOPS_EXT_PAT`). A `_KEY` name counts only when its qualifier names a
-secret key: `storage`, `signing`, `encryption`, `master`, `license`, `product`,
-`subscription`, `deploy`, `ssh`, `gpg`, `hmac`, `jwt`, `session`, `admin`,
-`service`, `app`, `client`, `function`, `webhook`, `sas` and the like
-(`AZURE_STORAGE_KEY`, `SIGNING_KEY`). `cache_key`, `primary_key`,
-`partition_key`, `PROJECT_KEY` and `Public-Key` are not secret names. An
-assembly's `PublicKeyToken` is public.
+Secret names also include:
+- `passphrase`;
+- a final `_PAT` part (`AZURE_DEVOPS_EXT_PAT`);
+- a secret word with a value suffix (`$passwordText`, `tokenValue`);
+- docker config's `"auth"`;
+- **any** separated `_KEY` name (`AZURE_OPENAI_KEY`, `COSMOS_KEY`, `NUGET_KEY`),
+  except a deny-list of keys that name data, not secrets. Examples are `cache`,
+  `sort`, `partition`, `hash`, `range`, `foreign`, `index`, `routing`, `shard`,
+  `project`, `registry`, `public`, `idempotency`, `object` and `message`
+  (`cache_key`, `PROJECT_KEY`, `Public-Key`). Failing open on an unknown
+  qualifier would leak, so the list names what is safe;
+- a camelCase `…Key` only with a secret qualifier (`storageKey`, `primaryKey`,
+  `secondaryKey`, `apiKey`).
+
+An assembly's `PublicKeyToken` is public.
 
 Other value rules:
 - **Line-start keys:** a line can start with an unquoted secret key, after an
-  optional log timestamp such as the one on every GitHub Actions log line.
-  Examples are `GPG_PASSPHRASE=…`, `export X=…`, `set X=…`, YAML `password: …`,
-  and a `Get-ChildItem env:` table row `X    …`.
+  optional log prefix. Prefixes are an ISO or Python timestamp with an optional
+  level, as on every GitHub Actions log line, and a bracketed tag such as the
+  runner's `_diag` `[2026-11-15 10:00:00Z INFO Runner]`. Examples are
+  `GPG_PASSPHRASE=…`, `export X=…`, `set X=…`, Dockerfile `ENV X=…` and
+  `ENV X …`, and YAML `password: …`.
   - Its value takes the rest of the line, quotes and brackets included, so a
     value with spaces, an unclosed quote or a `]` never leaks a word.
-  - A value that was quoted keeps its quotes.
+  - A value that is exactly one quoted string keeps its quotes; anything after it
+    on the line (`"abc" # note`) is taken too.
+- **Table rows:** a two-column row (`Get-ChildItem env:`, `set`), with a secret key
+  and a gap of two or more spaces, takes the rest of the row when no second gap
+  follows. So kubectl's `db-password   Opaque   1   5d` and a header
+  `Token   Type   Expires` are not rows. A key in the middle of a line, or a
+  row whose value holds a double space, falls back to the first word after the
+  gap. The short keys `pw`, `pass` and `pat` never use a gap (Jest's
+  ` PASS  src/…`).
+- **Tools that set a secret:** `setx NAME value`,
+  `[Environment]::SetEnvironmentVariable("NAME", "value", …)`,
+  `Set-Item env:NAME value`, `New-Item -Path env:NAME -Value …`,
+  `gh secret set NAME --body …` and `az keyvault secret set … --value …`.
 - **Quoted keys:** a secret key that opens a quoted string takes the value to the
   closing quote of the same spelling. Examples are `"GPG_PASSPHRASE=a b c"` in
   `docker inspect`'s `Env`, `docker run -e "X=a b"`, and `\"X=a b\"` or `'X=a b'`.
@@ -278,11 +312,16 @@ The URL, scp-remote, e-mail, XML-setting and operator deny-list patterns run on
 the version guard and the connection-string context is capped). Every other
 unbounded scan was measured linear, or is capped (a `;`-delimited value is at
 most 256 characters). The tests redact input at the 4,000,000-character cap for
-each adversarial shape and require it to finish well inside interactive time.
+each adversarial shape and require it to finish within 30 seconds (the slowest
+takes 8 seconds). These `Category=Performance` tests run in Release in their own
+CI step; the coverage run, which instruments every branch, leaves them out.
 The shapes include repeated `a.`, `C:\` and `password=a `; `key="` followed by
 `pwd`; whitespace runs before digits; `/O=a` and `Subject: s=1, `; `sqlcmd -P a`
 and `7z -p"a`; unclosed JSON literals and argument quotes; `D:\a' ` and
-`'D:\a' b\`; attributes on indented lines; and backslash runs before `u0027`.
+`'D:\a' b\`; attributes on indented lines; backslash runs before `u0027`;
+escaped JSON in a log line (`msg="{\"k\":\"v\",…`); an unclosed tag full of
+`N="Name"` attributes; `[DB_PASSWORD, x` without a closing bracket; and prefixed
+log lines.
 
 ## The deny list is operator-private
 

@@ -1177,7 +1177,7 @@
       ],
       "mustContain": [
         "Public-Key: (2048 bit)",
-        "\"cache_key\":\"setup-dotnet-123\",\"primary_key\":\"id\"",
+        "\"cache_key\":\"setup-dotnet-123\"",
         "partition_key=tenantId exit=0",
         "set PROJECT_KEY=LV2025 && build.cmd",
         "PublicKeyToken=b77a5c561934e089",
@@ -1205,6 +1205,99 @@
       ],
       "mustContain": [
         "\"exit\": 0"
+      ]
+    },
+    {
+      "id": "key-names-azure-and-openai",
+      "input": "AZURE_OPENAI_KEY=Sup3rA\nCOSMOS_KEY=Sup3rB\nSPEECH_KEY=Sup3rC\nAZURE_SEARCH_KEY=Sup3rD\nNUGET_KEY=Sup3rE\n{\"Name\":\"REDIS_KEY\",\"Value\":\"Sup3rF\"}\ndocker run -e \"OPENAI_KEY=Sup3rG x\" img\n{\"primaryKey\":\"Sup3rH\",\"cache_key\":\"setup-dotnet\",\"sort_key\":\"ts\"}",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "AZURE_OPENAI_KEY=<secret>",
+        "\"Value\":\"<secret>\"",
+        "\"primaryKey\":\"<secret>\",\"cache_key\":\"setup-dotnet\",\"sort_key\":\"ts\""
+      ]
+    },
+    {
+      "id": "clixml-env-dump",
+      "input": "<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\">\n  <Obj RefId=\"0\">\n    <TN RefId=\"0\">\n      <T>System.Object[]</T>\n      <T>System.Array</T>\n      <T>System.Object</T>\n    </TN>\n    <LST>\n      <Obj RefId=\"1\">\n        <TN RefId=\"1\">\n          <T>System.Collections.DictionaryEntry</T>\n          <T>System.ValueType</T>\n          <T>System.Object</T>\n        </TN>\n        <ToString>[API_TOKEN, Sup3rTok]</ToString>\n        <Props>\n          <S N=\"Key\">API_TOKEN</S>\n          <S N=\"Value\">Sup3rTok</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::API_TOKEN</S>\n          <Obj N=\"PSDrive\" RefId=\"2\">\n            <TN RefId=\"2\">\n              <T>System.Management.Automation.PSDriveInfo</T>\n              <T>System.Object</T>\n            </TN>\n            <ToString>Env</ToString>\n            <Props>\n              <S N=\"CurrentLocation\"></S>\n              <S N=\"Name\">Env</S>\n              <S N=\"Provider\">Microsoft.PowerShell.Core\\Environment</S>\n              <S N=\"Root\"></S>\n              <S N=\"Description\">Drive that contains a view of the environment variables for the process</S>\n              <Nil N=\"MaximumSize\" />\n              <Obj N=\"Credential\" RefId=\"3\">\n                <TN RefId=\"3\">\n                  <T>System.Management.Automation.PSCredential</T>\n                  <T>System.Object</T>\n                </TN>\n                <ToString>System.Management.Automation.PSCredential</ToString>\n                <Props>\n                  <Nil N=\"UserName\" />\n                  <Nil N=\"Password\" />\n                </Props>\n              </Obj>\n              <Nil N=\"DisplayRoot\" />\n              <B N=\"VolumeSeparatedByColon\">true</B>\n            </Props>\n            <MS>\n              <Obj N=\"Used\" RefId=\"4\">\n                <S></S>\n              </Obj>\n              <Ref N=\"Free\" RefId=\"4\" />\n            </MS>\n          </Obj>\n          <Obj N=\"PSProvider\" RefId=\"5\">\n            <TN RefId=\"4\">\n              <T>System.Management.Automation.ProviderInfo</T>\n              <T>System.Object</T>\n            </TN>\n            <ToString>Microsoft.PowerShell.Core\\Environment</ToString>\n            <Props>\n              <S N=\"ImplementingType\">Microsoft.PowerShell.Commands.EnvironmentProvider</S>\n              <S N=\"HelpFile\">System.Management.Automation.dll-Help.xml</S>\n              <S N=\"Name\">Environment</S>\n              <S N=\"PSSnapIn\">Microsoft.PowerShell.Core</S>\n              <S N=\"ModuleName\">Microsoft.PowerShell.Core</S>\n              <Nil N=\"Module\" />\n              <S N=\"Description\"></S>\n              <S N=\"Capabilities\">ShouldProcess</S>\n              <S N=\"Home\"></S>\n              <Obj N=\"Drives\" RefId=\"6\">\n                <TN RefId=\"5\">\n                  <T>System.Collections.ObjectModel.Collection`1[[System.Management.Automation.PSDriveInfo, System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]</T>\n                  <T>System.Object</T>\n                </TN>\n                <LST>\n                  <Ref RefId=\"2\" />\n                </LST>\n              </Obj>\n              <B N=\"VolumeSeparatedByColon\">true</B>\n              <C N=\"ItemSeparator\">47</C>\n              <C N=\"AltItemSeparator\">92</C>\n            </Props>\n          </Obj>\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">API_TOKEN</S>\n        </MS>\n      </Obj>\n      <Obj RefId=\"7\">\n        <TNRef RefId=\"1\" />\n        <ToString>[DB_PASSWORD, Sup3rClixml Words]</ToString>\n        <Props>\n          <S N=\"Key\">DB_PASSWORD</S>\n          <S N=\"Value\">Sup3rClixml Words</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::DB_PASSWORD</S>\n          <Ref N=\"PSDrive\" RefId=\"2\" />\n          <Ref N=\"PSProvider\" RefId=\"5\" />\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">DB_PASSWORD</S>\n        </MS>\n      </Obj>\n      <Obj RefId=\"8\">\n        <TNRef RefId=\"1\" />\n        <ToString>[HOME, /home/jdoe]</ToString>\n        <Props>\n          <S N=\"Key\">HOME</S>\n          <S N=\"Value\">/home/jdoe</S>\n        </Props>\n        <MS>\n          <S N=\"PSPath\">Microsoft.PowerShell.Core\\Environment::HOME</S>\n          <Ref N=\"PSDrive\" RefId=\"2\" />\n          <Ref N=\"PSProvider\" RefId=\"5\" />\n          <B N=\"PSIsContainer\">false</B>\n          <S N=\"Name\">HOME</S>\n        </MS>\n      </Obj>\n    </LST>\n  </Obj>\n</Objs>",
+      "mustNotContain": [
+        "Sup3r",
+        "Words"
+      ],
+      "mustContain": [
+        "<ToString>[API_TOKEN, <secret>]</ToString>",
+        "<ToString>[DB_PASSWORD, <secret>]</ToString>"
+      ]
+    },
+    {
+      "id": "escaped-json-in-log-lines",
+      "input": "level=info msg=\"{\\\"Name\\\":\\\"x\\\"}\" status=200\nts=1 level=warn msg=\"retry while count<limit reached\"\nts=2 level=info name=\"worker\" status=\"ok\"",
+      "mustNotContain": [
+        "<secret>"
+      ],
+      "mustContain": [
+        "status=200",
+        "msg=\"retry while count<limit reached\"",
+        "name=\"worker\" status=\"ok\""
+      ]
+    },
+    {
+      "id": "unattend-viewed-in-pieces",
+      "input": "[\"        <Password>\",\"            <Value>Sup3rJson</Value>\",\"            <PlainText>true</PlainText>\"]\nun.xml:3:        <Password>\nun.xml-4-            <Value>Sup3rGrep</Value>\n> un.xml:4:            <Value>Sup3rSelect</Value>\n  un.xml:5:            <PlainText>true</PlainText>\n<Settings><Value>shown</Value></Settings>",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "<Value><secret></Value>",
+        "<Settings><Value>shown</Value></Settings>"
+      ]
+    },
+    {
+      "id": "tools-that-set-secrets",
+      "input": "setx DB_PASSWORD Sup3rSetx\n[Environment]::SetEnvironmentVariable(\"DB_PASSWORD\", \"Sup3rEnv\", \"Machine\")\nSet-Item env:DB_PASSWORD Sup3rItem\nNew-Item -Path env:DB_PASSWORD -Value \"Sup3rNew\"\ngh secret set DB_PASSWORD --body Sup3rGh\naz keyvault secret set --vault-name kv01 --name db-password --value Sup3rAz\nDEBUG:     ! SET $passwordText = 'Sup3rTrace'.",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "setx DB_PASSWORD <secret>",
+        "\"DB_PASSWORD\", \"<secret>\", \"Machine\"",
+        "env:DB_PASSWORD <secret>",
+        "-Value \"<secret>\"",
+        "--body <secret>",
+        "--value <secret>",
+        "$passwordText = '<secret>'"
+      ]
+    },
+    {
+      "id": "xml-and-config-settings",
+      "input": "<setting name=\"ApiToken\" serializeAs=\"String\"><value>Sup3rTok</value></setting>\n<property name=\"password\" value=\"Sup3rSpring\"/>\n<Setting name=\"ApiKey\" value=\"Sup3rCs\"/>\n<add name=\"ApiToken\" value=\"Sup3rAdd\"/>\n{\"auths\":{\"ghcr.io\":{\"auth\":\"Sup3rAuth\"}}}\noauth=enabled",
+      "mustNotContain": [
+        "Sup3r"
+      ],
+      "mustContain": [
+        "<value><secret></value>",
+        "value=\"<secret>\"",
+        "\"auth\":\"<secret>\"",
+        "oauth=enabled"
+      ]
+    },
+    {
+      "id": "log-prefixes-and-tables",
+      "input": "[2026-11-15 10:00:00Z INFO Runner] DB_PASSWORD=Sup3r horse battery\n2026-11-15 10:00:00,123 INFO DB_PASSWORD=Sup3r correct horse\nENV DB_PASSWORD Sup3r S3cret words\n{\"summary\":\"pass=12 fail=0 skip=1\"}\n PASS  src/App.test.js (5.2 s)\nEnvironment : {[PATH, /usr/bin], [DB_PASSWORD, Sup3rEnvList]...}",
+      "mustNotContain": [
+        "Sup3r",
+        "horse",
+        "words"
+      ],
+      "mustContain": [
+        "Runner] DB_PASSWORD=<secret>",
+        "INFO DB_PASSWORD=<secret>",
+        "ENV DB_PASSWORD <secret>",
+        "\"pass=12 fail=0 skip=1\"",
+        " PASS  src/App.test.js (5.2 s)",
+        "[PATH, /usr/bin], [DB_PASSWORD, <secret>]"
       ]
     }
   ]

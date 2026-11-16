@@ -121,7 +121,7 @@ jobs:
     # the trimmed single-file win-x64 binary the peer runs.
     name: Peer Tool Tests (${{ matrix.dir }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -156,7 +156,7 @@ jobs:
           TESTS: ${{ matrix.tests }}
         run: |
           dotnet restore "$TESTS" --locked-mode --nologo
-          dotnet test "$TESTS" --no-restore --nologo --settings coverage.runsettings \
+          dotnet test "$TESTS" --no-restore --nologo --settings coverage.runsettings --filter "Category!=Performance" \
             --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/peer-coverage"
 
       - name: Enforce 100% Line And Branch Coverage
@@ -183,6 +183,15 @@ jobs:
           if line < 1.0 or branch < 1.0:
               raise SystemExit(f"{tool} coverage must be 100% line and branch")
           PY
+
+      # Input-size and linear-time tests run at the real caps in Release, outside the instrumented coverage run.
+      - name: Performance Tests
+        if: matrix.dir == 'redact'
+        shell: bash
+        working-directory: tools/peer/${{ matrix.dir }}
+        env:
+          TESTS: ${{ matrix.tests }}
+        run: dotnet test "$TESTS" -c Release --nologo --filter "Category=Performance"
 
       - name: Publish Trimmed win-x64
         if: matrix.publish != ''

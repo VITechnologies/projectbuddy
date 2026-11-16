@@ -50,7 +50,8 @@ release's notes for the exact pinned commit.
     and every adversarial shape tested stays linear up to that cap.
   - Diagnostics stay: digests, versions, exit codes and times.
   - A synthetic corpus gates it, and CI adds it to the `Peer Tool Tests`
-    matrix at 100% coverage.
+    matrix at 100% coverage. Its linear-time tests at the 4,000,000-character
+    cap run in a separate Release step, outside the instrumented coverage run.
 
 - Add `projectbuddy-advise pre-review` (#284 slice 2). It gives advisory
   findings on a `git diff`.
