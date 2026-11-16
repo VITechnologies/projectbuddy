@@ -112,6 +112,9 @@ public class OllamaTests
         Assert.Equal(FakeOllama.Digest, (await client.DigestsAsync())[FakeOllama.Model]);
         Assert.Equal(new Residency(100, 100), await client.ResidencyAsync(FakeOllama.Model));
         Assert.Null(await client.ResidencyAsync("other:1"));
+        Assert.Equal([new LoadedModel(FakeOllama.Model, "", 100, 100, 0)], await client.LoadedAsync());
+        fake.Ps = new JsonObject { ["models"] = new JsonArray(new JsonObject { ["name"] = FakeOllama.Model, ["digest"] = FakeOllama.Digest, ["size"] = 5, ["size_vram"] = 4, ["context_length"] = 8192 }) };
+        Assert.Equal([new LoadedModel(FakeOllama.Model, FakeOllama.Digest, 5, 4, 8192)], await client.LoadedAsync());
         await client.UnloadAsync(FakeOllama.Model);
         Assert.Equal(0, fake.Requests[^1].Body!["keep_alive"]!.GetValue<int>());
     }
