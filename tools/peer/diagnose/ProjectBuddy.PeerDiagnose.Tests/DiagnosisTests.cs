@@ -50,7 +50,7 @@ public sealed class DiagnosisTests
         Assert.Equal("0.40.16", (string?)report["ollamaVersion"]);
         Assert.Equal(Fixtures.Parse().Sha256, (string?)report["policySha256"]);
         Assert.Equal(
-            """{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"classCorrected":false,"evidenceBytes":""" + Encoding.UTF8.GetByteCount(expected)
+            """{"numCtx":16384,"probePromptTokens":8194,"requests":3,"rounds":2,"toolCalls":1,"refusedCalls":0,"answerAttempts":1,"evidenceBytes":""" + Encoding.UTF8.GetByteCount(expected)
                 + ""","maxPromptTokens":500,"outputTokens":120,"seconds":6}""",
             report["receipt"]!.ToJsonString());
         Assert.Equal(1, sources.AdapterReads);
@@ -61,7 +61,8 @@ public sealed class DiagnosisTests
         Assert.True(JsonNode.DeepEquals(Diagnosis.ToolDefinitions(), chats[0]["tools"]));
         Assert.Null(chats[0]["format"]);
         Assert.Null(chats[2]["tools"]);
-        Assert.True(JsonNode.DeepEquals(Diagnosis.AnswerFormat(Fixtures.Parse(), Fixtures.Parse().Questions[0]), chats[2]["format"]));
+        Assert.True(JsonNode.DeepEquals(Diagnosis.AnswerFormat(Fixtures.Parse(), Fixtures.Parse().Questions[0], "link-up"), chats[2]["format"]));
+        Assert.Equal("""["link-up"]""", chats[2]["format"]!["properties"]!["class"]!["enum"]!.ToJsonString());
         Assert.Equal(["system", "user", "assistant", "tool", "user"], Messages(chats[2]).Select(message => (string?)message!["role"]));
         Assert.Equal("""[{"function":{"name":"network-link","arguments":{}}}]""", Messages(chats[2])[2]!["tool_calls"]!.ToJsonString());
         Assert.Equal("network-link", (string?)Messages(chats[2])[3]!["tool_name"]);
@@ -78,6 +79,7 @@ public sealed class DiagnosisTests
     [Fact]
     public async Task HoldsTheModelToTheClassItsRulesDecide()
     {
+        // The shape allows only the decided class; a server that ignored it still cannot get a contradiction through.
         var ollama = new FakeOllama();
         ollama.Replies.Enqueue(FakeOllama.Calls(("network-link", None)));
         ollama.Replies.Enqueue(FakeOllama.Reply(""));
@@ -87,14 +89,14 @@ public sealed class DiagnosisTests
         var report = await Run(ollama, policy);
 
         Assert.Equal("link-up", (string?)report["answer"]!["class"]);
-        Assert.True((bool)report["receipt"]!["classCorrected"]!);
+        Assert.Equal(2, (int)report["receipt"]!["answerAttempts"]!);
+        Assert.Null(report["receipt"]!["classCorrected"]);
         var retry = ollama.Chats.Last();
         Assert.Equal(
             "That answer was rejected: class \"no-active-link\" contradicts the policy's rules, which decide link-up from the results. "
                 + "Answer again with JSON only; cite exact single values at pointers that exist in the tool results above.",
             Content(retry, 6));
-        Assert.Equal("""["link-up"]""", retry["format"]!["properties"]!["class"]!["enum"]!.ToJsonString());
-        Assert.True(JsonNode.DeepEquals(Diagnosis.AnswerFormat(policy, policy.Questions[0], "link-up"), retry["format"]));
+        Assert.All(ollama.Chats.Skip(2), request => Assert.Equal("""["link-up"]""", request["format"]!["properties"]!["class"]!["enum"]!.ToJsonString()));
 
         ollama.Replies.Enqueue(FakeOllama.Calls(("network-link", None)));
         ollama.Replies.Enqueue(FakeOllama.Reply(""));
@@ -120,9 +122,10 @@ public sealed class DiagnosisTests
         Assert.Equal("""[{"function":{"name":"disk","arguments":{}}}]""", Messages(answer)[5]!["tool_calls"]!.ToJsonString());
         Assert.Equal((3, 2), ((int)report["receipt"]!["toolCalls"]!, (int)report["receipt"]!["refusedCalls"]!));
 
-        // Without a network-link result the rules cannot decide, so the class stays the model's, advisory.
+        // Without a network-link result the rules cannot decide, so the class stays the model's, advisory and free.
         Assert.Equal("""["citations"]""", report["verified"]!.ToJsonString());
         Assert.Null(report["rule"]);
+        Assert.Equal("""["link-up","no-active-link","inconclusive"]""", answer["format"]!["properties"]!["class"]!["enum"]!.ToJsonString());
         Assert.Equal("""[{"tool":"disk","arguments":{}}]""", new JsonArray([.. report["evidence"]!.AsArray().Select(item => (JsonNode)new JsonObject
         {
             ["tool"] = item!["tool"]!.DeepClone(),

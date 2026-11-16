@@ -38,8 +38,6 @@ internal sealed class Receipt
 
     public int AnswerAttempts { get; set; }
 
-    public bool ClassCorrected { get; set; }
-
     public int EvidenceBytes { get; set; }
 
     public int MaxPromptTokens { get; set; }
@@ -93,25 +91,27 @@ public static class Diagnosis
             }
         }
 
-        // The answer is asked for on its own, without tools and constrained to the answer's shape. What leaves passes the
+        // The answer is asked for on its own, without tools and constrained to the answer's shape. When the rules decide
+        // the class from the evidence, the shape allows only that class from the first attempt: the class is verified by
+        // construction and the model's attempts go to the finding and the citations (#302). What leaves passes the
         // redactor again and is grounded as redacted: tool results were already redacted, so true citations still match.
         // A rejected answer is shown its reason and may be given again, up to maxAnswerAttempts.
+        var decision = Rules.Decide(question.Rules, evidence);
         request.Remove("tools");
-        request["format"] = AnswerFormat(policy, question);
+        request["format"] = AnswerFormat(policy, question, decision.Class);
         messages.Add((JsonNode)new JsonObject { ["role"] = "user", ["content"] = policy.AnswerPrompt });
         JsonObject answer;
-        var decision = Rules.Decide(question.Rules, evidence);
         while (true)
         {
             var content = redact((await ChatAsync(ollama, policy, request, receipt)).Content).Text;
             receipt.AnswerAttempts++;
-            var contradicted = false;
             try
             {
                 answer = Ground(policy, question, evidence, content);
+
+                // The shape already allows only the decided class; this check holds even if a server ignored it.
                 if (decision.Class is { } decided && (string?)answer["class"] != decided)
                 {
-                    contradicted = true;
                     throw NoAdvice($"class {Show((string)answer["class"]!)} contradicts the policy's rules, which decide {decided} from the results");
                 }
 
@@ -119,14 +119,6 @@ public static class Diagnosis
             }
             catch (PeerException rejected) when (receipt.AnswerAttempts < policy.MaxAnswerAttempts)
             {
-                // After a contradiction the answer's shape allows only the decided class; the finding and the
-                // citations are still the model's, and still grounded.
-                if (contradicted)
-                {
-                    request["format"] = AnswerFormat(policy, question, decision.Class);
-                    receipt.ClassCorrected = true;
-                }
-
                 messages.Add((JsonNode)new JsonObject { ["role"] = "assistant", ["content"] = content });
                 messages.Add((JsonNode)new JsonObject
                 {
@@ -167,7 +159,6 @@ public static class Diagnosis
                 ["toolCalls"] = receipt.ToolCalls,
                 ["refusedCalls"] = receipt.Refused,
                 ["answerAttempts"] = receipt.AnswerAttempts,
-                ["classCorrected"] = receipt.ClassCorrected,
                 ["evidenceBytes"] = receipt.EvidenceBytes,
                 ["maxPromptTokens"] = receipt.MaxPromptTokens,
                 ["outputTokens"] = receipt.OutputTokens,
