@@ -125,16 +125,17 @@ internal sealed class Database(Options options)
             using var command = new NpgsqlCommand(sql, connection, transaction);
             foreach (var value in values)
             {
-                command.Parameters.Add(new() { Value = value });
+                command.Parameters.Add(value as NpgsqlParameter ?? new() { Value = value });
             }
 
             return command.ExecuteNonQuery();
         }
 
         Run("""
-            INSERT INTO kpi_v1.sessions (session_id, first_at, last_at, events) VALUES ($1, $2, $3, $4)
-            ON CONFLICT (session_id) DO UPDATE SET first_at = EXCLUDED.first_at, last_at = EXCLUDED.last_at, events = EXCLUDED.events
-            """, session.Id, session.First, session.Last, session.Events);
+            INSERT INTO kpi_v1.sessions (session_id, first_at, last_at, events, aiu) VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (session_id) DO UPDATE SET first_at = EXCLUDED.first_at, last_at = EXCLUDED.last_at, events = EXCLUDED.events, aiu = EXCLUDED.aiu
+            """, session.Id, session.First, session.Last, session.Events,
+            new NpgsqlParameter { Value = (object?)session.Aiu ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Numeric });
         var calls = Run("""
             INSERT INTO kpi_v1.model_calls (event_id, session_id, at, initiator, model, cost, input_tokens, output_tokens, cache_read_tokens, category)
             SELECT c.id, $1, c.at, c.initiator, c.model, c.cost, c.input, c.output, c.cache_read, c.category
@@ -145,6 +146,12 @@ internal sealed class Database(Options options)
             session.Calls.Select(c => c.Initiator).ToArray(), session.Calls.Select(c => c.Model).ToArray(), session.Calls.Select(c => c.Cost).ToArray(),
             session.Calls.Select(c => c.InputTokens).ToArray(), session.Calls.Select(c => c.OutputTokens).ToArray(),
             session.Calls.Select(c => c.CacheReadTokens).ToArray(), session.Calls.Select(c => c.Category).ToArray());
+
+        // A call's AIU share is set once a later checkpoint measures its interval.
+        Run("""
+            UPDATE kpi_v1.model_calls AS c SET aiu = m.aiu FROM unnest($1::uuid[], $2::numeric[]) AS m(id, aiu)
+            WHERE c.event_id = m.id AND c.aiu IS DISTINCT FROM m.aiu
+            """, session.Calls.Select(c => c.EventId).ToArray(), session.Calls.Select(c => c.Aiu).ToArray());
         Run("""
             INSERT INTO kpi_v1.tool_calls (session_id, tool_call_id, tool, started_at, completed_at, success)
             SELECT $1, t.id, t.tool, t.started, t.completed, t.success
@@ -168,6 +175,7 @@ internal sealed class Database(Options options)
             ["session"] = session.Id,
             ["events"] = session.Events,
             ["newModelCalls"] = calls,
+            ["aiu"] = session.Aiu,
             ["activeSpans"] = session.Spans.Count,
         };
     }

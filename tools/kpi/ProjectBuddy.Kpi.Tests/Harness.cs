@@ -111,13 +111,14 @@ internal sealed class Log
         return this;
     }
 
-    public Log Call(double minutes, decimal cost, JsonNode? toolCounts, string initiator = "agent", string model = "claude-opus-5.5") =>
+    // A usage record; aiu writes the exact billed AIU that agent sessions record per call.
+    public Log Call(double minutes, decimal cost, JsonNode? toolCounts, string initiator = "agent", string model = "claude-opus-5.5", decimal? aiu = null) =>
         Event("session.usage_record", minutes, new JsonObject
         {
             ["usage"] = new JsonObject
             {
                 ["initiator"] = initiator, ["model"] = model, ["cost"] = cost, ["inputTokens"] = 100, ["outputTokens"] = 10,
-                ["cacheReadTokens"] = 90, ["toolCounts"] = toolCounts,
+                ["cacheReadTokens"] = 90, ["toolCounts"] = toolCounts, ["copilotUsage"] = aiu is null ? null : Total(aiu),
             },
         });
 
@@ -129,6 +130,11 @@ internal sealed class Log
 
     public Log Done(string id, double minutes, bool success = true, string content = "ok") =>
         Event("tool.execution_complete", minutes, new JsonObject { ["toolCallId"] = id, ["success"] = success, ["result"] = new JsonObject { ["content"] = content } });
+
+    // A cumulative agent-session checkpoint, or a CLI process's shutdown total; null writes one without a total.
+    public Log Checkpoint(double minutes, decimal? aiu) => Event("session.usage_checkpoint", minutes, Total(aiu));
+
+    public Log Shutdown(double minutes, decimal? aiu) => Event("session.shutdown", minutes, Total(aiu));
 
     public Log Raw(string line)
     {
@@ -145,4 +151,6 @@ internal sealed class Log
     }
 
     public TextReader Reader() => new StringReader(string.Join('\n', lines));
+
+    private static JsonObject Total(decimal? aiu) => aiu is { } value ? new JsonObject { ["totalNanoAiu"] = value * 1_000_000_000m } : [];
 }
