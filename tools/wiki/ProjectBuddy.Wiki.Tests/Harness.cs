@@ -41,6 +41,13 @@ internal sealed class Server : IDisposable
         command.ExecuteNonQuery();
     }
 
+    public object? Scalar(string[] connection, string sql)
+    {
+        using var data = Open(connection[^1]);
+        using var command = new NpgsqlCommand(sql, data);
+        return command.ExecuteScalar();
+    }
+
     public void Dispose()
     {
         using var server = Open("postgres");
@@ -61,6 +68,7 @@ internal sealed class Server : IDisposable
             Password = File.ReadAllText(PasswordFile).TrimEnd('\r', '\n'),
             Database = database,
             Pooling = false,
+            IncludeErrorDetail = true,
         }.ConnectionString);
         connection.Open();
         return connection;

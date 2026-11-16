@@ -6,6 +6,22 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-wiki project` projects the wiki's requirement and test pages
+  for the RSR registry (#309, slice 2 of #307).
+  - Migration `0003` parses each governed page in exactly one canonical
+    layout, and renders it back byte for byte.
+  - It derives the `verifies`, `allocates` and `supersedes` edges from wiki
+    links.
+  - `wiki_v1.registry_envelope` builds the `rsr/registry-snapshot@1` envelope
+    of each scope, with node texts byte-identical to RSR's.
+  - Any page or link that cannot be exported is listed by `project` (exit 1),
+    and refuses every envelope.
+  - Exit code 1 is now named `Findings`; it covers drift and projection
+    problems.
+  - Migration `0002` makes `seed` linear in the number of files. Seeding
+    10,001 files took 25 s, because the check that no file shares its name
+    with a directory was planned as a nested loop.
+
 - `projectbuddy-wiki` keeps a local working copy of the GitHub wiki in
   PostgreSQL (#308, slice 1 of #307).
   - `seed` records the wiki clone's committed bytes as an append-only

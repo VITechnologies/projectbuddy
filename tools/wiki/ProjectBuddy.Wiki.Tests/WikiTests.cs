@@ -20,6 +20,7 @@ public sealed class ParseTests
     [InlineData("check", "--password-file", Password)]
     [InlineData("render", "--password-file", Password)]
     [InlineData("render", "--out", "/o", "--commit", "abc", "--password-file", Password)]
+    [InlineData("project", "--wiki", "/w", "--password-file", Password)]
     [InlineData("migrate", "--port", "0", "--password-file", Password)]
     [InlineData("migrate", "--port", "x", "--password-file", Password)]
     [InlineData("migrate", "--host", "bad host!", "--password-file", Password)]
@@ -197,12 +198,13 @@ public sealed class DatabaseTests : IDisposable
     public void MigratesOnceAndRefusesAChangedMigration()
     {
         var connection = server.NewDatabase();
+        var names = string.Join(",", Database.Migrations().Select(migration => $"\"{migration.Name}\""));
         var (exit, output, _) = Cli.Run(["migrate", "--create-database", .. connection]);
         Assert.Equal(0, exit);
-        Assert.Equal("""{"database":"DB","created":true,"applied":["0001_wiki_v1.sql"],"present":[]}""".Replace("DB", connection[^1]), output.Trim());
+        Assert.Equal($$"""{"database":"{{connection[^1]}}","created":true,"applied":[{{names}}],"present":[]}""", output.Trim());
 
         var again = Cli.Run(["migrate", "--create-database", .. connection]);
-        Assert.Equal("""{"database":"DB","created":false,"applied":[],"present":["0001_wiki_v1.sql"]}""".Replace("DB", connection[^1]), again.Output.Trim());
+        Assert.Equal($$"""{"database":"{{connection[^1]}}","created":false,"applied":[],"present":[{{names}}]}""", again.Output.Trim());
 
         server.Execute(connection, "UPDATE public.wiki_schema_migrations SET sha256 = repeat('0', 64)");
         var tampered = Cli.Run(["migrate", .. connection]);
@@ -216,7 +218,7 @@ public sealed class DatabaseTests : IDisposable
         var (exit, _, error) = Cli.Run(["migrate", .. server.NewDatabase()]);
         Assert.Equal(ExitCodes.Database, exit);
         Assert.Contains("does not exist", error);
-        Assert.Single(Database.Migrations());
+        Assert.Equal([(1, "0001_wiki_v1.sql"), (2, "0002_ingest_parent_check.sql"), (3, "0003_wiki_projection.sql")], Database.Migrations().Select(migration => (migration.Version, migration.Name)));
     }
 
     [Fact]
@@ -229,7 +231,7 @@ public sealed class DatabaseTests : IDisposable
             Assert.All(runs, run => Assert.Equal(0, run.Exit));
             var results = runs.Select(run => JsonNode.Parse(run.Output)!.AsObject()).ToList();
             Assert.Single(results, result => (bool)result["created"]!);
-            Assert.Single(results, result => result["applied"]!.AsArray().Count == 1);
+            Assert.Single(results, result => result["applied"]!.AsArray().Count == Database.Migrations().Count);
         }
     }
 
@@ -550,7 +552,7 @@ public sealed class CheckTests : IDisposable
         var connection = server.Migrated();
         var commit = repo.Write("Home.md", "home\n").Write("gone.md", "gone\n").Commit();
         var nothing = Check(connection);
-        Assert.Equal(ExitCodes.Drift, nothing.Exit);
+        Assert.Equal(ExitCodes.Findings, nothing.Exit);
         Assert.Equal("nothing is recorded yet; run seed first", (string?)nothing.Result["reason"]);
 
         Cli.Run(["seed", "--wiki", repo.Path, .. connection]);
@@ -561,7 +563,7 @@ public sealed class CheckTests : IDisposable
         // The wiki moved on without a seed: every kind of difference is listed.
         repo.Write("Home.md", "edited\n").Remove("gone.md").Write("new.md", "new\n").Commit();
         var drift = Check(connection);
-        Assert.Equal(ExitCodes.Drift, drift.Exit);
+        Assert.Equal(ExitCodes.Findings, drift.Exit);
         Assert.Equal(
             """[{"path":"Home.md","change":"different"},{"path":"gone.md","change":"only-in-database"},{"path":"new.md","change":"only-in-wiki"}]""",
             drift.Result["differences"]!.ToJsonString());

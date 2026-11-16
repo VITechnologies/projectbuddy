@@ -11,7 +11,7 @@ namespace ProjectBuddy.Wiki;
 public static class ExitCodes
 {
     public const int Ok = 0;
-    public const int Drift = 1;
+    public const int Findings = 1;
     public const int Usage = 2;
     public const int Refused = 3;
     public const int Database = 5;
@@ -41,6 +41,7 @@ public static partial class Program
 {
     public const string Usage =
         "usage: projectbuddy-wiki migrate [--create-database] | seed --wiki <clone> | render --out <dir> [--commit <sha>] | check --wiki <clone>"
+        + " | project [--commit <sha>]"
         + " --password-file <path> [--host <host>] [--port <n>] [--user <name>] [--database <name>] [--git <path>]";
 
     public const string DefaultGit = "/usr/bin/git";
@@ -57,15 +58,17 @@ public static partial class Program
             var options = Parse(args);
             var database = new Database(options);
             var git = new Git(options.Git);
-            var result = options.Command switch
+            // Findings are what check and project report rather than refuse: drift, or pages that cannot be exported.
+            var (result, findings) = options.Command switch
             {
-                "migrate" => database.Migrate(options.CreateDatabase),
-                "seed" => Commands.Seed(database, git, options.Wiki!),
-                "render" => Commands.Render(database, git, options.Out!, options.Commit),
+                "migrate" => (database.Migrate(options.CreateDatabase), false),
+                "seed" => (Commands.Seed(database, git, options.Wiki!), false),
+                "render" => (Commands.Render(database, git, options.Out!, options.Commit), false),
+                "project" => Commands.Project(database, options.Commit),
                 _ => Commands.Check(database, git, options.Wiki!),
             };
             stdout.WriteLine(result.ToJsonString(Output));
-            return result["drift"] is JsonValue drift && drift.GetValue<bool>() ? ExitCodes.Drift : ExitCodes.Ok;
+            return findings ? ExitCodes.Findings : ExitCodes.Ok;
         }
         catch (WikiException error)
         {
@@ -96,9 +99,9 @@ public static partial class Program
 
     internal static Options Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("migrate" or "seed" or "render" or "check"))
+        if (args.Length == 0 || args[0] is not ("migrate" or "seed" or "render" or "check" or "project"))
         {
-            throw UsageError("expected a command: migrate, seed, render or check");
+            throw UsageError("expected a command: migrate, seed, render, check or project");
         }
 
         var command = args[0];
@@ -106,6 +109,7 @@ public static partial class Program
         {
             "migrate" => ["--create-database"],
             "render" => ["--out", "--commit"],
+            "project" => ["--commit"],
             _ => ["--wiki"],
         };
         string[] common = ["--password-file", "--host", "--port", "--user", "--database", "--git"];
