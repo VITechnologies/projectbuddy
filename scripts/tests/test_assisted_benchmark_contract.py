@@ -57,7 +57,7 @@ def authorization(contract, **overrides):
         ],
         "targetVmUuids": [VM_UUID],
         "ollamaModel": {
-            "tag": "projectbuddy:0.2-qwen2.5-7b",
+            "tag": "projectbuddy:0.3-qwen2.5-7b",
             "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
         },
         "evidenceFields": ["captureMetadata", "frameHashes"],
@@ -208,7 +208,7 @@ def test_per_run_approval_allows_only_named_tools_and_never_executes_plan_text()
     allowed = module.authorize_tool_call("get_benchmark_series", {}, auth, contract)
     assert allowed["allowed"] is True
     assert allowed["effect"] == "read-only"
-    assert allowed["ollamaModel"]["tag"] == "projectbuddy:0.2-qwen2.5-7b"
+    assert allowed["ollamaModel"]["tag"] == "projectbuddy:0.3-qwen2.5-7b"
     assert allowed["executesMcpResultCommands"] is False
 
     plan = module.authorize_tool_call("teardown", {"plane": "VBOX", "id": "witness-1"}, auth, contract)

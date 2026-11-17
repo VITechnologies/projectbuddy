@@ -18,9 +18,10 @@ release's notes for the exact pinned commit.
     out-of-range value is refused (exit 64).
   - The model must be in the peer's deployment-written allowlist at
     `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`. The
-    format is `projectbuddy/peer-infer-allowlist@2`, in which each model has
-    a name, a pinned digest and `ports`. `@1` files, without ports, are
-    still accepted.
+    format is `projectbuddy/peer-infer-allowlist@3`, in which each model has
+    a name, a pinned digest, and optional `ports` and `itemTimeoutSeconds`.
+    `@2` files (without `itemTimeoutSeconds`) and `@1` files (without
+    `ports` either) are still accepted, with the defaults.
   - `ports` is a non-empty, distinct subset of the fixed set 11434 (NVIDIA
     GPU) and 11435 (Intel Arc iGPU, Vulkan), and defaults to `[11434]`. The
     model must be installed with exactly its pinned digest on every listed
@@ -31,9 +32,13 @@ release's notes for the exact pinned commit.
     busy.
   - Host facts give 11434 four workers and 11435 two. Each must equal its
     server's `OLLAMA_NUM_PARALLEL` (deployment sets 4 and 2), so items never
-    queue inside Ollama and the 120 s per-item timeout covers generation,
-    not queueing. The whole call has 600 s. Any failure fails the whole call
-    (exit 66), with no partial answer.
+    queue inside Ollama and the item timeout covers generation, not
+    queueing.
+  - Each model's `itemTimeoutSeconds` (30 to 900, default 120) bounds its
+    digest check and each of its items, so a slow accelerator or a
+    reasoning model can have longer than 120 s. The whole call, from reading
+    the request to the last answer, has a fixed 1800 s; a batch must fit in
+    it. Any failure fails the whole call (exit 66), with no partial answer.
   - The peer always caps generation at `num_predict` 4096 tokens per item,
     thinking included. Only the final message content is returned, never
     the thinking text. One answer over 16 KiB of UTF-8 fails the call with
@@ -42,16 +47,18 @@ release's notes for the exact pinned commit.
     that answered, per id, and is at most 1 MiB. Every other verb keeps its
     16 KiB limit and its behaviour.
   - `ask infer --request <file>` sends the file's bytes with the same fixed
-    ssh invocation. It waits 620 s and checks that every requested id is
-    answered exactly once, from an allowed port.
-- The `projectbuddy` identity moves to 0.2, because its pinned
-  `tools/peer/README.md` now documents `diagnose` and `infer`. The
-  generator now names the model `projectbuddy:0.2-<base>`.
+    ssh invocation. It waits the peer's fixed 1800 s plus 20 s and the
+    connect timeout, and checks that every requested id is answered exactly
+    once, from an allowed port.
+- The `projectbuddy` identity moves to 0.3, because its pinned
+  `tools/peer/README.md` now documents `diagnose` and `infer`: 0.2 with the
+  verb, and 0.3 with per-model item timeouts. The generator now names the
+  model `projectbuddy:0.3-<base>`.
   - `projectbuddy-probes` follows: its default `--identity`
-    (`ProbeOptions.IdentityModel`) is now `projectbuddy:0.2-qwen2.5-7b`. A
+    (`ProbeOptions.IdentityModel`) is now `projectbuddy:0.3-qwen2.5-7b`. A
     test ties it to `identity.json`'s version, so a later bump cannot drift.
   - `projectbuddy-diagnose` uses that default, so its `ollama-empty`
-    question reports `identity-present` only when the 0.2 identity is
+    question reports `identity-present` only when the 0.3 identity is
     installed. Rebuild the identity on the peer before deploying probes or
     diagnose from this release.
 

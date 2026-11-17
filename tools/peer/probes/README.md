@@ -126,7 +126,7 @@ projectbuddy-probes run-all [--hours <1-72>]
 - `--ollama` must be `http://` followed by a loopback IP literal and a port. The
   client ignores proxy settings and refuses redirects.
 - `--identity` names the pinned model. The default is
-  `projectbuddy:0.2-qwen2.5-7b`: the version in `identity/identity.json` on
+  `projectbuddy:0.3-qwen2.5-7b`: the version in `identity/identity.json` on
   the `qwen2.5:7b` base. A test fails if the two drift.
 
 | Exit code | Meaning |

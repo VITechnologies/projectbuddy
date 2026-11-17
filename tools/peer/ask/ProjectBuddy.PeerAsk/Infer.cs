@@ -15,12 +15,14 @@ public sealed record InferOptions(double? Temperature, long? Seed, long? NumCtx,
 
 public sealed record InferRequest(string Model, InferOptions Options, IReadOnlyList<InferItem> Items);
 
-// An allowlisted model: its digest pin, and the loopback Ollama ports that serve it, each checked against the pin.
-public sealed record InferModel(ModelPin Pin, IReadOnlyList<int> Ports);
+// An allowlisted model: its digest pin, the loopback Ollama ports that serve it (each checked against the pin), and how
+// long each of its Ollama calls may take.
+public sealed record InferModel(ModelPin Pin, IReadOnlyList<int> Ports, int ItemTimeoutSeconds = Infer.DefaultItemTimeoutSeconds);
 
-public sealed record InferLimits(TimeSpan Item, TimeSpan Total)
+// Second is how long one allowlist second lasts: a real second, except in tests. Total is the whole-call limit.
+public sealed record InferLimits(TimeSpan Second, TimeSpan Total)
 {
-    public static readonly InferLimits Default = new(Infer.ItemTimeout, Infer.Timeout);
+    public static readonly InferLimits Default = new(TimeSpan.FromSeconds(1), Infer.Timeout);
 }
 
 internal sealed record InferAnswer(string Id, string Text, int EvalCount, int PromptEvalCount, double Seconds, int Port);
@@ -31,9 +33,10 @@ public static partial class Infer
 {
     public const string Verb = "infer";
     public const string RequestSchema = "projectbuddy/peer-infer-request@1";
-    public const string AllowlistSchema = "projectbuddy/peer-infer-allowlist@2";
+    public const string AllowlistSchema = "projectbuddy/peer-infer-allowlist@3";
 
-    // @1 entries have no ports and mean DefaultPort.
+    // Older allowlists stay valid: @2 entries have no item timeout, and @1 entries have no ports either.
+    public const string AllowlistSchemaV2 = "projectbuddy/peer-infer-allowlist@2";
     public const string AllowlistSchemaV1 = "projectbuddy/peer-infer-allowlist@1";
 
     // The peer's two loopback Ollama servers: the NVIDIA GPU, and the Intel Arc iGPU through Vulkan. Fixed, not configurable.
@@ -56,8 +59,13 @@ public static partial class Infer
     // of at most 16 KiB.
     public const int MaxPredictTokens = 4096;
     public const int MaxAnswerBytes = 16 * 1024;
-    public static readonly TimeSpan ItemTimeout = TimeSpan.FromSeconds(120);
-    public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(600);
+
+    // Each Ollama call of a batch (the digest check and every item) has its model's itemTimeoutSeconds. The whole call,
+    // from reading the request to the last answer, has a fixed limit, which the client's wait is derived from.
+    public const int DefaultItemTimeoutSeconds = 120;
+    public const int MinItemTimeoutSeconds = 30;
+    public const int MaxItemTimeoutSeconds = 900;
+    public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1800);
 
     private static readonly JsonDocumentOptions Strict = new() { AllowDuplicateProperties = false, MaxDepth = 8 };
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -124,8 +132,8 @@ public static partial class Infer
         return new InferRequest(model, options, parsed);
     }
 
-    // The allowlist deployment writes on the peer: {"schema", "models": [{"name", "digest", "ports"}]}, where @2 entries may
-    // name ports and @1 entries may not. Anything unusable is a refusal.
+    // The allowlist deployment writes on the peer: {"schema", "models": [{"name", "digest", "ports", "itemTimeoutSeconds"}]}.
+    // @3 entries may set both optional keys, @2 entries only ports, and @1 entries neither. Anything unusable is a refusal.
     public static IReadOnlyDictionary<string, InferModel> ParseAllowlist(byte[]? utf8)
     {
         if (utf8 is null)
@@ -135,13 +143,18 @@ public static partial class Infer
 
         var root = ParseObject(utf8, "the allowlist");
         Keys(root, "the allowlist", ["schema", "models"], []);
-        var schema = Text(root["schema"]);
-        if ((schema != AllowlistSchema && schema != AllowlistSchemaV1) || root["models"] is not JsonArray models || models.Count is < 1 or > MaxAllowlistModels)
+        string[] optional = Text(root["schema"]) switch
         {
-            throw new RefusedException($"the allowlist must be {AllowlistSchema} or {AllowlistSchemaV1} with 1 to {MaxAllowlistModels} models");
+            AllowlistSchema => ["ports", "itemTimeoutSeconds"],
+            AllowlistSchemaV2 => ["ports"],
+            AllowlistSchemaV1 => [],
+            _ => throw new RefusedException($"the allowlist schema must be {AllowlistSchema}, {AllowlistSchemaV2} or {AllowlistSchemaV1}"),
+        };
+        if (root["models"] is not JsonArray models || models.Count is < 1 or > MaxAllowlistModels)
+        {
+            throw new RefusedException($"the allowlist must have 1 to {MaxAllowlistModels} models");
         }
 
-        string[] optional = schema == AllowlistSchema ? ["ports"] : [];
         var allowed = new Dictionary<string, InferModel>(StringComparer.Ordinal);
         foreach (var node in models)
         {
@@ -162,7 +175,10 @@ public static partial class Infer
             }
 
             var ports = entry.ContainsKey("ports") ? Ports(entry["ports"]) : [DefaultPort];
-            if (!allowed.TryAdd(pin.Name, new InferModel(pin, ports)))
+            var itemTimeout = entry.ContainsKey("itemTimeoutSeconds")
+                ? (int)Integer(entry["itemTimeoutSeconds"], "itemTimeoutSeconds", MinItemTimeoutSeconds, MaxItemTimeoutSeconds)
+                : DefaultItemTimeoutSeconds;
+            if (!allowed.TryAdd(pin.Name, new InferModel(pin, ports, itemTimeout)))
             {
                 throw new RefusedException($"{pin.Name} is allowlisted twice");
             }
@@ -172,16 +188,18 @@ public static partial class Infer
     }
 
     // The peer side. The whole-call timeout covers reading the request, the allowlist and digest checks, and every
-    // prompt; Ollama has a per-prompt timeout. Any failure fails the whole call, so no partial answer is ever sent.
+    // prompt; each Ollama call has its model's item timeout. Any failure fails the whole call, so no partial answer is ever
+    // sent.
     public static byte[] Render(Stream stdin, HttpMessageHandler handler, IHostFacts facts, InferLimits limits)
     {
-        // One client per allowed port; disposing them on the way out cancels any prompt still running after a failure or
-        // the timeout.
-        var clients = AllowedPorts.ToDictionary(port => port, port => new OllamaClient(handler, OllamaClient.RequireLoopback($"http://{OllamaHost}:{port}/"), limits.Item));
+        // One client per allowed port, with the longest item timeout as a backstop; the model's own timeout is applied per
+        // call. Disposing the clients on the way out cancels any prompt still running after a failure or the timeout.
+        var clients = AllowedPorts.ToDictionary(port => port,
+            port => new OllamaClient(handler, OllamaClient.RequireLoopback($"http://{OllamaHost}:{port}/"), limits.Second * MaxItemTimeoutSeconds));
         using var stop = new CancellationTokenSource();
         try
         {
-            var work = Task.Run(() => RunAsync(stdin, clients, facts, stop.Token));
+            var work = Task.Run(() => RunAsync(stdin, clients, facts, limits.Second, stop.Token));
             var finished = Task.WhenAny(work, Task.Delay(limits.Total, stop.Token)).GetAwaiter().GetResult();
             stop.Cancel();
             return finished == work ? work.GetAwaiter().GetResult() : throw new TimeoutException("infer exceeded its whole-call timeout");
@@ -195,17 +213,18 @@ public static partial class Infer
         }
     }
 
-    internal static async Task<byte[]> RunAsync(Stream stdin, IReadOnlyDictionary<int, OllamaClient> clients, IHostFacts facts, CancellationToken stop)
+    internal static async Task<byte[]> RunAsync(Stream stdin, IReadOnlyDictionary<int, OllamaClient> clients, IHostFacts facts, TimeSpan second, CancellationToken stop)
     {
         var request = ParseRequest(await BoundedFile.ReadAsync(stdin, MaxRequestBytes, stop) ?? throw new RefusedException("the request is over 1 MiB"));
         var allowlist = ParseAllowlist(ReadAllowlist(facts.InferAllowlistPath));
         var model = allowlist.GetValueOrDefault(request.Model) ?? throw new RefusedException($"{request.Model} is not allowlisted");
+        var itemTimeout = second * model.ItemTimeoutSeconds;
         try
         {
             // Never pulls: every listed port's server must already have the model with exactly the pinned digest.
             foreach (var port in model.Ports)
             {
-                await ModelPin.RequireInstalledAsync(clients[port], [model.Pin]);
+                await ModelPin.RequireInstalledAsync(clients[port], [model.Pin]).WaitAsync(itemTimeout);
             }
         }
         catch (PeerException error) when (error.ExitCode == PeerOllama.ExitCodes.Refused)
@@ -220,7 +239,7 @@ public static partial class Infer
         using var abandon = CancellationTokenSource.CreateLinkedTokenSource(stop);
         var pending = model.Ports
             .SelectMany(port => Enumerable.Range(0, Math.Clamp(facts.InferWorkers(port), 1, MaxItems))
-                .Select(_ => WorkAsync(port, clients[port], request, queue, answers, abandon.Token)))
+                .Select(_ => WorkAsync(port, clients[port], itemTimeout, request, queue, answers, abandon.Token)))
             .ToList();
         while (pending.Count > 0)
         {
@@ -297,15 +316,16 @@ public static partial class Infer
         return chat;
     }
 
-    // One worker on one port: takes items off the shared queue until it is empty or the batch is abandoned.
-    internal static async Task WorkAsync(int port, OllamaClient ollama, InferRequest request, ConcurrentQueue<int> queue, InferAnswer[] answers, CancellationToken abandon)
+    // One worker on one port: takes items off the shared queue until it is empty or the batch is abandoned. An item over its
+    // timeout fails the batch, and the call it leaves running is cancelled when the clients are disposed.
+    internal static async Task WorkAsync(int port, OllamaClient ollama, TimeSpan itemTimeout, InferRequest request, ConcurrentQueue<int> queue, InferAnswer[] answers, CancellationToken abandon)
     {
         while (!abandon.IsCancellationRequested && queue.TryDequeue(out var index))
         {
             var item = request.Items[index];
 
             // Only the final message content is kept: Ollama returns thinking text in a separate field, which is dropped.
-            var result = await ollama.ChatAsync(ChatRequest(request, item));
+            var result = await ollama.ChatAsync(ChatRequest(request, item)).WaitAsync(itemTimeout);
             if (Encoding.UTF8.GetByteCount(result.Content) > MaxAnswerBytes)
             {
                 throw new AnswerLimitException();

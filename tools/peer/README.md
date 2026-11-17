@@ -104,12 +104,15 @@ The workstation sends a batch of prompts to the peer's GPU.
   `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`
   (`~/.local/share/projectbuddy/peer-ask/infer/allowlist.json` on Linux),
   which deployment writes:
-  `{"schema":"projectbuddy/peer-infer-allowlist@2","models":[{"name":"<name:tag>","digest":"<64 hex>","ports":[11434,11435]}]}`.
+  `{"schema":"projectbuddy/peer-infer-allowlist@3","models":[{"name":"<name:tag>","digest":"<64 hex>","ports":[11434,11435],"itemTimeoutSeconds":300}]}`.
   - At most 64 KiB and 64 models; names are lowercase `name:tag`.
   - `ports` picks the peer's loopback Ollama servers: 11434 (NVIDIA GPU)
     and 11435 (Intel Arc iGPU, Vulkan). The set is fixed. The list is
-    non-empty and distinct, and defaults to `[11434]`. An `@1` file has no
-    `ports` and means `[11434]`.
+    non-empty and distinct, and defaults to `[11434]`.
+  - `itemTimeoutSeconds` (30 to 900, default 120) bounds each of the
+    model's Ollama calls, for slow accelerators and reasoning models.
+  - `@2` files (no `itemTimeoutSeconds`) and `@1` files (no `ports`
+    either) are still accepted, with the defaults.
   - Each listed server's `/api/tags` must show the model with exactly that
     digest. The peer never pulls. A missing or malformed allowlist refuses
     everything.
@@ -121,8 +124,10 @@ The workstation sends a batch of prompts to the peer's GPU.
     servers stay busy. Host facts give 11434 four workers and 11435 two.
   - Each port's worker count must equal its server's `OLLAMA_NUM_PARALLEL`
     (deployment sets 4 and 2). Items then never queue inside Ollama, and
-    the 120 s per item covers generation, not queueing. The whole call,
-    including reading the request, has 600 s.
+    the item timeout covers generation, not queueing.
+  - The whole call, from reading the request to the last answer, has a
+    fixed 1800 s. A batch must fit: about ceil(items / workers) times the
+    item time.
   - The peer always sets `num_predict` to 4096 tokens; callers cannot raise
     it. Thinking tokens count against it, and only the final message
     content is returned, never the thinking text.
@@ -134,7 +139,7 @@ The workstation sends a batch of prompts to the peer's GPU.
   call (66), with no partial answer. One answer over 16 KiB of UTF-8, or a
   whole answer over 1 MiB, is 65 (output limit).
 - **Client:** sends the file's bytes unchanged, after the same checks. It
-  waits 620 s plus the connect timeout. It accepts only an answer that names
+  waits the peer's 1800 s plus 20 s and the connect timeout. It accepts only an answer that names
   the model and a digest and answers every requested id exactly once, from
   an allowed port.
 - **Security:** the request carries no path, command or tool, and nothing
@@ -154,7 +159,7 @@ source fails closed:
 
 ```bash
 python3 scripts/New-PeerModelfile.py --manifest tools/peer/identity/identity.json --base qwen2.5:7b --output Modelfile
-ollama create projectbuddy:0.2-qwen2.5-7b -f Modelfile
+ollama create projectbuddy:0.3-qwen2.5-7b -f Modelfile
 ```
 
 Editing a pinned source (this README is one of them) means updating its digest
