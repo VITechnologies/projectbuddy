@@ -30,9 +30,10 @@ public interface IHostFacts
     string DiagnosePolicyPath { get; }
     string DenyListPath { get; }
 
-    // infer (#358): the deployment-written model allowlist, and how many prompts run at once on each Ollama port.
+    // infer (#358): the deployment-written model allowlist, and how many prompts run at once on each Ollama port. A port's
+    // worker count must equal its server's OLLAMA_NUM_PARALLEL, so no item waits in Ollama's queue.
     string InferAllowlistPath { get; }
-    int InferConcurrency { get; }
+    int InferWorkers(int port);
 
     IReadOnlyList<Volume> FixedVolumes();
 }
@@ -210,7 +211,8 @@ public sealed class SystemFacts : IHostFacts
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "infer", "allowlist.json")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-ask", "infer", "allowlist.json");
 
-    public int InferConcurrency => 4;
+    // The deployment sets OLLAMA_NUM_PARALLEL=4 on the RTX server (11434) and 2 on the Arc iGPU server (11435).
+    public int InferWorkers(int port) => port == 11434 ? 4 : 2;
 
     private static string DiagnoseDirectory => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "diagnose")

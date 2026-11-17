@@ -9,8 +9,9 @@ namespace ProjectBuddy.PeerAsk;
 
 public sealed record InferItem(string Id, string Prompt, bool Json);
 
-// Only the options a caller may set; each one reaches Ollama only when the request gives it.
-public sealed record InferOptions(double? Temperature, long? Seed, long? NumCtx);
+// Only the options a caller may set; each one reaches Ollama only when the request gives it. Think is Ollama's top-level
+// "think" switch, not a model option.
+public sealed record InferOptions(double? Temperature, long? Seed, long? NumCtx, bool? Think = null);
 
 public sealed record InferRequest(string Model, InferOptions Options, IReadOnlyList<InferItem> Items);
 
@@ -50,6 +51,11 @@ public static partial class Infer
     public const double MaxTemperature = 2;
     public const int MinNumCtx = 512;
     public const int MaxNumCtx = 32768;
+
+    // Fixed on the peer, never set by the caller: at most 4096 generated tokens per item, thinking included, and an answer
+    // of at most 16 KiB.
+    public const int MaxPredictTokens = 4096;
+    public const int MaxAnswerBytes = 16 * 1024;
     public static readonly TimeSpan ItemTimeout = TimeSpan.FromSeconds(120);
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(600);
 
@@ -77,7 +83,7 @@ public static partial class Infer
             throw new RefusedException($"model must be a string of 1 to {MaxModelChars} characters");
         }
 
-        var options = root.ContainsKey("options") ? Options(root["options"]) : new InferOptions(null, null, null);
+        var options = root.ContainsKey("options") ? Options(root["options"]) : new InferOptions(null, null, null, null);
         if (root["items"] is not JsonArray items || items.Count is < 1 or > MaxItems)
         {
             throw new RefusedException($"items must be an array of 1 to {MaxItems} items");
@@ -207,14 +213,14 @@ public static partial class Infer
             throw new RefusedException(error.Message);
         }
 
-        // One shared queue; each port runs the configured number of workers, and a free worker on either port takes the
-        // next item, so a faster server answers more of the batch and neither sits idle while items remain.
+        // One shared queue; each port runs as many workers as its server has slots, and a free worker on either port takes
+        // the next item, so a faster server answers more of the batch and neither sits idle while items remain.
         var queue = new ConcurrentQueue<int>(Enumerable.Range(0, request.Items.Count));
         var answers = new InferAnswer[request.Items.Count];
-        var workers = Math.Clamp(facts.InferConcurrency, 1, MaxItems);
         using var abandon = CancellationTokenSource.CreateLinkedTokenSource(stop);
         var pending = model.Ports
-            .SelectMany(port => Enumerable.Range(0, workers).Select(_ => WorkAsync(port, clients[port], request, queue, answers, abandon.Token)))
+            .SelectMany(port => Enumerable.Range(0, Math.Clamp(facts.InferWorkers(port), 1, MaxItems))
+                .Select(_ => WorkAsync(port, clients[port], request, queue, answers, abandon.Token)))
             .ToList();
         while (pending.Count > 0)
         {
@@ -250,16 +256,18 @@ public static partial class Infer
         });
     }
 
-    // One user message and nothing else: no system prompt, no tools, no images, so the model sees only the prompt.
+    // One user message and nothing else: no system prompt, no tools, no images, so the model sees only the prompt. The
+    // generation cap is always set.
     internal static JsonObject ChatRequest(InferRequest request, InferItem item)
     {
+        var options = new JsonObject();
         var chat = new JsonObject
         {
             ["model"] = request.Model,
             ["stream"] = false,
             ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = item.Prompt }),
+            ["options"] = options,
         };
-        var options = new JsonObject();
         if (request.Options.Temperature is { } temperature)
         {
             options["temperature"] = temperature;
@@ -275,9 +283,10 @@ public static partial class Infer
             options["num_ctx"] = numCtx;
         }
 
-        if (options.Count > 0)
+        options["num_predict"] = MaxPredictTokens;
+        if (request.Options.Think is { } think)
         {
-            chat["options"] = options;
+            chat["think"] = think;
         }
 
         if (item.Json)
@@ -294,7 +303,14 @@ public static partial class Infer
         while (!abandon.IsCancellationRequested && queue.TryDequeue(out var index))
         {
             var item = request.Items[index];
+
+            // Only the final message content is kept: Ollama returns thinking text in a separate field, which is dropped.
             var result = await ollama.ChatAsync(ChatRequest(request, item));
+            if (Encoding.UTF8.GetByteCount(result.Content) > MaxAnswerBytes)
+            {
+                throw new AnswerLimitException();
+            }
+
             answers[index] = new InferAnswer(item.Id, result.Content, result.OutputTokens, result.PromptTokens, result.Seconds, port);
         }
     }
@@ -339,12 +355,16 @@ public static partial class Infer
             throw new RefusedException("options must be an object");
         }
 
-        Keys(options, "options", [], ["temperature", "seed", "num_ctx"]);
+        Keys(options, "options", [], ["temperature", "seed", "num_ctx", "think"]);
         return new InferOptions(
             options.ContainsKey("temperature") ? Number(options["temperature"], "options.temperature", 0, MaxTemperature) : null,
             options.ContainsKey("seed") ? Integer(options["seed"], "options.seed", 0, int.MaxValue) : null,
-            options.ContainsKey("num_ctx") ? Integer(options["num_ctx"], "options.num_ctx", MinNumCtx, MaxNumCtx) : null);
+            options.ContainsKey("num_ctx") ? Integer(options["num_ctx"], "options.num_ctx", MinNumCtx, MaxNumCtx) : null,
+            options.ContainsKey("think") ? Boolean(options["think"], "options.think") : null);
     }
+
+    private static bool Boolean(JsonNode? node, string what) =>
+        node is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : throw new RefusedException($"{what} must be true or false");
 
     private static JsonObject ParseObject(byte[] utf8, string what)
     {
@@ -398,3 +418,6 @@ public static partial class Infer
 // A refusal: the peer answers exit 64 with its fixed message and nothing else; the client shows the reason for its own
 // request file.
 public sealed class RefusedException(string reason) : Exception(reason);
+
+// One answer over Infer.MaxAnswerBytes: the peer fails the call with its output-limit exit code and fixed message.
+public sealed class AnswerLimitException : Exception;

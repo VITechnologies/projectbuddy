@@ -38,7 +38,8 @@ internal sealed class FakeFacts : IHostFacts
     public string DiagnosePolicyPath => "policy.json";
     public string DenyListPath => "deny.json";
     public string InferAllowlistPath { get; set; } = "allowlist.json";
-    public int InferConcurrency { get; set; } = 4;
+    public Dictionary<int, int> Workers { get; } = new() { [11434] = 4, [11435] = 2 };
+    public int InferWorkers(int port) => Workers[port];
     public List<Volume> Volumes { get; } = [new("C:\\", 100, 200)];
     public Exception? VolumesError { get; set; }
     public IReadOnlyList<Volume> FixedVolumes() => VolumesError is null ? Volumes : throw VolumesError;

@@ -50,7 +50,7 @@ public sealed class ProgramTests
         Assert.Empty(error);
         Assert.Equal("disk", (string?)JsonNode.Parse(output)!["tool"]);
         Assert.Equal(new Uri(Program.DefaultOllama), ollama);
-        Assert.Equal(new Program.Cli("run", "disk", null, null, Program.DefaultOllama, null, "projectbuddy:0.1-qwen2.5-7b", 24), cli);
+        Assert.Equal(new Program.Cli("run", "disk", null, null, Program.DefaultOllama, null, "projectbuddy:0.2-qwen2.5-7b", 24), cli);
 
         (exit, _, _, _, _) = await Run(sources, "run", "event-errors", "--args", """{"hours":2}""");
         Assert.Equal(0, exit);

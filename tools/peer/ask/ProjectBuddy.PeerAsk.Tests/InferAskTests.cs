@@ -260,7 +260,8 @@ public class HostInputTests
     {
         var facts = new SystemFacts();
         Assert.EndsWith(Path.Combine(".local", "share", "projectbuddy", "peer-ask", "infer", "allowlist.json"), facts.InferAllowlistPath);
-        Assert.Equal(4, facts.InferConcurrency);
+        Assert.Equal(4, facts.InferWorkers(11434));
+        Assert.Equal(2, facts.InferWorkers(11435));
     }
 
     private sealed class BrokenPipe : MemoryStream

@@ -40,6 +40,21 @@ internal sealed class FakeSources : ISources
 
     public static OllamaState State(int models = 1, int loaded = 1) => new(
         "0.40.16",
-        [.. Enumerable.Range(0, models).Select(index => new OllamaModel(index == 0 ? "projectbuddy:0.1-qwen2.5-7b" : $"model-{index:D3}:latest", $"sha256:{index:D64}"))],
-        [.. Enumerable.Range(0, loaded).Select(index => new LoadedModel(index == 0 ? "projectbuddy:0.1-qwen2.5-7b" : $"model-{index:D3}:latest", $"sha256:{index:D64}", 4_683_087_332, 4_683_087_332, 8192))]);
+        [.. Enumerable.Range(0, models).Select(index => new OllamaModel(index == 0 ? new ProbeOptions().IdentityModel : $"model-{index:D3}:latest", $"sha256:{index:D64}"))],
+        [.. Enumerable.Range(0, loaded).Select(index => new LoadedModel(index == 0 ? new ProbeOptions().IdentityModel : $"model-{index:D3}:latest", $"sha256:{index:D64}", 4_683_087_332, 4_683_087_332, 8192))]);
+
+    // A file of this repository, found by walking up from the test output.
+    public static string RepositoryFile(string name)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, name);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException(name);
+    }
 }

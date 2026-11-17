@@ -25,8 +25,16 @@ public class InferTests
     private static string Items(int count, Func<int, string>? prompt = null) =>
         "[" + string.Join(",", Enumerable.Range(0, count).Select(index => $$"""{"id":"item-{{index}}","prompt":"{{(prompt ?? (i => $"prompt {i}"))(index)}}"}""")) + "]";
 
-    private static FakeFacts Facts(string? allowlist = null, int concurrency = 4) =>
-        new() { InferAllowlistPath = Fixture.Write(allowlist ?? Allowlisted), InferConcurrency = concurrency };
+    private static FakeFacts Facts(string? allowlist = null, int? concurrency = null)
+    {
+        var facts = new FakeFacts { InferAllowlistPath = Fixture.Write(allowlist ?? Allowlisted) };
+        foreach (var port in Infer.AllowedPorts)
+        {
+            facts.Workers[port] = concurrency ?? facts.Workers[port];
+        }
+
+        return facts;
+    }
 
     private static (int Code, string Out, string Err) Run(string request, FakeOllama ollama, FakeFacts? facts = null, InferLimits? limits = null) =>
         Run(new MemoryStream(Encoding.UTF8.GetBytes(request)), ollama, facts, limits);
@@ -105,10 +113,11 @@ public class InferTests
             var message = Assert.Single(chat["messages"]!.AsArray())!.AsObject();
             Assert.Equal(["role", "content"], message.Select(pair => pair.Key));
             Assert.Equal("user", message["role"]!.GetValue<string>());
-            Assert.Equal("""{"temperature":0.5,"seed":42,"num_ctx":4096}""", chat["options"]!.ToJsonString());
+            Assert.Equal("""{"temperature":0.5,"seed":42,"num_ctx":4096,"num_predict":4096}""", chat["options"]!.ToJsonString());
         }
 
         Assert.Equal(["model", "stream", "messages", "options", "format"], chats[0].Select(pair => pair.Key));
+        Assert.All(chats, chat => Assert.False(chat.ContainsKey("think")));
         Assert.Equal("json", chats[0]["format"]!.GetValue<string>());
         Assert.False(chats[1].ContainsKey("format"));
         Assert.False(chats[2].ContainsKey("format"));
@@ -118,22 +127,24 @@ public class InferTests
     [Fact]
     public void Sends_no_options_the_request_left_out()
     {
+        // Only the peer's generation cap is always sent.
         var ollama = new FakeOllama();
         Assert.Equal(0, Run(Request(), ollama).Code);
-        Assert.Equal(["model", "stream", "messages"], Assert.Single(ollama.Chats).Select(pair => pair.Key));
+        var only = Assert.Single(ollama.Chats);
+        Assert.Equal(["model", "stream", "messages", "options"], only.Select(pair => pair.Key));
+        Assert.Equal("""{"num_predict":4096}""", only["options"]!.ToJsonString());
 
         foreach (var (options, sent) in new[]
                  {
-                     ("""{}""", "{}"),
-                     ("""{"temperature":2}""", """{"temperature":2}"""),
-                     ("""{"seed":0}""", """{"seed":0}"""),
-                     ("""{"num_ctx":512}""", """{"num_ctx":512}"""),
+                     ("""{}""", """{"num_predict":4096}"""),
+                     ("""{"temperature":2}""", """{"temperature":2,"num_predict":4096}"""),
+                     ("""{"seed":0}""", """{"seed":0,"num_predict":4096}"""),
+                     ("""{"num_ctx":512}""", """{"num_ctx":512,"num_predict":4096}"""),
                  })
         {
             var each = new FakeOllama();
             Assert.Equal(0, Run(Request(options: options), each).Code);
-            var chat = Assert.Single(each.Chats);
-            Assert.Equal(sent == "{}" ? null : sent, chat["options"]?.ToJsonString());
+            Assert.Equal(sent, Assert.Single(each.Chats)["options"]!.ToJsonString());
         }
     }
 
@@ -141,10 +152,10 @@ public class InferTests
     public void Accepts_every_limit_exactly()
     {
         var prompt = new string('p', Infer.MaxPromptBytes);
-        var request = Request(Items(Infer.MaxItems), """{"temperature":0,"seed":2147483647,"num_ctx":32768}""");
+        var request = Request(Items(Infer.MaxItems), """{"temperature":0,"seed":2147483647,"num_ctx":32768,"think":true}""");
         var parsed = PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(request));
         Assert.Equal(Infer.MaxItems, parsed.Items.Count);
-        Assert.Equal(new InferOptions(0, int.MaxValue, Infer.MaxNumCtx), parsed.Options);
+        Assert.Equal(new InferOptions(0, int.MaxValue, Infer.MaxNumCtx, true), parsed.Options);
 
         var longest = Request($$"""[{"id":"{{new string('i', 64)}}","prompt":"{{prompt}}"}]""", model: new string('m', Infer.MaxModelChars));
         var item = Assert.Single(PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(longest)).Items);
@@ -194,6 +205,12 @@ public class InferTests
             Request(options: """{"num_ctx":32769}"""),
             Request(options: """{"num_ctx":1024.0}"""),
             Request(options: """{"num_ctx":"2048"}"""),
+            Request(options: """{"num_predict":8192}"""),
+            Request(options: """{"num_predict":16}"""),
+            Request(options: """{"think":"true"}"""),
+            Request(options: """{"think":1}"""),
+            Request(options: """{"think":null}"""),
+            Request(options: """{"think":"high"}"""),
             $$"""{"schema":"{{Schema}}","model":"{{FakeOllama.Model}}"}""",
             Request("{}"),
             Request("null"),
@@ -271,7 +288,8 @@ public class InferTests
         string Reason(string request) => Assert.Throws<RefusedException>(() => PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(request))).Message;
         Assert.Equal("the request needs [schema, model, items] and may have [options], nothing else", Reason(Request().Replace("{\"schema\"", "{\"x\":1,\"schema\"")));
         Assert.Equal($"schema must be {Schema}", Reason(Request().Replace("@1", "@2")));
-        Assert.Equal("options needs [] and may have [temperature, seed, num_ctx], nothing else", Reason(Request(options: """{"x":1}""")));
+        Assert.Equal("options needs [] and may have [temperature, seed, num_ctx, think], nothing else", Reason(Request(options: """{"x":1}""")));
+        Assert.Equal("options.think must be true or false", Reason(Request(options: """{"think":"yes"}""")));
         Assert.Equal("options.num_ctx must be an integer from 512 to 32768", Reason(Request(options: """{"num_ctx":1}""")));
         Assert.Equal("options.temperature must be a number from 0 to 2", Reason(Request(options: """{"temperature":3}""")));
         Assert.Equal("item id a is not unique", Reason(Request("""[{"id":"a","prompt":"p"},{"id":"a","prompt":"q"}]""")));
@@ -534,22 +552,94 @@ public class InferTests
     [Fact]
     public void Answers_may_exceed_the_other_verbs_limit_up_to_one_mebibyte()
     {
-        var answer = new string('a', 60 * 1024);
+        var answer = new string('a', 15 * 1024);
         var ollama = new FakeOllama { Chat = (_, _, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
-        var (code, output, _) = Run(Request(Items(16)), ollama);
+        var (code, output, _) = Run(Request(Items(Infer.MaxItems)), ollama);
         Assert.Equal(0, code);
         Assert.InRange(Encoding.UTF8.GetByteCount(output), Serve.MaxOutputBytes, Infer.MaxOutputBytes);
     }
 
     [Fact]
-    public void Answers_over_one_mebibyte_are_refused_as_the_output_limit()
+    public void Answers_over_one_mebibyte_together_are_refused_as_the_output_limit()
     {
-        var answer = new string('a', 70 * 1024);
+        // Every answer is exactly at its own limit; only the envelope is over.
+        var answer = new string('a', Infer.MaxAnswerBytes);
         var ollama = new FakeOllama { Chat = (_, _, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
-        var (code, output, error) = Run(Request(Items(16)), ollama);
+        var (code, output, error) = Run(Request(Items(Infer.MaxItems)), ollama);
         Assert.Equal(ExitCodes.OutputLimit, code);
         Assert.Empty(output);
         Assert.Equal(Serve.OutputLimitMessage + Environment.NewLine, error);
+    }
+
+    [Theory]
+    [InlineData(Infer.MaxAnswerBytes, 'a', 0)]
+    [InlineData(Infer.MaxAnswerBytes / 2, 'é', 0)]
+    [InlineData(Infer.MaxAnswerBytes + 1, 'a', ExitCodes.OutputLimit)]
+    [InlineData((Infer.MaxAnswerBytes / 2) + 1, 'é', ExitCodes.OutputLimit)]
+    public void One_answer_over_16_KiB_of_utf8_fails_the_call(int length, char letter, int expected)
+    {
+        var answer = new string(letter, length);
+        var ollama = new FakeOllama
+        {
+            Chat = (body, _, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(FakeOllama.Prompt(body) == "prompt 1" ? answer : "short"))),
+        };
+        var (code, output, error) = Run(Request(Items(3)), ollama);
+        Assert.Equal(expected, code);
+        if (expected != 0)
+        {
+            Assert.Empty(output);
+            Assert.Equal(Serve.OutputLimitMessage + Environment.NewLine, error);
+        }
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    public void Passes_think_to_ollama_and_returns_only_the_final_content(string think, bool sent)
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = (_, _, _) =>
+            {
+                var reply = FakeOllama.Reply("Yes");
+                reply["message"]!["thinking"] = "secret reasoning about D:\\customer";
+                return Task.FromResult(FakeOllama.Ok(reply));
+            },
+        };
+        var (code, output, _) = Run(Request(options: $$"""{"think":{{think}}}"""), ollama);
+        Assert.Equal(0, code);
+        var chat = Assert.Single(ollama.Chats);
+        Assert.Equal(sent, chat["think"]!.GetValue<bool>());
+        Assert.Equal("""{"num_predict":4096}""", chat["options"]!.ToJsonString());
+        Assert.Equal("Yes", Data(output).GetProperty("items")[0].GetProperty("answer").GetString());
+        Assert.DoesNotContain("secret", output);
+        Assert.DoesNotContain("thinking", output);
+    }
+
+    [Fact]
+    public void Runs_each_port_with_its_own_worker_count()
+    {
+        // The deployment's slots: 4 on the RTX server, 2 on the Arc iGPU server. Each prompt holds its slot until all six
+        // are busy (or 2 s pass), so a port running more workers than its slots would show.
+        var ollama = new FakeOllama();
+        ollama.Chat = async (body, _, token) =>
+        {
+            var deadline = Stopwatch.StartNew();
+            while (ollama.InFlight < 6 && deadline.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(5, token);
+            }
+
+            await Task.Delay(20, token);
+            return FakeOllama.Ok(FakeOllama.Reply("ok"));
+        };
+        var (code, output, _) = Run(Request(Items(18)), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]")));
+        Assert.Equal(0, code);
+        Assert.Equal(4, ollama.MaxInFlightOn(11434));
+        Assert.Equal(2, ollama.MaxInFlightOn(11435));
+        var ports = Data(output).GetProperty("items").EnumerateArray().Select(item => item.GetProperty("port").GetInt32()).ToList();
+        Assert.Equal(12, ports.Count(port => port == 11434));
+        Assert.Equal(6, ports.Count(port => port == 11435));
     }
 
     [Theory]
@@ -670,7 +760,7 @@ public class InferTests
     [Fact]
     public async Task A_worker_takes_nothing_once_the_batch_is_abandoned()
     {
-        var request = new InferRequest(FakeOllama.Model, new InferOptions(null, null, null), [new InferItem("a", "p", false)]);
+        var request = new InferRequest(FakeOllama.Model, new InferOptions(null, null, null, null), [new InferItem("a", "p", false)]);
         var queue = new System.Collections.Concurrent.ConcurrentQueue<int>([0]);
         var answers = new InferAnswer[1];
         var ollama = new FakeOllama();
@@ -698,9 +788,9 @@ public class InferTests
     [Fact]
     public void Builds_one_user_message_per_prompt()
     {
-        var request = new InferRequest("m:1", new InferOptions(null, 7, null), [new InferItem("a", "hello", true)]);
+        var request = new InferRequest("m:1", new InferOptions(null, 7, null, false), [new InferItem("a", "hello", true)]);
         Assert.Equal(
-            """{"model":"m:1","stream":false,"messages":[{"role":"user","content":"hello"}],"options":{"seed":7},"format":"json"}""",
+            """{"model":"m:1","stream":false,"messages":[{"role":"user","content":"hello"}],"options":{"seed":7,"num_predict":4096},"think":false,"format":"json"}""",
             PeerAsk.Infer.ChatRequest(request, request.Items[0]).ToJsonString());
     }
 

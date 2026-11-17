@@ -97,7 +97,8 @@ The workstation sends a batch of prompts to the peer's GPU.
   - 1 to 64 items. Ids are unique, 1 to 64 of `[A-Za-z0-9._:-]`. A prompt
     is 1 byte to 64 KiB. `format` is `"json"`, `null` or absent.
   - `options` and each option are optional: `temperature` 0 to 2, `seed`
-    0 to 2147483647, `num_ctx` 512 to 32768.
+    0 to 2147483647, `num_ctx` 512 to 32768, and `think` (`true` or
+    `false`, sent as Ollama's top-level `think`).
   - Any other key, a duplicate key, or a value out of range is refused (64).
 - **Allowlist:** the model must be listed with its digest in
   `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`
@@ -115,15 +116,23 @@ The workstation sends a batch of prompts to the peer's GPU.
 - **Run:** each item is one non-streaming `/api/chat` call with one user
   message and no system prompt, tools or images. It goes to Ollama at
   `127.0.0.1` through the loopback-only client in
-  [`ollama/`](ollama/README.md). Each listed port runs four workers that take
-  items from one shared queue, so both servers stay busy. Each item has
-  120 s; the whole call, including reading the request, has 600 s.
+  [`ollama/`](ollama/README.md).
+  - Workers on each listed port take items from one shared queue, so both
+    servers stay busy. Host facts give 11434 four workers and 11435 two.
+  - Each port's worker count must equal its server's `OLLAMA_NUM_PARALLEL`
+    (deployment sets 4 and 2). Items then never queue inside Ollama, and
+    the 120 s per item covers generation, not queueing. The whole call,
+    including reading the request, has 600 s.
+  - The peer always sets `num_predict` to 4096 tokens; callers cannot raise
+    it. Thinking tokens count against it, and only the final message
+    content is returned, never the thinking text.
 - **Answer:** `data` is
   `{"model","digest","items":[{"id","answer","evalCount","promptEvalCount","seconds","port"}]}`,
   in request order; `port` is the server that answered. The caller can check
   `promptEvalCount < num_ctx/2` (truncation guard).
 - **Failure:** a timeout, an Ollama fault or any failed item fails the whole
-  call (66), with no partial answer. An answer over 1 MiB is 65.
+  call (66), with no partial answer. One answer over 16 KiB of UTF-8, or a
+  whole answer over 1 MiB, is 65 (output limit).
 - **Client:** sends the file's bytes unchanged, after the same checks. It
   waits 620 s plus the connect timeout. It accepts only an answer that names
   the model and a digest and answers every requested id exactly once, from

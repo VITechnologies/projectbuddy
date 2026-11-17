@@ -52,6 +52,11 @@ public static partial class Serve
             stderr.WriteLine(RefusedMessage);
             return ExitCodes.Refused;
         }
+        catch (AnswerLimitException)
+        {
+            stderr.WriteLine(OutputLimitMessage);
+            return ExitCodes.OutputLimit;
+        }
         catch (Exception)
         {
             // The client sees stderr, so never let a stack trace or exception message reach it.

@@ -12,7 +12,9 @@ public sealed record IntArgument(string Name, int Min, int Max, int Default, str
 
 public sealed record ToolSpec(string Name, string Description, IReadOnlyList<IntArgument> Arguments);
 
-public sealed record ProbeOptions(string IdentityModel = "projectbuddy:0.1-qwen2.5-7b", int MaxResultBytes = Registry.MaxResultBytes);
+// The default identity is tools/peer/identity/identity.json's version built on #217's base, qwen2.5:7b; a test ties the
+// two, so raising identityVersion fails until this follows.
+public sealed record ProbeOptions(string IdentityModel = "projectbuddy:0.2-qwen2.5-7b", int MaxResultBytes = Registry.MaxResultBytes);
 
 // The fixed, read-only tools the P4 diagnostics loop may call (#292). A call names one tool from the closed list with
 // typed, range-checked arguments; anything else is refused. Every result is bounded, deterministic for a given machine
