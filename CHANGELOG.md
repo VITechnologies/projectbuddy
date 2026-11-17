@@ -6,6 +6,9 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- The RSR pins move to v0.8.0 (#346): the consumer kit, the standards scan, and
+  projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@4`.
+  Re-certification at v0.8.0 found no regression: the 5 required gates `PASS`.
 - `projectbuddy-kpi` measures the cost of AI-assisted work (#330, milestone K
   of #328).
   - It ingests the agent's session event logs into a local PostgreSQL
