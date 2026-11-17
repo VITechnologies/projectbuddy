@@ -6,6 +6,19 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- `projectbuddy-wiki` lets one profile scope declare several ID prefixes
+  (#348), so mprr's requirements can be verified by both `TEST-UNIT-NNN` and
+  `TEST-DOC-NNN`.
+  - The new profile schema `rsr/wiki-profile@2` is `@1`, except that each
+    scope has exactly one of `idPrefix` and `idPrefixes`, a non-empty array
+    of distinct prefixes. No prefix appears twice in a profile, within a scope
+    or across scopes.
+  - A scope's pages, `id-outside-scope`, the links that count,
+    `link-outside-field`, edges and whole-wiki ID pages use all of the scope's
+    prefixes.
+  - `@1` profiles, the default profile, the finding catalogues, the layouts and
+    the registry projection are unchanged. The standard pin stays at `@4`
+    until RSR ships the revision that defines `@2`.
 - The RSR pins move to v0.8.0 (#346): the consumer kit, the standards scan, and
   projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@4`.
   Re-certification at v0.8.0 found no regression: the 5 required gates `PASS`.
