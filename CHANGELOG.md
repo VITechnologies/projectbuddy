@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
-## Unreleased
+## v0.5.0
 
 - `projectbuddy-wiki` lets one profile scope declare several ID prefixes
   (#348), so mprr's requirements can be verified by both `TEST-UNIT-NNN` and
