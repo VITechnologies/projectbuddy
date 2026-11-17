@@ -72,7 +72,7 @@ jobs:
           # claims without anyone noticing. Bump this alongside the stamp,
           # never independently.
           git clone --quiet "https://github.com/svelderrainruiz/repo-standards-review.git" /tmp/repo-standards-review-scan
-          git -C /tmp/repo-standards-review-scan checkout --quiet d25cfc1661228ab70762314389b0a1e4e9c8da3a # v0.6.0
+          git -C /tmp/repo-standards-review-scan checkout --quiet d4d022b92f1c5a8bedd4995aab8ca6d65b678e93 # v0.8.0
 
       - name: Run Assurance Pipeline
         id: scan

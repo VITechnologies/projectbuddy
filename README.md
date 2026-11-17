@@ -25,7 +25,7 @@ or private configuration ever flow into this repository.
 ## Standards compliance
 
 Assessed against `svelderrainruiz/repo-standards-review`'s `release-gate`
-profile, **version `v0.6.0`** (commit `d25cfc1`). See
+profile, **version `v0.8.0`** (commit `d4d022b`). See
 [`docs/architecture/standards-compliance.md`](docs/architecture/standards-compliance.md)
 for the full gate status and the living re-certification policy,
 [`docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md`](docs/architecture/adr/ADR-0001-adopt-gitflow-for-release-governance.md)
