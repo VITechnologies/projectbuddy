@@ -4,18 +4,30 @@ using System.Text.Json.Nodes;
 
 namespace ProjectBuddy.PeerAsk.Tests;
 
-// A scripted loopback Ollama: never touches the network, records every request and how many chats ran at once.
+// A scripted loopback Ollama on every port: never touches the network, records every request and how many chats ran at
+// once on each port.
 internal sealed class FakeOllama : HttpMessageHandler
 {
     public const string Model = "bespoke-minicheck:7b";
     public const string Digest = "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e";
 
     private readonly Lock gate = new();
-    private int inFlight;
+    private readonly Dictionary<int, int> inFlight = [];
+    private readonly Dictionary<int, int> maxInFlight = [];
 
-    public List<(string Path, JsonObject? Body)> Requests { get; } = [];
+    public List<(string Path, JsonObject? Body, int Port, string Host)> Requests { get; } = [];
 
-    public int MaxInFlight { get; private set; }
+    // Across all ports.
+    public int MaxInFlight
+    {
+        get
+        {
+            lock (gate)
+            {
+                return maxInFlight.Values.DefaultIfEmpty().Max();
+            }
+        }
+    }
 
     public int InFlight
     {
@@ -23,27 +35,34 @@ internal sealed class FakeOllama : HttpMessageHandler
         {
             lock (gate)
             {
-                return inFlight;
+                return inFlight.Values.Sum();
             }
         }
     }
 
     public int Cancelled { get; private set; }
 
-    public Func<HttpResponseMessage> Tags { get; set; } = () => Ok(TagList((Model, Digest)));
+    public Func<int, HttpResponseMessage> Tags { get; set; } = _ => Ok(TagList((Model, Digest)));
 
     // The default reply echoes the prompt, so each answer can be traced to its item.
-    public Func<JsonObject, CancellationToken, Task<HttpResponseMessage>> Chat { get; set; } =
-        (body, _) => Task.FromResult(Ok(Reply($"answer: {Prompt(body)}")));
+    public Func<JsonObject, int, CancellationToken, Task<HttpResponseMessage>> Chat { get; set; } =
+        (body, _, _) => Task.FromResult(Ok(Reply($"answer: {Prompt(body)}")));
 
-    public IEnumerable<JsonObject> Chats
+    public IEnumerable<JsonObject> Chats => ChatsOn(null);
+
+    public List<JsonObject> ChatsOn(int? port)
     {
-        get
+        lock (gate)
         {
-            lock (gate)
-            {
-                return Requests.Where(request => request.Path == "/api/chat").Select(request => request.Body!).ToList();
-            }
+            return Requests.Where(request => request.Path == "/api/chat" && (port is null || request.Port == port)).Select(request => request.Body!).ToList();
+        }
+    }
+
+    public int MaxInFlightOn(int port)
+    {
+        lock (gate)
+        {
+            return maxInFlight.GetValueOrDefault(port);
         }
     }
 
@@ -69,25 +88,27 @@ internal sealed class FakeOllama : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? null : JsonNode.Parse(await request.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;
-        var path = request.RequestUri!.AbsolutePath;
+        var uri = request.RequestUri!;
+        var path = uri.AbsolutePath;
         lock (gate)
         {
-            Requests.Add((path, body));
+            Requests.Add((path, body, uri.Port, uri.Host));
         }
 
         if (path == "/api/tags")
         {
-            return Tags();
+            return Tags(uri.Port);
         }
 
         lock (gate)
         {
-            MaxInFlight = Math.Max(MaxInFlight, ++inFlight);
+            inFlight[uri.Port] = inFlight.GetValueOrDefault(uri.Port) + 1;
+            maxInFlight[uri.Port] = Math.Max(maxInFlight.GetValueOrDefault(uri.Port), inFlight[uri.Port]);
         }
 
         try
         {
-            return await Chat(body!, cancellationToken);
+            return await Chat(body!, uri.Port, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -102,7 +123,7 @@ internal sealed class FakeOllama : HttpMessageHandler
         {
             lock (gate)
             {
-                inFlight--;
+                inFlight[uri.Port]--;
             }
         }
     }

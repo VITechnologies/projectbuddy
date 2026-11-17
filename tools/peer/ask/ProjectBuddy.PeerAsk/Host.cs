@@ -30,9 +30,8 @@ public interface IHostFacts
     string DiagnosePolicyPath { get; }
     string DenyListPath { get; }
 
-    // infer (#358): the deployment-written model allowlist, the loopback Ollama, and how many prompts run at once.
+    // infer (#358): the deployment-written model allowlist, and how many prompts run at once on each Ollama port.
     string InferAllowlistPath { get; }
-    string OllamaUrl { get; }
     int InferConcurrency { get; }
 
     IReadOnlyList<Volume> FixedVolumes();
@@ -210,8 +209,6 @@ public sealed class SystemFacts : IHostFacts
     public string InferAllowlistPath => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "infer", "allowlist.json")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-ask", "infer", "allowlist.json");
-
-    public string OllamaUrl => "http://127.0.0.1:11434/";
 
     public int InferConcurrency => 4;
 

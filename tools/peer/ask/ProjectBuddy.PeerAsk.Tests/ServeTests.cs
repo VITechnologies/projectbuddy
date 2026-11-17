@@ -38,7 +38,6 @@ internal sealed class FakeFacts : IHostFacts
     public string DiagnosePolicyPath => "policy.json";
     public string DenyListPath => "deny.json";
     public string InferAllowlistPath { get; set; } = "allowlist.json";
-    public string OllamaUrl { get; set; } = "http://127.0.0.1:11434/";
     public int InferConcurrency { get; set; } = 4;
     public List<Volume> Volumes { get; } = [new("C:\\", 100, 200)];
     public Exception? VolumesError { get; set; }

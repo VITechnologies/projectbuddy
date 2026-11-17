@@ -15,19 +15,26 @@ release's notes for the exact pinned commit.
     `"json"` format. `temperature` (0 to 2), `seed` and `num_ctx` (512 to
     32768) are optional. Any other key or an out-of-range value is refused
     (exit 64).
-  - The model must be in the peer's deployment-written allowlist,
-    `projectbuddy/peer-infer-allowlist@1` at
-    `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`, and be
-    installed with exactly its pinned digest. The peer never pulls models.
-  - Each item is one `/api/chat` call to the loopback Ollama through the
-    shared `ProjectBuddy.PeerOllama` client. Four run at once, each within
-    120 s, and the whole call within 600 s. Any failure fails the whole call
-    (exit 66), with no partial answer.
-  - The answer holds only the model's output and its counters per id, and is
-    at most 1 MiB. Every other verb keeps its 16 KiB limit and its behaviour.
+  - The model must be in the peer's deployment-written allowlist at
+    `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`. The
+    format is `projectbuddy/peer-infer-allowlist@2`, in which each model has
+    a name, a pinned digest and `ports`. `@1` files, without ports, are
+    still accepted.
+  - `ports` is a non-empty, distinct subset of the fixed set 11434 (NVIDIA
+    GPU) and 11435 (Intel Arc iGPU, Vulkan), and defaults to `[11434]`. The
+    model must be installed with exactly its pinned digest on every listed
+    port's server. The peer never pulls models.
+  - Each item is one `/api/chat` call to a loopback Ollama through the
+    shared `ProjectBuddy.PeerOllama` client. Each listed port runs four
+    workers that take items from one shared queue, so one batch keeps both
+    accelerators busy. Each item has 120 s, and the whole call 600 s. Any
+    failure fails the whole call (exit 66), with no partial answer.
+  - The answer holds only the model's output, its counters and the `port`
+    that answered, per id, and is at most 1 MiB. Every other verb keeps its
+    16 KiB limit and its behaviour.
   - `ask infer --request <file>` sends the file's bytes with the same fixed
     ssh invocation. It waits 620 s and checks that every requested id is
-    answered exactly once.
+    answered exactly once, from an allowed port.
 - The `projectbuddy` identity moves to 0.2, because its pinned
   `tools/peer/README.md` now documents `diagnose` and `infer`. The
   generator now names the model `projectbuddy:0.2-<base>`.

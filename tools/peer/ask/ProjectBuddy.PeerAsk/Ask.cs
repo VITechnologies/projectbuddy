@@ -298,8 +298,8 @@ public static partial class Ask
                 && verified.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "citations")
             : data.TryGetProperty("reason", out var reason) && reason.ValueKind == JsonValueKind.String);
 
-    // An infer answer names the requested model and its pinned digest, and answers every requested id exactly once and
-    // nothing else.
+    // An infer answer names the requested model and its pinned digest, and answers every requested id exactly once, from an
+    // allowed port, and nothing else.
     private static bool IsInference(JsonElement data, InferRequest request)
     {
         if (!(data.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String && model.GetString() == request.Model
@@ -318,7 +318,9 @@ public static partial class Ask
                   && expected.Contains(id.GetString()!) && answered.Add(id.GetString()!)
                   && item.TryGetProperty("answer", out var answer) && answer.ValueKind == JsonValueKind.String
                   && Count(item, "evalCount") && Count(item, "promptEvalCount")
-                  && item.TryGetProperty("seconds", out var seconds) && seconds.ValueKind == JsonValueKind.Number && seconds.GetDouble() >= 0))
+                  && item.TryGetProperty("seconds", out var seconds) && seconds.ValueKind == JsonValueKind.Number && seconds.GetDouble() >= 0
+                  && item.TryGetProperty("port", out var port) && port.ValueKind == JsonValueKind.Number && port.TryGetInt32(out var number)
+                  && Infer.AllowedPorts.Contains(number)))
             {
                 return false;
             }

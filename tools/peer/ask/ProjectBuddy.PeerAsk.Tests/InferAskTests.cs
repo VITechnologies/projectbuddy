@@ -12,7 +12,7 @@ public class InferAskTests
         $$"""{"schema":"projectbuddy/peer-infer-request@1","model":"{{FakeOllama.Model}}","items":[{"id":"a","prompt":"p"},{"id":"b","prompt":"q","format":"json"}]}""";
 
     private const string GoodItems =
-        """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":"b","answer":"{}","evalCount":0,"promptEvalCount":0,"seconds":0}]""";
+        """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","answer":"{}","evalCount":0,"promptEvalCount":0,"seconds":0,"port":11435}]""";
 
     private static string Envelope(string data) => $$"""{"schema":"projectbuddy/peer-ask@1","tool":"0.4.0","verb":"infer","data":{{data}}}""";
 
@@ -102,13 +102,13 @@ public class InferAskTests
         const int bad = ExitCodes.Protocol;
         string Data(string model = $"\"{FakeOllama.Model}\"", string digest = $"\"{FakeOllama.Digest}\"", string items = GoodItems) =>
             Envelope($$"""{"model":{{model}},"digest":{{digest}},"items":{{items}}}""");
-        string Item(string id = "\"b\"", string answer = "\"y\"", string evalCount = "1", string promptEvalCount = "1", string seconds = "1.5") =>
-            $$"""[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":{{id}},"answer":{{answer}},"evalCount":{{evalCount}},"promptEvalCount":{{promptEvalCount}},"seconds":{{seconds}}}]""";
+        string Item(string id = "\"b\"", string answer = "\"y\"", string evalCount = "1", string promptEvalCount = "1", string seconds = "1.5", string port = "11435") =>
+            $$"""[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":{{id}},"answer":{{answer}},"evalCount":{{evalCount}},"promptEvalCount":{{promptEvalCount}},"seconds":{{seconds}},"port":{{port}}}]""";
         return new TheoryData<string, int>
         {
             { Answer(), 0 },
             { Data(items: Item()), 0 },
-            { Answer("""[{"id":"b","answer":"","evalCount":0,"promptEvalCount":0,"seconds":0},{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5}]"""), 0 },
+            { Answer("""[{"id":"b","answer":"","evalCount":0,"promptEvalCount":0,"seconds":0,"port":11435},{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434}]"""), 0 },
             { Answer(GoodItems.Replace("\"seconds\":0.5", "\"seconds\":0.5,\"extra\":true")), 0 },
             { Data(model: "\"other:7b\""), bad },
             { Data(model: "1"), bad },
@@ -121,26 +121,34 @@ public class InferAskTests
             { Envelope($$"""{"model":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"}"""), bad },
             { Data(items: "{}"), bad },
             { Data(items: "[]"), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5}]"""), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},1]"""), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"answer":"y","evalCount":1,"promptEvalCount":1,"seconds":1}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},1]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"answer":"y","evalCount":1,"promptEvalCount":1,"seconds":1,"port":11434}]"""), bad },
             { Data(items: Item(id: "1")), bad },
             { Data(items: Item(id: "\"c\"")), bad },
             { Data(items: Item(id: "\"a\"")), bad },
             { Data(items: Item(id: "\"\\ud800\"")), bad },
-            { Data(items: GoodItems.Replace("]", ",{\"id\":\"c\",\"answer\":\"z\",\"evalCount\":1,\"promptEvalCount\":1,\"seconds\":1}]")), bad },
+            { Data(items: GoodItems.Replace("]", ",{\"id\":\"c\",\"answer\":\"z\",\"evalCount\":1,\"promptEvalCount\":1,\"seconds\":1,\"port\":11434}]")), bad },
             { Data(items: Item(answer: "1")), bad },
             { Data(items: Item(answer: "null")), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":"b","evalCount":1,"promptEvalCount":1,"seconds":1}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","evalCount":1,"promptEvalCount":1,"seconds":1,"port":11434}]"""), bad },
             { Data(items: Item(evalCount: "\"1\"")), bad },
             { Data(items: Item(evalCount: "-1")), bad },
             { Data(items: Item(evalCount: "1.5")), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":"b","answer":"y","promptEvalCount":1,"seconds":1}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","answer":"y","promptEvalCount":1,"seconds":1,"port":11434}]"""), bad },
             { Data(items: Item(promptEvalCount: "null")), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":"b","answer":"y","evalCount":1,"seconds":1}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","answer":"y","evalCount":1,"seconds":1,"port":11434}]"""), bad },
             { Data(items: Item(seconds: "\"1\"")), bad },
             { Data(items: Item(seconds: "-0.001")), bad },
-            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5},{"id":"b","answer":"y","evalCount":1,"promptEvalCount":1}]"""), bad },
+            { Data(items: Item(port: "11434")), 0 },
+            { Data(items: Item(port: "\"11434\"")), bad },
+            { Data(items: Item(port: "null")), bad },
+            { Data(items: Item(port: "8080")), bad },
+            { Data(items: Item(port: "11436")), bad },
+            { Data(items: Item(port: "11434.5")), bad },
+            { Data(items: Item(port: "1e10")), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","answer":"y","evalCount":1,"promptEvalCount":1,"seconds":1}]"""), bad },
+            { Data(items: """[{"id":"a","answer":"x","evalCount":1,"promptEvalCount":2,"seconds":0.5,"port":11434},{"id":"b","answer":"y","evalCount":1,"promptEvalCount":1,"port":11434}]"""), bad },
             { Answer().Replace("\"verb\":\"infer\"", "\"verb\":\"identity\""), bad },
             { Answer().Replace("projectbuddy/peer-ask@1", "projectbuddy/peer-ask@2"), bad },
         };
@@ -252,7 +260,6 @@ public class HostInputTests
     {
         var facts = new SystemFacts();
         Assert.EndsWith(Path.Combine(".local", "share", "projectbuddy", "peer-ask", "infer", "allowlist.json"), facts.InferAllowlistPath);
-        Assert.Equal("http://127.0.0.1:11434/", facts.OllamaUrl);
         Assert.Equal(4, facts.InferConcurrency);
     }
 

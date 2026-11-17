@@ -103,24 +103,31 @@ The workstation sends a batch of prompts to the peer's GPU.
   `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`
   (`~/.local/share/projectbuddy/peer-ask/infer/allowlist.json` on Linux),
   which deployment writes:
-  `{"schema":"projectbuddy/peer-infer-allowlist@1","models":[{"name":"<name:tag>","digest":"<64 hex>"}]}`.
+  `{"schema":"projectbuddy/peer-infer-allowlist@2","models":[{"name":"<name:tag>","digest":"<64 hex>","ports":[11434,11435]}]}`.
   - At most 64 KiB and 64 models; names are lowercase `name:tag`.
-  - Ollama's `/api/tags` must show the model with exactly that digest. The
-    peer never pulls. A missing or malformed allowlist refuses everything.
+  - `ports` picks the peer's loopback Ollama servers: 11434 (NVIDIA GPU)
+    and 11435 (Intel Arc iGPU, Vulkan). The set is fixed. The list is
+    non-empty and distinct, and defaults to `[11434]`. An `@1` file has no
+    `ports` and means `[11434]`.
+  - Each listed server's `/api/tags` must show the model with exactly that
+    digest. The peer never pulls. A missing or malformed allowlist refuses
+    everything.
 - **Run:** each item is one non-streaming `/api/chat` call with one user
   message and no system prompt, tools or images. It goes to Ollama at
-  `127.0.0.1:11434` through the loopback-only client in
-  [`ollama/`](ollama/README.md). Four run at once. Each has 120 s; the whole
-  call, including reading the request, has 600 s.
+  `127.0.0.1` through the loopback-only client in
+  [`ollama/`](ollama/README.md). Each listed port runs four workers that take
+  items from one shared queue, so both servers stay busy. Each item has
+  120 s; the whole call, including reading the request, has 600 s.
 - **Answer:** `data` is
-  `{"model","digest","items":[{"id","answer","evalCount","promptEvalCount","seconds"}]}`,
-  in request order. The caller can check `promptEvalCount < num_ctx/2`
-  (truncation guard).
+  `{"model","digest","items":[{"id","answer","evalCount","promptEvalCount","seconds","port"}]}`,
+  in request order; `port` is the server that answered. The caller can check
+  `promptEvalCount < num_ctx/2` (truncation guard).
 - **Failure:** a timeout, an Ollama fault or any failed item fails the whole
   call (66), with no partial answer. An answer over 1 MiB is 65.
 - **Client:** sends the file's bytes unchanged, after the same checks. It
   waits 620 s plus the connect timeout. It accepts only an answer that names
-  the model and a digest and answers every requested id exactly once.
+  the model and a digest and answers every requested id exactly once, from
+  an allowed port.
 - **Security:** the request carries no path, command or tool, and nothing
   runs through a shell. Only the model's output for the submitted prompts
   and its counters leave the peer. Allowlist only models whose Modelfile

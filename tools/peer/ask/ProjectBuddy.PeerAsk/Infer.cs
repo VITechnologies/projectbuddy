@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,12 +14,15 @@ public sealed record InferOptions(double? Temperature, long? Seed, long? NumCtx)
 
 public sealed record InferRequest(string Model, InferOptions Options, IReadOnlyList<InferItem> Items);
 
+// An allowlisted model: its digest pin, and the loopback Ollama ports that serve it, each checked against the pin.
+public sealed record InferModel(ModelPin Pin, IReadOnlyList<int> Ports);
+
 public sealed record InferLimits(TimeSpan Item, TimeSpan Total)
 {
     public static readonly InferLimits Default = new(Infer.ItemTimeout, Infer.Timeout);
 }
 
-internal sealed record InferAnswer(string Id, string Text, int EvalCount, int PromptEvalCount, double Seconds);
+internal sealed record InferAnswer(string Id, string Text, int EvalCount, int PromptEvalCount, double Seconds, int Port);
 
 // "infer" (#358): the workstation sends a batch of prompts on stdin and the peer runs them on its local Ollama. The peer
 // returns only the model's output for those prompts, from an allowlisted model whose installed digest matches its pin.
@@ -26,7 +30,16 @@ public static partial class Infer
 {
     public const string Verb = "infer";
     public const string RequestSchema = "projectbuddy/peer-infer-request@1";
-    public const string AllowlistSchema = "projectbuddy/peer-infer-allowlist@1";
+    public const string AllowlistSchema = "projectbuddy/peer-infer-allowlist@2";
+
+    // @1 entries have no ports and mean DefaultPort.
+    public const string AllowlistSchemaV1 = "projectbuddy/peer-infer-allowlist@1";
+
+    // The peer's two loopback Ollama servers: the NVIDIA GPU, and the Intel Arc iGPU through Vulkan. Fixed, not configurable.
+    public const string OllamaHost = "127.0.0.1";
+    public const int DefaultPort = 11434;
+    public static readonly IReadOnlyList<int> AllowedPorts = [11434, 11435];
+
     public const int MaxRequestBytes = 1024 * 1024;
     public const int MaxOutputBytes = 1024 * 1024;
     public const int MaxItems = 64;
@@ -105,8 +118,9 @@ public static partial class Infer
         return new InferRequest(model, options, parsed);
     }
 
-    // The allowlist deployment writes on the peer: {"schema", "models": [{"name", "digest"}]}. Anything unusable is a refusal.
-    public static IReadOnlyDictionary<string, ModelPin> ParseAllowlist(byte[]? utf8)
+    // The allowlist deployment writes on the peer: {"schema", "models": [{"name", "digest", "ports"}]}, where @2 entries may
+    // name ports and @1 entries may not. Anything unusable is a refusal.
+    public static IReadOnlyDictionary<string, InferModel> ParseAllowlist(byte[]? utf8)
     {
         if (utf8 is null)
         {
@@ -115,12 +129,14 @@ public static partial class Infer
 
         var root = ParseObject(utf8, "the allowlist");
         Keys(root, "the allowlist", ["schema", "models"], []);
-        if (Text(root["schema"]) != AllowlistSchema || root["models"] is not JsonArray models || models.Count is < 1 or > MaxAllowlistModels)
+        var schema = Text(root["schema"]);
+        if ((schema != AllowlistSchema && schema != AllowlistSchemaV1) || root["models"] is not JsonArray models || models.Count is < 1 or > MaxAllowlistModels)
         {
-            throw new RefusedException($"the allowlist must be {AllowlistSchema} with 1 to {MaxAllowlistModels} models");
+            throw new RefusedException($"the allowlist must be {AllowlistSchema} or {AllowlistSchemaV1} with 1 to {MaxAllowlistModels} models");
         }
 
-        var pins = new Dictionary<string, ModelPin>(StringComparer.Ordinal);
+        string[] optional = schema == AllowlistSchema ? ["ports"] : [];
+        var allowed = new Dictionary<string, InferModel>(StringComparer.Ordinal);
         foreach (var node in models)
         {
             if (node is not JsonObject entry)
@@ -128,7 +144,7 @@ public static partial class Infer
                 throw new RefusedException("each allowlisted model must be an object");
             }
 
-            Keys(entry, "an allowlisted model", ["name", "digest"], []);
+            Keys(entry, "an allowlisted model", ["name", "digest"], optional);
             ModelPin pin;
             try
             {
@@ -139,54 +155,74 @@ public static partial class Infer
                 throw new RefusedException(error.Message);
             }
 
-            if (!pins.TryAdd(pin.Name, pin))
+            var ports = entry.ContainsKey("ports") ? Ports(entry["ports"]) : [DefaultPort];
+            if (!allowed.TryAdd(pin.Name, new InferModel(pin, ports)))
             {
                 throw new RefusedException($"{pin.Name} is allowlisted twice");
             }
         }
 
-        return pins;
+        return allowed;
     }
 
     // The peer side. The whole-call timeout covers reading the request, the allowlist and digest checks, and every
     // prompt; Ollama has a per-prompt timeout. Any failure fails the whole call, so no partial answer is ever sent.
     public static byte[] Render(Stream stdin, HttpMessageHandler handler, IHostFacts facts, InferLimits limits)
     {
-        // Disposing the client on the way out cancels any prompt still running after a failure or the timeout.
-        using var ollama = new OllamaClient(handler, OllamaClient.RequireLoopback(facts.OllamaUrl), limits.Item);
+        // One client per allowed port; disposing them on the way out cancels any prompt still running after a failure or
+        // the timeout.
+        var clients = AllowedPorts.ToDictionary(port => port, port => new OllamaClient(handler, OllamaClient.RequireLoopback($"http://{OllamaHost}:{port}/"), limits.Item));
         using var stop = new CancellationTokenSource();
-        var work = Task.Run(() => RunAsync(stdin, ollama, facts, stop.Token));
-        var finished = Task.WhenAny(work, Task.Delay(limits.Total, stop.Token)).GetAwaiter().GetResult();
-        stop.Cancel();
-        return finished == work ? work.GetAwaiter().GetResult() : throw new TimeoutException("infer exceeded its whole-call timeout");
+        try
+        {
+            var work = Task.Run(() => RunAsync(stdin, clients, facts, stop.Token));
+            var finished = Task.WhenAny(work, Task.Delay(limits.Total, stop.Token)).GetAwaiter().GetResult();
+            stop.Cancel();
+            return finished == work ? work.GetAwaiter().GetResult() : throw new TimeoutException("infer exceeded its whole-call timeout");
+        }
+        finally
+        {
+            foreach (var client in clients.Values)
+            {
+                client.Dispose();
+            }
+        }
     }
 
-    internal static async Task<byte[]> RunAsync(Stream stdin, OllamaClient ollama, IHostFacts facts, CancellationToken stop)
+    internal static async Task<byte[]> RunAsync(Stream stdin, IReadOnlyDictionary<int, OllamaClient> clients, IHostFacts facts, CancellationToken stop)
     {
         var request = ParseRequest(await BoundedFile.ReadAsync(stdin, MaxRequestBytes, stop) ?? throw new RefusedException("the request is over 1 MiB"));
         var allowlist = ParseAllowlist(ReadAllowlist(facts.InferAllowlistPath));
-        var pin = allowlist.GetValueOrDefault(request.Model) ?? throw new RefusedException($"{request.Model} is not allowlisted");
+        var model = allowlist.GetValueOrDefault(request.Model) ?? throw new RefusedException($"{request.Model} is not allowlisted");
         try
         {
-            // Never pulls: the model must already be installed with exactly the pinned digest.
-            await ModelPin.RequireInstalledAsync(ollama, [pin]);
+            // Never pulls: every listed port's server must already have the model with exactly the pinned digest.
+            foreach (var port in model.Ports)
+            {
+                await ModelPin.RequireInstalledAsync(clients[port], [model.Pin]);
+            }
         }
         catch (PeerException error) when (error.ExitCode == PeerOllama.ExitCodes.Refused)
         {
             throw new RefusedException(error.Message);
         }
 
-        var gate = new SemaphoreSlim(Math.Clamp(facts.InferConcurrency, 1, MaxItems));
+        // One shared queue; each port runs the configured number of workers, and a free worker on either port takes the
+        // next item, so a faster server answers more of the batch and neither sits idle while items remain.
+        var queue = new ConcurrentQueue<int>(Enumerable.Range(0, request.Items.Count));
+        var answers = new InferAnswer[request.Items.Count];
+        var workers = Math.Clamp(facts.InferConcurrency, 1, MaxItems);
         using var abandon = CancellationTokenSource.CreateLinkedTokenSource(stop);
-        var answers = request.Items.Select(item => AnswerAsync(ollama, request, item, gate, abandon.Token)).ToList();
-        var pending = answers.Cast<Task>().ToList();
+        var pending = model.Ports
+            .SelectMany(port => Enumerable.Range(0, workers).Select(_ => WorkAsync(port, clients[port], request, queue, answers, abandon.Token)))
+            .ToList();
         while (pending.Count > 0)
         {
             var done = await Task.WhenAny(pending);
             pending.Remove(done);
             if (!done.IsCompletedSuccessfully)
             {
-                // Fail fast: no prompt waiting for a slot starts after the first failure, which the await rethrows.
+                // Fail fast: no worker takes another item after the first failure, which the await rethrows.
                 abandon.Cancel();
             }
 
@@ -196,9 +232,9 @@ public static partial class Infer
         return Serve.Envelope(Verb, writer =>
         {
             writer.WriteString("model", request.Model);
-            writer.WriteString("digest", pin.Digest);
+            writer.WriteString("digest", model.Pin.Digest);
             writer.WriteStartArray("items");
-            foreach (var answer in answers.Select(task => task.Result))
+            foreach (var answer in answers)
             {
                 writer.WriteStartObject();
                 writer.WriteString("id", answer.Id);
@@ -206,6 +242,7 @@ public static partial class Infer
                 writer.WriteNumber("evalCount", answer.EvalCount);
                 writer.WriteNumber("promptEvalCount", answer.PromptEvalCount);
                 writer.WriteNumber("seconds", Math.Round(answer.Seconds, 3));
+                writer.WriteNumber("port", answer.Port);
                 writer.WriteEndObject();
             }
 
@@ -251,17 +288,14 @@ public static partial class Infer
         return chat;
     }
 
-    private static async Task<InferAnswer> AnswerAsync(OllamaClient ollama, InferRequest request, InferItem item, SemaphoreSlim gate, CancellationToken abandon)
+    // One worker on one port: takes items off the shared queue until it is empty or the batch is abandoned.
+    internal static async Task WorkAsync(int port, OllamaClient ollama, InferRequest request, ConcurrentQueue<int> queue, InferAnswer[] answers, CancellationToken abandon)
     {
-        await gate.WaitAsync(abandon);
-        try
+        while (!abandon.IsCancellationRequested && queue.TryDequeue(out var index))
         {
+            var item = request.Items[index];
             var result = await ollama.ChatAsync(ChatRequest(request, item));
-            return new InferAnswer(item.Id, result.Content, result.OutputTokens, result.PromptTokens, result.Seconds);
-        }
-        finally
-        {
-            gate.Release();
+            answers[index] = new InferAnswer(item.Id, result.Content, result.OutputTokens, result.PromptTokens, result.Seconds, port);
         }
     }
 
@@ -275,6 +309,27 @@ public static partial class Infer
         {
             throw new RefusedException("the allowlist cannot be read");
         }
+    }
+
+    private static List<int> Ports(JsonNode? node)
+    {
+        if (node is not JsonArray array || array.Count == 0)
+        {
+            throw new RefusedException("ports must be a non-empty array");
+        }
+
+        var ports = new List<int>();
+        foreach (var item in array)
+        {
+            if (!(item is JsonValue value && value.TryGetValue<int>(out var port) && AllowedPorts.Contains(port) && !ports.Contains(port)))
+            {
+                throw new RefusedException($"ports must be distinct values from [{string.Join(", ", AllowedPorts)}]");
+            }
+
+            ports.Add(port);
+        }
+
+        return ports;
     }
 
     private static InferOptions Options(JsonNode? node)

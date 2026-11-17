@@ -14,6 +14,9 @@ public class InferTests
     private static readonly string Allowlisted =
         $$"""{"schema":"projectbuddy/peer-infer-allowlist@1","models":[{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"}]}""";
 
+    private static string AllowlistedOn(string ports) =>
+        $$"""{"schema":"projectbuddy/peer-infer-allowlist@2","models":[{"name":"other:1","digest":"{{new string('b', 64)}}"},{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"{{ports}}}]}""";
+
     private static readonly InferLimits Fast = new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20));
 
     private static string Request(string items = """[{"id":"a","prompt":"Is the sky blue?"}]""", string? options = null, string model = FakeOllama.Model) =>
@@ -66,7 +69,7 @@ public class InferTests
         var ollama = new FakeOllama
         {
             // The first item finishes last, so the answer order cannot follow completion order.
-            Chat = async (body, token) =>
+            Chat = async (body, _, token) =>
             {
                 var prompt = FakeOllama.Prompt(body);
                 await Task.Delay(prompt == "first" ? 200 : 0, token);
@@ -88,7 +91,8 @@ public class InferTests
         Assert.Equal([3, 3, 3], items.Select(item => item.GetProperty("evalCount").GetInt32()));
         Assert.Equal([5, 6, 5], items.Select(item => item.GetProperty("promptEvalCount").GetInt32()));
         Assert.All(items, item => Assert.Equal(1.235, item.GetProperty("seconds").GetDouble()));
-        Assert.Equal(["id", "answer", "evalCount", "promptEvalCount", "seconds"], items[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["id", "answer", "evalCount", "promptEvalCount", "seconds", "port"], items[0].EnumerateObject().Select(property => property.Name));
+        Assert.All(items, item => Assert.Equal(11434, item.GetProperty("port").GetInt32()));
         Assert.Equal(["model", "digest", "items"], data.EnumerateObject().Select(property => property.Name));
 
         // Each chat carries one user message and only the options the request set: no system prompt, tools or images.
@@ -281,7 +285,7 @@ public class InferTests
     [InlineData("BESPOKE-MINICHECK:7B")]
     public void Refuses_a_model_off_the_allowlist(string model)
     {
-        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, FakeOllama.Digest), (model, FakeOllama.Digest))) };
+        var ollama = new FakeOllama { Tags = _ => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, FakeOllama.Digest), (model, FakeOllama.Digest))) };
         AssertRefused(Run(Request(model: model), ollama));
         Assert.Empty(ollama.Requests);
     }
@@ -292,7 +296,7 @@ public class InferTests
     [InlineData("sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e")]
     public void Refuses_a_model_whose_installed_digest_is_not_the_pinned_one(string installed)
     {
-        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, installed))) };
+        var ollama = new FakeOllama { Tags = _ => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, installed))) };
         AssertRefused(Run(Request(), ollama));
         Assert.Equal(["/api/tags"], ollama.Requests.Select(request => request.Path));
     }
@@ -300,7 +304,7 @@ public class InferTests
     [Fact]
     public void Refuses_a_model_that_is_not_installed_and_never_pulls_it()
     {
-        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList(("qwen2.5:7b", FakeOllama.Digest))) };
+        var ollama = new FakeOllama { Tags = _ => FakeOllama.Ok(FakeOllama.TagList(("qwen2.5:7b", FakeOllama.Digest))) };
         AssertRefused(Run(Request(), ollama));
         Assert.Equal(["/api/tags"], ollama.Requests.Select(request => request.Path));
     }
@@ -315,7 +319,9 @@ public class InferTests
             "not json",
             "[]",
             Models($"[{entry}]").Replace("{\"schema\"", "{\"extra\":1,\"schema\""),
-            Models($"[{entry}]").Replace("@1", "@2"),
+            Models($"[{entry}]").Replace("@1", "@3"),
+            Models($"[{entry}]").Replace("@1", "@0"),
+            Models($$"""[{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}","ports":[11434]}]"""),
             $"{{\"models\":[{entry}]}}",
             Models("{}"),
             Models("[]"),
@@ -331,6 +337,34 @@ public class InferTests
             Models($"[{entry},{entry}]"),
             Models($"[{entry}]") + new string(' ', Infer.MaxAllowlistBytes),
         };
+    }
+
+    public static TheoryData<string> UnusablePorts() => new()
+    {
+        "[]",
+        "null",
+        "11434",
+        "{}",
+        "[8080]",
+        "[11436]",
+        "[0]",
+        "[11434,11434]",
+        "[11435,11434,11435]",
+        "[\"11434\"]",
+        "[11434.0]",
+        "[11434.5]",
+        "[1e400]",
+        "[null]",
+        "[[11434]]",
+    };
+
+    [Theory]
+    [MemberData(nameof(UnusablePorts))]
+    public void Refuses_ports_outside_the_fixed_set(string ports)
+    {
+        var ollama = new FakeOllama();
+        AssertRefused(Run(Request(), ollama, Facts(AllowlistedOn($",\"ports\":{ports}"))));
+        Assert.Empty(ollama.Requests);
     }
 
     [Theory]
@@ -369,7 +403,7 @@ public class InferTests
     [InlineData(HttpStatusCode.NotFound)]
     public void An_ollama_that_cannot_list_its_models_is_an_internal_error(HttpStatusCode status)
     {
-        var ollama = new FakeOllama { Tags = () => new HttpResponseMessage(status) { Content = new StringContent("secret detail D:\\customer") } };
+        var ollama = new FakeOllama { Tags = _ => new HttpResponseMessage(status) { Content = new StringContent("secret detail D:\\customer") } };
         AssertInternal(Run(Request(), ollama));
         Assert.Empty(ollama.Chats);
     }
@@ -389,7 +423,7 @@ public class InferTests
     {
         var ollama = new FakeOllama
         {
-            Chat = (body, _) => Task.FromResult(FakeOllama.Prompt(body) != "prompt 2" ? FakeOllama.Ok(FakeOllama.Reply("fine"))
+            Chat = (body, _, _) => Task.FromResult(FakeOllama.Prompt(body) != "prompt 2" ? FakeOllama.Ok(FakeOllama.Reply("fine"))
                 : reply == "status" ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("secret") }
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(reply, Encoding.UTF8, "application/json") }),
         };
@@ -403,7 +437,7 @@ public class InferTests
     {
         var ollama = new FakeOllama
         {
-            Chat = async (body, token) =>
+            Chat = async (body, _, token) =>
             {
                 if (FakeOllama.Prompt(body) == "prompt 0")
                 {
@@ -434,7 +468,7 @@ public class InferTests
     {
         // Each prompt holds its slot until every allowed slot is busy (or 2 s pass), so a looser bound would show.
         var ollama = new FakeOllama();
-        ollama.Chat = async (body, token) =>
+        ollama.Chat = async (body, _, token) =>
         {
             var deadline = Stopwatch.StartNew();
             while (ollama.InFlight < bound && deadline.Elapsed < TimeSpan.FromSeconds(2))
@@ -456,7 +490,7 @@ public class InferTests
     {
         var ollama = new FakeOllama
         {
-            Chat = async (body, token) =>
+            Chat = async (body, _, token) =>
             {
                 await Task.Delay(FakeOllama.Prompt(body) == "prompt 1" ? Timeout.InfiniteTimeSpan : TimeSpan.Zero, token);
                 return FakeOllama.Ok(FakeOllama.Reply("ok"));
@@ -473,7 +507,7 @@ public class InferTests
     {
         var ollama = new FakeOllama
         {
-            Chat = async (body, token) =>
+            Chat = async (body, _, token) =>
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
                 return FakeOllama.Ok(FakeOllama.Reply("ok"));
@@ -501,7 +535,7 @@ public class InferTests
     public void Answers_may_exceed_the_other_verbs_limit_up_to_one_mebibyte()
     {
         var answer = new string('a', 60 * 1024);
-        var ollama = new FakeOllama { Chat = (_, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
+        var ollama = new FakeOllama { Chat = (_, _, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
         var (code, output, _) = Run(Request(Items(16)), ollama);
         Assert.Equal(0, code);
         Assert.InRange(Encoding.UTF8.GetByteCount(output), Serve.MaxOutputBytes, Infer.MaxOutputBytes);
@@ -511,21 +545,154 @@ public class InferTests
     public void Answers_over_one_mebibyte_are_refused_as_the_output_limit()
     {
         var answer = new string('a', 70 * 1024);
-        var ollama = new FakeOllama { Chat = (_, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
+        var ollama = new FakeOllama { Chat = (_, _, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
         var (code, output, error) = Run(Request(Items(16)), ollama);
         Assert.Equal(ExitCodes.OutputLimit, code);
         Assert.Empty(output);
         Assert.Equal(Serve.OutputLimitMessage + Environment.NewLine, error);
     }
 
-    [Fact]
-    public void Talks_only_to_a_loopback_ollama()
+    [Theory]
+    [InlineData("", new[] { 11434 })]
+    [InlineData(",\"ports\":[11434]", new[] { 11434 })]
+    [InlineData(",\"ports\":[11435]", new[] { 11435 })]
+    [InlineData(",\"ports\":[11435,11434]", new[] { 11435, 11434 })]
+    public void Checks_the_pin_on_every_listed_port_and_uses_only_those(string ports, int[] expected)
     {
         var ollama = new FakeOllama();
-        var facts = Facts();
-        facts.OllamaUrl = "http://192.168.1.10:11434/";
-        AssertInternal(Run(Request(), ollama, facts));
+        var (code, output, _) = Run(Request(Items(12)), ollama, Facts(AllowlistedOn(ports), concurrency: 2));
+        Assert.Equal(0, code);
+        Assert.Equal(expected, ollama.Requests.Where(request => request.Path == "/api/tags").Select(request => request.Port));
+        Assert.All(ollama.Requests, request => Assert.Equal("127.0.0.1", request.Host));
+        Assert.All(ollama.Requests, request => Assert.Contains(request.Port, expected));
+        var answered = Data(output).GetProperty("items").EnumerateArray().Select(item => item.GetProperty("port").GetInt32()).ToList();
+        Assert.Equal(12, answered.Count);
+        Assert.All(answered, port => Assert.Contains(port, expected));
+        Assert.Equal(answered.Count(port => port == 11435), ollama.ChatsOn(11435).Count);
+    }
+
+    [Fact]
+    public void A_digest_mismatch_on_either_port_refuses_the_batch()
+    {
+        foreach (var (wrong, checkedPorts) in new[] { (11434, new[] { 11434 }), (11435, new[] { 11434, 11435 }) })
+        {
+            var ollama = new FakeOllama
+            {
+                Tags = port => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, port == wrong ? new string('0', 64) : FakeOllama.Digest))),
+            };
+            AssertRefused(Run(Request(), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"))));
+            Assert.Equal(checkedPorts, ollama.Requests.Select(request => request.Port));
+            Assert.Empty(ollama.Chats);
+        }
+    }
+
+    [Fact]
+    public void A_listed_port_whose_server_is_down_is_an_internal_error()
+    {
+        var ollama = new FakeOllama
+        {
+            Tags = port => port == 11435 ? new HttpResponseMessage(HttpStatusCode.BadGateway) : FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, FakeOllama.Digest))),
+        };
+        AssertInternal(Run(Request(), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"))));
+        Assert.Empty(ollama.Chats);
+    }
+
+    [Fact]
+    public void Keeps_both_servers_busy_with_the_configured_workers_on_each()
+    {
+        // Each prompt holds its slot until all four slots (two per port) are busy, so a looser bound would show.
+        var ollama = new FakeOllama();
+        ollama.Chat = async (body, _, token) =>
+        {
+            var deadline = Stopwatch.StartNew();
+            while (ollama.InFlight < 4 && deadline.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(5, token);
+            }
+
+            await Task.Delay(20, token);
+            return FakeOllama.Ok(FakeOllama.Reply("ok"));
+        };
+        var (code, output, _) = Run(Request(Items(16)), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"), concurrency: 2));
+        Assert.Equal(0, code);
+        Assert.Equal(2, ollama.MaxInFlightOn(11434));
+        Assert.Equal(2, ollama.MaxInFlightOn(11435));
+        var ports = Data(output).GetProperty("items").EnumerateArray().Select(item => item.GetProperty("port").GetInt32()).ToList();
+        Assert.Equal(8, ports.Count(port => port == 11434));
+        Assert.Equal(8, ports.Count(port => port == 11435));
+    }
+
+    [Fact]
+    public void A_faster_server_takes_more_of_the_shared_queue()
+    {
+        // The Arc iGPU (11435) is slow here: while it answers one prompt, the RTX GPU (11434) answers all the rest.
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, port, token) =>
+            {
+                await Task.Delay(port == 11435 ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(10), token);
+                return FakeOllama.Ok(FakeOllama.Reply($"answer: {FakeOllama.Prompt(body)}"));
+            },
+        };
+        var (code, output, _) = Run(Request(Items(10)), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"), concurrency: 1));
+        Assert.Equal(0, code);
+        var items = Data(output).GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(Enumerable.Range(0, 10).Select(index => $"item-{index}"), items.Select(item => item.GetProperty("id").GetString()));
+        Assert.Equal(Enumerable.Range(0, 10).Select(index => $"answer: prompt {index}"), items.Select(item => item.GetProperty("answer").GetString()));
+        Assert.Equal(1, items.Count(item => item.GetProperty("port").GetInt32() == 11435));
+        Assert.Equal(9, items.Count(item => item.GetProperty("port").GetInt32() == 11434));
+    }
+
+    [Fact]
+    public void A_failure_on_one_port_stops_the_other_port_too()
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, port, token) =>
+            {
+                if (port == 11435)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(30), token);
+                return FakeOllama.Ok(FakeOllama.Reply("late"));
+            },
+        };
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(Request(Items(20)), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"), concurrency: 1),
+            new InferLimits(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"took {watch.Elapsed}");
+        Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled >= 1, TimeSpan.FromSeconds(10)));
+        Assert.True(ollama.Chats.Count() < 20);
+    }
+
+    [Fact]
+    public async Task A_worker_takes_nothing_once_the_batch_is_abandoned()
+    {
+        var request = new InferRequest(FakeOllama.Model, new InferOptions(null, null, null), [new InferItem("a", "p", false)]);
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<int>([0]);
+        var answers = new InferAnswer[1];
+        var ollama = new FakeOllama();
+        using var client = new ProjectBuddy.PeerOllama.OllamaClient(ollama, new Uri("http://127.0.0.1:11434/"), TimeSpan.FromSeconds(5));
+        await PeerAsk.Infer.WorkAsync(11434, client, request, queue, answers, new CancellationToken(canceled: true));
+        Assert.Single(queue);
+        Assert.Null(answers[0]);
         Assert.Empty(ollama.Requests);
+
+        await PeerAsk.Infer.WorkAsync(11434, client, request, queue, answers, CancellationToken.None);
+        Assert.Empty(queue);
+        Assert.Equal(11434, answers[0].Port);
+    }
+
+    [Fact]
+    public void Parses_ports_per_model_and_defaults_to_the_rtx_server()
+    {
+        var allowlist = PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(AllowlistedOn(",\"ports\":[11435,11434]")));
+        Assert.Equal([11434], allowlist["other:1"].Ports);
+        Assert.Equal([11435, 11434], allowlist[FakeOllama.Model].Ports);
+        Assert.Equal([11434], PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(Allowlisted))[FakeOllama.Model].Ports);
+        Assert.Equal([11434, 11435], PeerAsk.Infer.AllowedPorts);
     }
 
     [Fact]
