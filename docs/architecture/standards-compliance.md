@@ -13,7 +13,7 @@ compliance posture was assessed against.
 | Standard | `svelderrainruiz/repo-standards-review` |
 | Version (tag) | `v0.8.0` |
 | Version (commit SHA) | `d4d022b92f1c5a8bedd4995aab8ca6d65b678e93` |
-| Assessed | 2026-11-16 |
+| Assessed | 2026-11-17 |
 | Profile | `release-gate` |
 
 `v0.7.0` and `v0.8.0` add `rsr/ecosystem-wiki-standard@3` and `@4`. These are
