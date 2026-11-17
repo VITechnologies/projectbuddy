@@ -14,7 +14,12 @@ public static partial class Ask
     // The peer allows diagnose its own timeout; the client waits a little longer, so the peer's answer arrives first.
     public static readonly TimeSpan DiagnoseAllowance = Serve.DiagnoseTimeout + TimeSpan.FromSeconds(20);
 
-    public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh, string? Question = null);
+    // Likewise for infer, whose whole-call timeout already covers reading the request.
+    public static readonly TimeSpan InferAllowance = Infer.Timeout + TimeSpan.FromSeconds(20);
+
+    // An infer request travels as ssh's stdin, byte for byte as read from the file.
+    public sealed record Options(string Verb, string Host, string User, string Identity, string KnownHosts, int ConnectTimeout, string Ssh, string? Question = null,
+        InferRequest? Request = null, byte[]? RequestBytes = null);
 
     public static int Execute(string[] args, IProcessRunner runner, string defaultSsh, Func<string, bool> fileExists, TextWriter stdout, TextWriter stderr)
     {
@@ -26,9 +31,9 @@ public static partial class Ask
             return ExitCodes.Usage;
         }
 
-        var timeout = TimeSpan.FromSeconds(options.ConnectTimeout) + (options.Question is null ? CommandAllowance : DiagnoseAllowance);
-        var result = runner.Run(options.Ssh, SshArguments(options), timeout);
-        var (code, message) = Classify(result, options.Verb, options.Question);
+        var allowance = options.Request is not null ? InferAllowance : options.Question is null ? CommandAllowance : DiagnoseAllowance;
+        var result = runner.Run(options.Ssh, SshArguments(options), TimeSpan.FromSeconds(options.ConnectTimeout) + allowance, options.RequestBytes);
+        var (code, message) = Classify(result, options.Verb, options.Question, options.Request);
         if (code == 0)
         {
             stdout.WriteLine(result.Stdout.Trim());
@@ -59,14 +64,16 @@ public static partial class Ask
                 return null;
             }
         }
-        else if (!Serve.Verbs.Contains(verb))
+        else if (verb != Infer.Verb && !Serve.Verbs.Contains(verb))
         {
             problem = $"unknown verb '{verb}'";
             return null;
         }
 
+        var infer = verb == Infer.Verb;
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        string[] known = ["--host", "--user", "--identity", "--known-hosts", "--connect-timeout", "--ssh"];
+        string[] required = infer ? ["--host", "--user", "--identity", "--known-hosts", "--request"] : ["--host", "--user", "--identity", "--known-hosts"];
+        string[] known = [.. required, "--connect-timeout", "--ssh"];
         for (var i = question is null ? 1 : 2; i < args.Length; i += 2)
         {
             if (!known.Contains(args[i]) || i + 1 >= args.Length || values.ContainsKey(args[i]))
@@ -78,11 +85,11 @@ public static partial class Ask
             values[args[i]] = args[i + 1];
         }
 
-        foreach (var required in known[..4])
+        foreach (var option in required)
         {
-            if (!values.ContainsKey(required))
+            if (!values.ContainsKey(option))
             {
-                problem = $"missing {required}";
+                problem = $"missing {option}";
                 return null;
             }
         }
@@ -124,7 +131,42 @@ public static partial class Ask
             return null;
         }
 
-        return new Options(verb, host, values["--user"], values["--identity"], values["--known-hosts"], connectTimeout, ssh, question);
+        InferRequest? request = null;
+        byte[]? bytes = null;
+        if (infer)
+        {
+            bytes = ReadRequest(values["--request"]);
+            if (bytes is null)
+            {
+                problem = $"--request must be a readable file of at most {Infer.MaxRequestBytes} bytes";
+                return null;
+            }
+
+            try
+            {
+                request = Infer.ParseRequest(bytes);
+            }
+            catch (RefusedException error)
+            {
+                problem = $"--request is not a valid {Infer.RequestSchema} document: {error.Message}";
+                return null;
+            }
+        }
+
+        return new Options(verb, host, values["--user"], values["--identity"], values["--known-hosts"], connectTimeout, ssh, question, request, bytes);
+    }
+
+    // The request file stays on the workstation; only its bytes travel, so it needs no path rules beyond being readable.
+    private static byte[]? ReadRequest(string path)
+    {
+        try
+        {
+            return BoundedFile.Read(path, Infer.MaxRequestBytes);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
     }
 
     public static IReadOnlyList<string> SshArguments(Options options) =>
@@ -167,7 +209,7 @@ public static partial class Ask
         "Connection reset", "Could not resolve hostname",
     ];
 
-    public static (int Code, string Message) Classify(ProcessResult result, string verb, string? question = null)
+    public static (int Code, string Message) Classify(ProcessResult result, string verb, string? question = null, InferRequest? request = null)
     {
         if (!result.Started)
         {
@@ -182,7 +224,7 @@ public static partial class Ask
         switch (result.ExitCode)
         {
             case 0:
-                return Validate(result.Stdout, verb, question);
+                return Validate(result.Stdout, verb, question, request);
             case ExitCodes.Refused:
                 return (ExitCodes.PeerRefused, "refused: the peer refused the request");
             case ExitCodes.OutputLimit:
@@ -216,9 +258,9 @@ public static partial class Ask
         return (ExitCodes.SshError, $"ssh-error: {detail}");
     }
 
-    private static (int Code, string Message) Validate(string stdout, string verb, string? question)
+    private static (int Code, string Message) Validate(string stdout, string verb, string? question, InferRequest? request)
     {
-        if (Encoding.UTF8.GetByteCount(stdout) > Serve.MaxOutputBytes + 2)
+        if (Encoding.UTF8.GetByteCount(stdout) > (verb == Infer.Verb ? Infer.MaxOutputBytes : Serve.MaxOutputBytes) + 2)
         {
             return (ExitCodes.Protocol, "protocol: answer exceeds the output limit");
         }
@@ -231,13 +273,15 @@ public static partial class Ask
                 && root.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.String && schema.GetString() == Versions.Schema
                 && root.TryGetProperty("verb", out var answered) && answered.ValueKind == JsonValueKind.String && answered.GetString() == verb
                 && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
-                && (question is null || IsDiagnosis(data, question)))
+                && (question is null || IsDiagnosis(data, question))
+                && (verb != Infer.Verb || (request is not null && IsInference(data, request))))
             {
                 return (0, "");
             }
         }
-        catch (JsonException)
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
         {
+            // InvalidOperationException: a string with an escaped lone surrogate cannot be read.
         }
 
         return (ExitCodes.Protocol, "protocol: answer is not a projectbuddy/peer-ask@1 document for this verb");
@@ -253,6 +297,43 @@ public static partial class Ask
                 && report.TryGetProperty("verified", out var verified) && verified.ValueKind == JsonValueKind.Array
                 && verified.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "citations")
             : data.TryGetProperty("reason", out var reason) && reason.ValueKind == JsonValueKind.String);
+
+    // An infer answer names the requested model and its pinned digest, and answers every requested id exactly once, from an
+    // allowed port, and nothing else.
+    private static bool IsInference(JsonElement data, InferRequest request)
+    {
+        if (!(data.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String && model.GetString() == request.Model
+              && data.TryGetProperty("digest", out var digest) && digest.ValueKind == JsonValueKind.String && Digest().IsMatch(digest.GetString()!)
+              && data.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array))
+        {
+            return false;
+        }
+
+        var expected = request.Items.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        var answered = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in items.EnumerateArray())
+        {
+            if (!(item.ValueKind == JsonValueKind.Object
+                  && item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                  && expected.Contains(id.GetString()!) && answered.Add(id.GetString()!)
+                  && item.TryGetProperty("answer", out var answer) && answer.ValueKind == JsonValueKind.String
+                  && Count(item, "evalCount") && Count(item, "promptEvalCount")
+                  && item.TryGetProperty("seconds", out var seconds) && seconds.ValueKind == JsonValueKind.Number && seconds.GetDouble() >= 0
+                  && item.TryGetProperty("port", out var port) && port.ValueKind == JsonValueKind.Number && port.TryGetInt32(out var number)
+                  && Infer.AllowedPorts.Contains(number)))
+            {
+                return false;
+            }
+        }
+
+        return answered.Count == expected.Count;
+    }
+
+    private static bool Count(JsonElement item, string name) =>
+        item.TryGetProperty(name, out var count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt64(out var value) && value >= 0;
+
+    [GeneratedRegex("^[0-9a-f]{64}\\z")]
+    private static partial Regex Digest();
 
     [GeneratedRegex("^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")]
     private static partial Regex HostName();

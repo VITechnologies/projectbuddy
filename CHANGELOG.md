@@ -4,6 +4,57 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## Unreleased
+
+- `projectbuddy-ask` 0.4.0 adds the `infer` verb (#358), so the workstation
+  can run batches of prompts on the peer's GPU over the existing forced
+  command.
+  - The request travels as ssh's stdin: `projectbuddy/peer-infer-request@1`,
+    at most 1 MiB of UTF-8 JSON, with 1 to 64 items. Each item has a unique
+    id (`[A-Za-z0-9._:-]{1,64}`), a prompt of at most 64 KiB, and an optional
+    `"json"` format. `temperature` (0 to 2), `seed` and `num_ctx` (512 to
+    32768) are optional, and so is `think` (a boolean, sent as Ollama's
+    top-level `think`). Any other key, including `num_predict`, or an
+    out-of-range value is refused (exit 64).
+  - The model must be in the peer's deployment-written allowlist at
+    `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`. The
+    format is `projectbuddy/peer-infer-allowlist@2`, in which each model has
+    a name, a pinned digest and `ports`. `@1` files, without ports, are
+    still accepted.
+  - `ports` is a non-empty, distinct subset of the fixed set 11434 (NVIDIA
+    GPU) and 11435 (Intel Arc iGPU, Vulkan), and defaults to `[11434]`. The
+    model must be installed with exactly its pinned digest on every listed
+    port's server. The peer never pulls models.
+  - Each item is one `/api/chat` call to a loopback Ollama through the
+    shared `ProjectBuddy.PeerOllama` client. Workers on each listed port
+    take items from one shared queue, so one batch keeps both accelerators
+    busy.
+  - Host facts give 11434 four workers and 11435 two. Each must equal its
+    server's `OLLAMA_NUM_PARALLEL` (deployment sets 4 and 2), so items never
+    queue inside Ollama and the 120 s per-item timeout covers generation,
+    not queueing. The whole call has 600 s. Any failure fails the whole call
+    (exit 66), with no partial answer.
+  - The peer always caps generation at `num_predict` 4096 tokens per item,
+    thinking included. Only the final message content is returned, never
+    the thinking text. One answer over 16 KiB of UTF-8 fails the call with
+    the output-limit exit code (65) and its fixed message.
+  - The answer holds only the model's output, its counters and the `port`
+    that answered, per id, and is at most 1 MiB. Every other verb keeps its
+    16 KiB limit and its behaviour.
+  - `ask infer --request <file>` sends the file's bytes with the same fixed
+    ssh invocation. It waits 620 s and checks that every requested id is
+    answered exactly once, from an allowed port.
+- The `projectbuddy` identity moves to 0.2, because its pinned
+  `tools/peer/README.md` now documents `diagnose` and `infer`. The
+  generator now names the model `projectbuddy:0.2-<base>`.
+  - `projectbuddy-probes` follows: its default `--identity`
+    (`ProbeOptions.IdentityModel`) is now `projectbuddy:0.2-qwen2.5-7b`. A
+    test ties it to `identity.json`'s version, so a later bump cannot drift.
+  - `projectbuddy-diagnose` uses that default, so its `ollama-empty`
+    question reports `identity-present` only when the 0.2 identity is
+    installed. Rebuild the identity on the peer before deploying probes or
+    diagnose from this release.
+
 ## v0.5.0
 
 - `projectbuddy-wiki` lets one profile scope declare several ID prefixes

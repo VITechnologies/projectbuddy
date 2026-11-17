@@ -4,9 +4,11 @@ using System.Text.RegularExpressions;
 
 namespace ProjectBuddy.PeerAsk;
 
-// The forced command on the peer: answers one allow-listed, read-only verb, or one diagnose question, as bounded JSON.
+// The forced command on the peer: answers one allow-listed, read-only verb, one diagnose question, or one infer batch,
+// as bounded JSON.
 public static partial class Serve
 {
+    // Every verb but infer, which has its own limit (Infer.MaxOutputBytes).
     public const int MaxOutputBytes = 16 * 1024;
     public const int MaxFieldChars = 200;
     public const string RefusedMessage = "projectbuddy-ask: request refused";
@@ -25,10 +27,15 @@ public static partial class Serve
     public const int MaxReasonChars = 400;
     public static readonly TimeSpan DiagnoseTimeout = TimeSpan.FromSeconds(180);
 
-    public static int Execute(string? command, IProcessRunner runner, IHostFacts facts, TextWriter stdout, TextWriter stderr)
+    // Only infer reads stdin: its request. The Ollama handler is used only by infer.
+    public static int Execute(string? command, IProcessRunner runner, IHostFacts facts, Stream stdin, HttpMessageHandler ollama, TextWriter stdout, TextWriter stderr) =>
+        Execute(command, runner, facts, stdin, ollama, stdout, stderr, InferLimits.Default);
+
+    internal static int Execute(string? command, IProcessRunner runner, IHostFacts facts, Stream stdin, HttpMessageHandler ollama, TextWriter stdout, TextWriter stderr, InferLimits limits)
     {
         var question = Question(command);
-        if (command is null || (question is null && !Verbs.Contains(command)))
+        var infer = command == Infer.Verb;
+        if (command is null || (question is null && !infer && !Verbs.Contains(command)))
         {
             stderr.WriteLine(RefusedMessage);
             return ExitCodes.Refused;
@@ -37,12 +44,18 @@ public static partial class Serve
         byte[] json;
         try
         {
-            json = question is null ? Render(command, runner, facts) : RenderDiagnosis(question, runner, facts);
+            json = infer ? Infer.Render(stdin, ollama, facts, limits)
+                : question is null ? Render(command, runner, facts) : RenderDiagnosis(question, runner, facts);
         }
-        catch (DiagnosisRefusedException)
+        catch (RefusedException)
         {
             stderr.WriteLine(RefusedMessage);
             return ExitCodes.Refused;
+        }
+        catch (AnswerLimitException)
+        {
+            stderr.WriteLine(OutputLimitMessage);
+            return ExitCodes.OutputLimit;
         }
         catch (Exception)
         {
@@ -51,7 +64,7 @@ public static partial class Serve
             return ExitCodes.Internal;
         }
 
-        if (json.Length > MaxOutputBytes)
+        if (json.Length > (infer ? Infer.MaxOutputBytes : MaxOutputBytes))
         {
             stderr.WriteLine(OutputLimitMessage);
             return ExitCodes.OutputLimit;
@@ -97,7 +110,7 @@ public static partial class Serve
         var result = runner.Run(facts.DiagnosePath, ["--policy", facts.DiagnosePolicyPath, "--question", question, "--deny-list", facts.DenyListPath], DiagnoseTimeout);
         if (result is { Started: true, TimedOut: false, ExitCode: 3 })
         {
-            throw new DiagnosisRefusedException();
+            throw new RefusedException("projectbuddy-diagnose refused the question");
         }
 
         if (result is not { Started: true, TimedOut: false, ExitCode: 0 or 6 })
@@ -130,7 +143,7 @@ public static partial class Serve
         return line.Length <= MaxReasonChars ? line : line[..MaxReasonChars];
     }
 
-    private static byte[] Envelope(string verb, Action<Utf8JsonWriter> data)
+    internal static byte[] Envelope(string verb, Action<Utf8JsonWriter> data)
     {
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
@@ -265,6 +278,4 @@ public static partial class Serve
     // The id starts with a letter or digit, so it can never read as an option; \z, unlike $, admits no trailing newline.
     [GeneratedRegex("^diagnose ([a-z0-9][a-z0-9-]{0,63})\\z")]
     private static partial Regex DiagnoseCommand();
-
-    private sealed class DiagnosisRefusedException : Exception;
 }

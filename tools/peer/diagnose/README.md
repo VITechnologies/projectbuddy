@@ -202,8 +202,8 @@ projectbuddy-ask ask diagnose disk-full --host <peer> --user <account> --identit
   that account's VMs.
 
 The verb list in [`../README.md`](../README.md) is pinned content of the
-`projectbuddy` identity (`identity/identity.json`). It gains `diagnose` at the
-identity's next version.
+`projectbuddy` identity (`identity/identity.json`). It lists `diagnose` from
+identity 0.2 (#358).
 
 ## Tests
 

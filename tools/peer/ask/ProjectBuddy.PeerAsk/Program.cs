@@ -1,12 +1,16 @@
+using ProjectBuddy.PeerOllama;
+
 namespace ProjectBuddy.PeerAsk;
 
 public static class Program
 {
     public const string Usage =
-        "usage: projectbuddy-ask serve | ask <verb> | ask diagnose <question-id> --host <address> --user <name> --identity <file> --known-hosts <file> [--connect-timeout <seconds>] [--ssh <path>] | --version";
+        "usage: projectbuddy-ask serve | ask <verb> | ask diagnose <question-id> | ask infer --request <file> --host <address> --user <name> --identity <file> --known-hosts <file> [--connect-timeout <seconds>] [--ssh <path>] | --version";
 
+    // stdin is the raw byte stream, never Console.In: an infer request is UTF-8 whatever the console code page is.
     public static int Main(string[] args) =>
-        Run(args, Environment.GetEnvironmentVariable, new SystemProcessRunner(), new SystemFacts(), File.Exists, Console.Out, Console.Error);
+        Run(args, Environment.GetEnvironmentVariable, new SystemProcessRunner(), new SystemFacts(), File.Exists,
+            Console.OpenStandardInput(), OllamaClient.LoopbackHandler(), Console.Out, Console.Error);
 
     public static int Run(
         string[] args,
@@ -14,12 +18,14 @@ public static class Program
         IProcessRunner runner,
         IHostFacts facts,
         Func<string, bool> fileExists,
+        Stream stdin,
+        HttpMessageHandler ollama,
         TextWriter stdout,
         TextWriter stderr)
     {
         if (args is ["serve"])
         {
-            return Serve.Execute(environment("SSH_ORIGINAL_COMMAND"), runner, facts, stdout, stderr);
+            return Serve.Execute(environment("SSH_ORIGINAL_COMMAND"), runner, facts, stdin, ollama, stdout, stderr);
         }
 
         if (args is ["ask", .. var rest])
@@ -40,7 +46,7 @@ public static class Program
 
 public static class Versions
 {
-    public const string Tool = "0.3.0";
+    public const string Tool = "0.4.0";
     public const string Schema = "projectbuddy/peer-ask@1";
 }
 

@@ -55,7 +55,7 @@ def test_render_is_deterministic_and_pins_every_source(tmp_path: Path) -> None:
 
 def test_the_committed_manifest_matches_the_repository() -> None:
     manifest = parse_manifest((REPO / "tools/peer/identity/identity.json").read_text(encoding="utf-8"))
-    assert render(manifest, "qwen2.5:7b", REPO).startswith("# projectbuddy:0.1-qwen2.5-7b")
+    assert render(manifest, "qwen2.5:7b", REPO).startswith("# projectbuddy:0.2-qwen2.5-7b")
 
 
 def test_a_changed_source_fails_closed(tmp_path: Path) -> None:
@@ -218,4 +218,4 @@ def test_script_entry_point(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capt
     with pytest.raises(SystemExit) as exited:
         runpy.run_path(str(SCRIPT), run_name="__main__")
     assert exited.value.code == 0
-    assert capsys.readouterr().err == "projectbuddy:0.1-qwen2.5-7b\n"
+    assert capsys.readouterr().err == "projectbuddy:0.2-qwen2.5-7b\n"
