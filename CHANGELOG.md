@@ -17,8 +17,12 @@ release's notes for the exact pinned commit.
     `link-outside-field`, edges and whole-wiki ID pages use all of the scope's
     prefixes.
   - `@1` profiles, the default profile, the finding catalogues, the layouts and
-    the registry projection are unchanged. The standard pin stays at `@4`
-    until RSR ships the revision that defines `@2`.
+    the registry projection are unchanged.
+- The RSR pins move to v0.9.0 (#348): the consumer kit, the standards scan, and
+  projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@5`.
+  `@5` defines `rsr/wiki-profile@2` and adds a content rule: an observation
+  states only what its stimulus shows. Re-certification at v0.9.0 found no
+  regression: the 5 required gates `PASS`.
 - The RSR pins move to v0.8.0 (#346): the consumer kit, the standards scan, and
   projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@4`.
   Re-certification at v0.8.0 found no regression: the 5 required gates `PASS`.
