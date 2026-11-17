@@ -7,7 +7,7 @@ internal sealed class FakeRunner : IProcessRunner
 {
     private readonly Dictionary<string, ProcessResult> _results = new(StringComparer.Ordinal);
 
-    public List<(string File, IReadOnlyList<string> Args, TimeSpan Timeout)> Calls { get; } = [];
+    public List<(string File, IReadOnlyList<string> Args, TimeSpan Timeout, byte[]? Stdin)> Calls { get; } = [];
 
     public FakeRunner On(string command, ProcessResult result)
     {
@@ -15,9 +15,9 @@ internal sealed class FakeRunner : IProcessRunner
         return this;
     }
 
-    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)
+    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, byte[]? stdin = null)
     {
-        Calls.Add((fileName, arguments, timeout));
+        Calls.Add((fileName, arguments, timeout, stdin));
         var key = $"{fileName} {string.Join(' ', arguments)}";
         return _results.TryGetValue(key, out var result) ? result : new ProcessResult(false, false, -1, "", "");
     }
@@ -37,6 +37,9 @@ internal sealed class FakeFacts : IHostFacts
     public string DiagnosePath => "diagnose.exe";
     public string DiagnosePolicyPath => "policy.json";
     public string DenyListPath => "deny.json";
+    public string InferAllowlistPath { get; set; } = "allowlist.json";
+    public string OllamaUrl { get; set; } = "http://127.0.0.1:11434/";
+    public int InferConcurrency { get; set; } = 4;
     public List<Volume> Volumes { get; } = [new("C:\\", 100, 200)];
     public Exception? VolumesError { get; set; }
     public IReadOnlyList<Volume> FixedVolumes() => VolumesError is null ? Volumes : throw VolumesError;
@@ -48,7 +51,7 @@ public class ServeTests
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        var code = PeerAsk.Serve.Execute(command, runner ?? new FakeRunner(), facts ?? new FakeFacts(), stdout, stderr);
+        var code = PeerAsk.Serve.Execute(command, runner ?? new FakeRunner(), facts ?? new FakeFacts(), new UnreadableStream(), new FakeOllama(), stdout, stderr);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -69,6 +72,10 @@ public class ServeTests
     [InlineData("identity; whoami")]
     [InlineData("powershell")]
     [InlineData("vbox && del")]
+    [InlineData("infer ")]
+    [InlineData("infer x")]
+    [InlineData("INFER")]
+    [InlineData("infer\n")]
     public void Refuses_anything_off_the_allow_list(string? command)
     {
         var runner = new FakeRunner();

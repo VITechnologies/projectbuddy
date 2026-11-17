@@ -9,7 +9,8 @@ public sealed record ProcessResult(bool Started, bool TimedOut, int ExitCode, st
 
 public interface IProcessRunner
 {
-    ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout);
+    // stdin, when given, is written to the child and then closed; otherwise the child's input is closed at once.
+    ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, byte[]? stdin = null);
 }
 
 public sealed record Volume(string Name, long FreeBytes, long TotalBytes);
@@ -29,15 +30,41 @@ public interface IHostFacts
     string DiagnosePolicyPath { get; }
     string DenyListPath { get; }
 
+    // infer (#358): the deployment-written model allowlist, the loopback Ollama, and how many prompts run at once.
+    string InferAllowlistPath { get; }
+    string OllamaUrl { get; }
+    int InferConcurrency { get; }
+
     IReadOnlyList<Volume> FixedVolumes();
+}
+
+public static class BoundedFile
+{
+    // The file's bytes, or null when it holds more than maxBytes; never reads past maxBytes + 1.
+    public static byte[]? Read(string path, int maxBytes)
+    {
+        using var file = File.OpenRead(path);
+        var buffer = new byte[maxBytes + 1];
+        var read = file.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+        return read > maxBytes ? null : buffer[..read];
+    }
+
+    // Reads at most maxBytes + 1 bytes of a stream, so an oversized input is detected without reading all of it.
+    public static async Task<byte[]?> ReadAsync(Stream stream, int maxBytes, CancellationToken cancel)
+    {
+        var buffer = new byte[maxBytes + 1];
+        var read = await stream.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, cancel);
+        return read > maxBytes ? null : buffer[..read];
+    }
 }
 
 public sealed class SystemProcessRunner : IProcessRunner
 {
-    public const int MaxCapturedChars = 1024 * 1024;
+    // Above the infer answer limit (1 MiB plus a line end), so a full answer is never cut short.
+    public const int MaxCapturedChars = 2 * 1024 * 1024;
     public static readonly TimeSpan KillDrain = TimeSpan.FromSeconds(2);
 
-    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)
+    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, byte[]? stdin = null)
     {
         var info = new ProcessStartInfo(fileName)
         {
@@ -65,9 +92,11 @@ public sealed class SystemProcessRunner : IProcessRunner
         }
 
         var deadline = Stopwatch.StartNew();
-        process.StandardInput.Close();
         var stdout = ReadCapped(process.StandardOutput);
         var stderr = ReadCapped(process.StandardError);
+
+        // Written while the output is drained, so a child that answers before reading all its input cannot deadlock.
+        _ = Feed(process.StandardInput.BaseStream, stdin);
 
         // A grandchild can hold the pipes open after the child exits, so the reads share the deadline.
         var exited = process.WaitForExit(timeout);
@@ -88,6 +117,22 @@ public sealed class SystemProcessRunner : IProcessRunner
         return left > TimeSpan.Zero ? left : TimeSpan.Zero;
     }
 
+    internal static async Task Feed(Stream input, byte[]? bytes)
+    {
+        try
+        {
+            await input.WriteAsync(bytes ?? []);
+        }
+        catch (IOException)
+        {
+            // The child exited, or was killed, without reading all of its input.
+        }
+        finally
+        {
+            Close(input);
+        }
+    }
+
     internal static async Task<string> ReadCapped(TextReader reader)
     {
         var text = new StringBuilder();
@@ -103,6 +148,18 @@ public sealed class SystemProcessRunner : IProcessRunner
 
     [ExcludeFromCodeCoverage(Justification = "A pipe inherited by a process outside the killed tree can outlive the drain wait.")]
     private static string Completed(Task<string> read) => read.IsCompletedSuccessfully ? read.Result : "";
+
+    [ExcludeFromCodeCoverage(Justification = "Closing a pipe whose reader is gone fails only on some platforms.")]
+    private static void Close(Stream input)
+    {
+        try
+        {
+            input.Dispose();
+        }
+        catch (IOException)
+        {
+        }
+    }
 
     [ExcludeFromCodeCoverage(Justification = "Races with process exit; both outcomes leave the process gone.")]
     private static void Kill(Process process)
@@ -149,6 +206,14 @@ public sealed class SystemFacts : IHostFacts
     public string DenyListPath => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-link", "redaction-denylist.json")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-link", "redaction-denylist.json");
+
+    public string InferAllowlistPath => OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "infer", "allowlist.json")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "projectbuddy", "peer-ask", "infer", "allowlist.json");
+
+    public string OllamaUrl => "http://127.0.0.1:11434/";
+
+    public int InferConcurrency => 4;
 
     private static string DiagnoseDirectory => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ProjectBuddy", "peer-ask", "diagnose")

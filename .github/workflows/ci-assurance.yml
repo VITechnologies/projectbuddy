@@ -74,7 +74,8 @@ jobs:
           path: coverage.xml
 
   peer-ask:
-    # tools/peer/ask (projectbuddy-ask, #211): unit tests with a 100% line and branch gate.
+    # tools/peer/ask (projectbuddy-ask, #211, #358): unit tests with a 100% line and branch gate on its own assembly
+    # (the shared Ollama library it references has its own gate), and the trimmed single-file win-x64 binary the peer runs.
     name: Peer Ask Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -109,11 +110,21 @@ jobs:
           if report is None:
               raise SystemExit("no projectbuddy-ask coverage report was produced")
           root = ElementTree.parse(report).getroot()
+          packages = [package.attrib["name"] for package in root.iter("package")]
+          if packages != ["projectbuddy-ask"]:
+              raise SystemExit(f"projectbuddy-ask coverage must measure exactly its own assembly, got {packages}")
           line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
           print(f"projectbuddy-ask coverage: line {line:.1%}, branch {branch:.1%}")
           if line < 1.0 or branch < 1.0:
               raise SystemExit("projectbuddy-ask coverage must be 100% line and branch")
           PY
+
+      - name: Publish Trimmed win-x64
+        shell: bash
+        working-directory: tools/peer/ask
+        run: |
+          dotnet publish ProjectBuddy.PeerAsk -c Release -r win-x64 -o "$RUNNER_TEMP/publish" --nologo
+          ls "$RUNNER_TEMP"/publish/projectbuddy-ask.exe
 
   peer-tools:
     # tools/peer/{ollama,redact,bench,advise,probes,diagnose} (#217, #284, #290, #292, #295): the shared Ollama guard library and the tools built on it.

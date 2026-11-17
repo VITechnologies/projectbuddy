@@ -2,8 +2,9 @@
 
 `ProjectBuddy.PeerOllama` holds the code that every ProjectBuddy tool talking
 to a local Ollama must share, so the guards cannot drift between copies. It is
-used by [`../bench`](../bench/README.md) (#217) and
-[`../advise`](../advise/README.md) (#284).
+used by [`../bench`](../bench/README.md) (#217),
+[`../advise`](../advise/README.md) (#284), and `projectbuddy-ask`'s `infer`
+verb ([`../README.md`](../README.md), #358).
 
 - **`OllamaClient`**
   - Accepts only `http://` plus a loopback IP literal and a port (#210 D2).

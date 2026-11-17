@@ -100,6 +100,12 @@
         }
       },
       "projectbuddy-ask": {
+        "type": "Project",
+        "dependencies": {
+          "ProjectBuddy.PeerOllama": "[0.1.0, )"
+        }
+      },
+      "projectbuddy.peerollama": {
         "type": "Project"
       }
     }

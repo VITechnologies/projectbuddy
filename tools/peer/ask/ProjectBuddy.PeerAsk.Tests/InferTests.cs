@@ -1,0 +1,549 @@
+using System.Diagnostics;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Xunit;
+
+namespace ProjectBuddy.PeerAsk.Tests;
+
+public class InferTests
+{
+    private const string Schema = "projectbuddy/peer-infer-request@1";
+
+    private static readonly string Allowlisted =
+        $$"""{"schema":"projectbuddy/peer-infer-allowlist@1","models":[{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"}]}""";
+
+    private static readonly InferLimits Fast = new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20));
+
+    private static string Request(string items = """[{"id":"a","prompt":"Is the sky blue?"}]""", string? options = null, string model = FakeOllama.Model) =>
+        $$"""{"schema":"{{Schema}}","model":"{{model}}",{{(options is null ? "" : $"\"options\":{options},")}}"items":{{items}}}""";
+
+    private static string Items(int count, Func<int, string>? prompt = null) =>
+        "[" + string.Join(",", Enumerable.Range(0, count).Select(index => $$"""{"id":"item-{{index}}","prompt":"{{(prompt ?? (i => $"prompt {i}"))(index)}}"}""")) + "]";
+
+    private static FakeFacts Facts(string? allowlist = null, int concurrency = 4) =>
+        new() { InferAllowlistPath = Fixture.Write(allowlist ?? Allowlisted), InferConcurrency = concurrency };
+
+    private static (int Code, string Out, string Err) Run(string request, FakeOllama ollama, FakeFacts? facts = null, InferLimits? limits = null) =>
+        Run(new MemoryStream(Encoding.UTF8.GetBytes(request)), ollama, facts, limits);
+
+    private static (int Code, string Out, string Err) Run(Stream stdin, FakeOllama ollama, FakeFacts? facts = null, InferLimits? limits = null)
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var code = Serve.Execute("infer", new FakeRunner(), facts ?? Facts(), stdin, ollama, stdout, stderr, limits ?? Fast);
+        return (code, stdout.ToString(), stderr.ToString());
+    }
+
+    private static JsonElement Data(string output)
+    {
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        Assert.Equal(Versions.Schema, root.GetProperty("schema").GetString());
+        Assert.Equal(Versions.Tool, root.GetProperty("tool").GetString());
+        Assert.Equal("infer", root.GetProperty("verb").GetString());
+        return root.GetProperty("data").Clone();
+    }
+
+    private static void AssertRefused((int Code, string Out, string Err) result)
+    {
+        Assert.Equal(ExitCodes.Refused, result.Code);
+        Assert.Empty(result.Out);
+        Assert.Equal(Serve.RefusedMessage + Environment.NewLine, result.Err);
+    }
+
+    private static void AssertInternal((int Code, string Out, string Err) result)
+    {
+        Assert.Equal(ExitCodes.Internal, result.Code);
+        Assert.Empty(result.Out);
+        Assert.Equal(Serve.InternalMessage + Environment.NewLine, result.Err);
+    }
+
+    [Fact]
+    public void Runs_every_prompt_and_answers_in_request_order()
+    {
+        var ollama = new FakeOllama
+        {
+            // The first item finishes last, so the answer order cannot follow completion order.
+            Chat = async (body, token) =>
+            {
+                var prompt = FakeOllama.Prompt(body);
+                await Task.Delay(prompt == "first" ? 200 : 0, token);
+                return FakeOllama.Ok(FakeOllama.Reply($"answer: {prompt}", prompt.Length, 3));
+            },
+        };
+        var request = Request(
+            """[{"id":"first","prompt":"first","format":"json"},{"id":"b.2:x_y-z","prompt":"second","format":null},{"id":"C","prompt":"thïrd"}]""",
+            """{"temperature":0.5,"seed":42,"num_ctx":4096}""");
+        var (code, output, error) = Run(request, ollama);
+        Assert.Equal(0, code);
+        Assert.Empty(error);
+        var data = Data(output);
+        Assert.Equal(FakeOllama.Model, data.GetProperty("model").GetString());
+        Assert.Equal(FakeOllama.Digest, data.GetProperty("digest").GetString());
+        var items = data.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(["first", "b.2:x_y-z", "C"], items.Select(item => item.GetProperty("id").GetString()));
+        Assert.Equal(["answer: first", "answer: second", "answer: thïrd"], items.Select(item => item.GetProperty("answer").GetString()));
+        Assert.Equal([3, 3, 3], items.Select(item => item.GetProperty("evalCount").GetInt32()));
+        Assert.Equal([5, 6, 5], items.Select(item => item.GetProperty("promptEvalCount").GetInt32()));
+        Assert.All(items, item => Assert.Equal(1.235, item.GetProperty("seconds").GetDouble()));
+        Assert.Equal(["id", "answer", "evalCount", "promptEvalCount", "seconds"], items[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["model", "digest", "items"], data.EnumerateObject().Select(property => property.Name));
+
+        // Each chat carries one user message and only the options the request set: no system prompt, tools or images.
+        var chats = ollama.Chats.OrderBy(FakeOllama.Prompt, StringComparer.Ordinal).ToList();
+        Assert.Equal(3, chats.Count);
+        foreach (var chat in chats)
+        {
+            Assert.Equal(FakeOllama.Model, chat["model"]!.GetValue<string>());
+            Assert.False(chat["stream"]!.GetValue<bool>());
+            var message = Assert.Single(chat["messages"]!.AsArray())!.AsObject();
+            Assert.Equal(["role", "content"], message.Select(pair => pair.Key));
+            Assert.Equal("user", message["role"]!.GetValue<string>());
+            Assert.Equal("""{"temperature":0.5,"seed":42,"num_ctx":4096}""", chat["options"]!.ToJsonString());
+        }
+
+        Assert.Equal(["model", "stream", "messages", "options", "format"], chats[0].Select(pair => pair.Key));
+        Assert.Equal("json", chats[0]["format"]!.GetValue<string>());
+        Assert.False(chats[1].ContainsKey("format"));
+        Assert.False(chats[2].ContainsKey("format"));
+        Assert.Equal("/api/tags", ollama.Requests[0].Path);
+    }
+
+    [Fact]
+    public void Sends_no_options_the_request_left_out()
+    {
+        var ollama = new FakeOllama();
+        Assert.Equal(0, Run(Request(), ollama).Code);
+        Assert.Equal(["model", "stream", "messages"], Assert.Single(ollama.Chats).Select(pair => pair.Key));
+
+        foreach (var (options, sent) in new[]
+                 {
+                     ("""{}""", "{}"),
+                     ("""{"temperature":2}""", """{"temperature":2}"""),
+                     ("""{"seed":0}""", """{"seed":0}"""),
+                     ("""{"num_ctx":512}""", """{"num_ctx":512}"""),
+                 })
+        {
+            var each = new FakeOllama();
+            Assert.Equal(0, Run(Request(options: options), each).Code);
+            var chat = Assert.Single(each.Chats);
+            Assert.Equal(sent == "{}" ? null : sent, chat["options"]?.ToJsonString());
+        }
+    }
+
+    [Fact]
+    public void Accepts_every_limit_exactly()
+    {
+        var prompt = new string('p', Infer.MaxPromptBytes);
+        var request = Request(Items(Infer.MaxItems), """{"temperature":0,"seed":2147483647,"num_ctx":32768}""");
+        var parsed = PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(request));
+        Assert.Equal(Infer.MaxItems, parsed.Items.Count);
+        Assert.Equal(new InferOptions(0, int.MaxValue, Infer.MaxNumCtx), parsed.Options);
+
+        var longest = Request($$"""[{"id":"{{new string('i', 64)}}","prompt":"{{prompt}}"}]""", model: new string('m', Infer.MaxModelChars));
+        var item = Assert.Single(PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(longest)).Items);
+        Assert.Equal(Infer.MaxPromptBytes, item.Prompt.Length);
+
+        var ollama = new FakeOllama();
+        var (code, output, _) = Run(request, ollama);
+        Assert.Equal(0, code);
+        Assert.Equal(Infer.MaxItems, Data(output).GetProperty("items").GetArrayLength());
+    }
+
+    public static TheoryData<string> RefusedRequests()
+    {
+        var valid = """[{"id":"a","prompt":"p"}]""";
+        return new TheoryData<string>
+        {
+            "",
+            "not json",
+            "[]",
+            "null",
+            "\"text\"",
+            Request() + " x",
+            Request().Replace("{\"schema\"", "{\"extra\":1,\"schema\""),
+            $$"""{"model":"{{FakeOllama.Model}}","items":{{valid}}}""",
+            Request().Replace("@1", "@2"),
+            Request().Replace($"\"{Schema}\"", "1"),
+            Request().Replace("\"model\"", "\"schema\""),
+            $$"""{"schema":"{{Schema}}","items":{{valid}}}""",
+            Request().Replace($"\"{FakeOllama.Model}\"", "1"),
+            Request(model: ""),
+            Request(model: new string('m', Infer.MaxModelChars + 1)),
+            Request(options: "null"),
+            Request(options: "[]"),
+            Request(options: """{"top_k":1}"""),
+            Request(options: """{"temperature":0,"temperature":1}"""),
+            Request(options: """{"temperature":-0.1}"""),
+            Request(options: """{"temperature":2.01}"""),
+            Request(options: """{"temperature":"0"}"""),
+            Request(options: """{"temperature":true}"""),
+            Request(options: """{"temperature":1e400}"""),
+            Request(options: """{"temperature":[[[[[[[[0]]]]]]]]}"""),
+            Request(options: """{"seed":-1}"""),
+            Request(options: """{"seed":2147483648}"""),
+            Request(options: """{"seed":1.5}"""),
+            Request(options: """{"seed":"1"}"""),
+            Request(options: """{"num_ctx":511}"""),
+            Request(options: """{"num_ctx":32769}"""),
+            Request(options: """{"num_ctx":1024.0}"""),
+            Request(options: """{"num_ctx":"2048"}"""),
+            $$"""{"schema":"{{Schema}}","model":"{{FakeOllama.Model}}"}""",
+            Request("{}"),
+            Request("null"),
+            Request("[]"),
+            Request(Items(Infer.MaxItems + 1)),
+            Request("[1]"),
+            Request("[[]]"),
+            Request("""[{"id":"a","prompt":"p","system":"s"}]"""),
+            Request("""[{"id":"a","prompt":"p","images":["x"]}]"""),
+            Request("""[{"prompt":"p"}]"""),
+            Request("""[{"id":"a"}]"""),
+            Request("""[{"id":"","prompt":"p"}]"""),
+            Request("""[{"id":"a b","prompt":"p"}]"""),
+            Request("""[{"id":"a/b","prompt":"p"}]"""),
+            Request("""[{"id":"-x\n","prompt":"p"}]"""),
+            Request($$"""[{"id":"{{new string('i', 65)}}","prompt":"p"}]"""),
+            Request("""[{"id":1,"prompt":"p"}]"""),
+            Request("""[{"id":"a","prompt":"p"},{"id":"a","prompt":"q"}]"""),
+            Request("""[{"id":"a","prompt":1}]"""),
+            Request("""[{"id":"a","prompt":""}]"""),
+            Request("""[{"id":"a","prompt":"\ud800"}]"""),
+            Request($$"""[{"id":"a","prompt":"{{new string('p', Infer.MaxPromptBytes + 1)}}"}]"""),
+            Request($$"""[{"id":"a","prompt":"{{string.Concat(Enumerable.Repeat("é", (Infer.MaxPromptBytes / 2) + 1))}}"}]"""),
+            Request("""[{"id":"a","prompt":"p","format":"xml"}]"""),
+            Request("""[{"id":"a","prompt":"p","format":"JSON"}]"""),
+            Request("""[{"id":"a","prompt":"p","format":1}]"""),
+            Request("""[{"id":"a","prompt":"p","format":{"type":"object"}}]"""),
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedRequests))]
+    public void Refuses_a_malformed_request_before_asking_ollama(string request)
+    {
+        var ollama = new FakeOllama();
+        AssertRefused(Run(request, ollama));
+        Assert.Empty(ollama.Requests);
+        Assert.Throws<RefusedException>(() => PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(request)));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0xEF, 0xBB, 0xBF }, false)]
+    [InlineData(new byte[] { 0xFF }, false)]
+    [InlineData(new byte[] { 0xFF }, true)]
+    [InlineData(new byte[] { 0xC3 }, true)]
+    public void Refuses_a_request_that_is_not_plain_utf8(byte[] bytes, bool insidePrompt)
+    {
+        // A byte-order mark before the request; an invalid byte or a truncated sequence before it or inside a prompt.
+        var valid = Encoding.UTF8.GetBytes(Request());
+        var at = insidePrompt ? valid.Length - 10 : 0;
+        byte[] request = [.. valid[..at], .. bytes, .. valid[at..]];
+        var ollama = new FakeOllama();
+        AssertRefused(Run(new MemoryStream(request), ollama));
+        Assert.Empty(ollama.Requests);
+        Assert.Equal("the request is not UTF-8 JSON", Assert.Throws<RefusedException>(() => PeerAsk.Infer.ParseRequest(request)).Message);
+    }
+
+    [Fact]
+    public void Refuses_a_request_over_one_mebibyte_without_reading_all_of_it()
+    {
+        var oversized = new byte[(Infer.MaxRequestBytes * 2) + 7];
+        var stdin = new MemoryStream(oversized);
+        var ollama = new FakeOllama();
+        AssertRefused(Run(stdin, ollama));
+        Assert.Equal(Infer.MaxRequestBytes + 1, stdin.Position);
+        Assert.Empty(ollama.Requests);
+
+        var refusal = Assert.Throws<RefusedException>(() => PeerAsk.Infer.ParseRequest(new byte[Infer.MaxRequestBytes + 1]));
+        Assert.Equal($"the request is over {Infer.MaxRequestBytes} bytes", refusal.Message);
+    }
+
+    [Fact]
+    public void Gives_the_client_a_reason_for_each_refusal()
+    {
+        string Reason(string request) => Assert.Throws<RefusedException>(() => PeerAsk.Infer.ParseRequest(Encoding.UTF8.GetBytes(request))).Message;
+        Assert.Equal("the request needs [schema, model, items] and may have [options], nothing else", Reason(Request().Replace("{\"schema\"", "{\"x\":1,\"schema\"")));
+        Assert.Equal($"schema must be {Schema}", Reason(Request().Replace("@1", "@2")));
+        Assert.Equal("options needs [] and may have [temperature, seed, num_ctx], nothing else", Reason(Request(options: """{"x":1}""")));
+        Assert.Equal("options.num_ctx must be an integer from 512 to 32768", Reason(Request(options: """{"num_ctx":1}""")));
+        Assert.Equal("options.temperature must be a number from 0 to 2", Reason(Request(options: """{"temperature":3}""")));
+        Assert.Equal("item id a is not unique", Reason(Request("""[{"id":"a","prompt":"p"},{"id":"a","prompt":"q"}]""")));
+        Assert.Equal("the format of a must be \"json\" or null", Reason(Request("""[{"id":"a","prompt":"p","format":"yaml"}]""")));
+        Assert.Equal("the request must be a JSON object", Reason("[]"));
+    }
+
+    [Theory]
+    [InlineData("other:7b")]
+    [InlineData("bespoke-minicheck:latest")]
+    [InlineData("BESPOKE-MINICHECK:7B")]
+    public void Refuses_a_model_off_the_allowlist(string model)
+    {
+        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, FakeOllama.Digest), (model, FakeOllama.Digest))) };
+        AssertRefused(Run(Request(model: model), ollama));
+        Assert.Empty(ollama.Requests);
+    }
+
+    [Theory]
+    [InlineData("0000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("845DBDA0EA48ED749CAAFD9E6037047AA19ACFCFD82E704D7CA97D631A0B697E")]
+    [InlineData("sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e")]
+    public void Refuses_a_model_whose_installed_digest_is_not_the_pinned_one(string installed)
+    {
+        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList((FakeOllama.Model, installed))) };
+        AssertRefused(Run(Request(), ollama));
+        Assert.Equal(["/api/tags"], ollama.Requests.Select(request => request.Path));
+    }
+
+    [Fact]
+    public void Refuses_a_model_that_is_not_installed_and_never_pulls_it()
+    {
+        var ollama = new FakeOllama { Tags = () => FakeOllama.Ok(FakeOllama.TagList(("qwen2.5:7b", FakeOllama.Digest))) };
+        AssertRefused(Run(Request(), ollama));
+        Assert.Equal(["/api/tags"], ollama.Requests.Select(request => request.Path));
+    }
+
+    public static TheoryData<string> UnusableAllowlists()
+    {
+        static string Models(string models) => $$"""{"schema":"projectbuddy/peer-infer-allowlist@1","models":{{models}}}""";
+        var entry = $$"""{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"}""";
+        return new TheoryData<string>
+        {
+            "",
+            "not json",
+            "[]",
+            Models($"[{entry}]").Replace("{\"schema\"", "{\"extra\":1,\"schema\""),
+            Models($"[{entry}]").Replace("@1", "@2"),
+            $"{{\"models\":[{entry}]}}",
+            Models("{}"),
+            Models("[]"),
+            Models("[" + string.Join(",", Enumerable.Range(0, Infer.MaxAllowlistModels + 1).Select(index => entry.Replace(":7b", $":{index}")) ) + "]"),
+            Models("[1]"),
+            Models($$"""[{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}","pull":true}]"""),
+            Models($$"""[{"name":"{{FakeOllama.Model}}"}]"""),
+            Models($$"""[{"name":"Bespoke-MiniCheck:7B","digest":"{{FakeOllama.Digest}}"}]"""),
+            Models($$"""[{"name":"bespoke-minicheck","digest":"{{FakeOllama.Digest}}"}]"""),
+            Models($$"""[{"name":1,"digest":"{{FakeOllama.Digest}}"}]"""),
+            Models($$"""[{"name":"{{FakeOllama.Model}}","digest":"sha256:{{FakeOllama.Digest}}"}]"""),
+            Models($$"""[{"name":"{{FakeOllama.Model}}","digest":null}]"""),
+            Models($"[{entry},{entry}]"),
+            Models($"[{entry}]") + new string(' ', Infer.MaxAllowlistBytes),
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(UnusableAllowlists))]
+    public void Refuses_when_the_allowlist_is_unusable(string allowlist)
+    {
+        var ollama = new FakeOllama();
+        AssertRefused(Run(Request(), ollama, Facts(allowlist)));
+        Assert.Empty(ollama.Requests);
+    }
+
+    [Fact]
+    public void Refuses_when_the_allowlist_is_missing_or_unreadable()
+    {
+        foreach (var path in new[] { Fixture.Missing, Fixture.AnyDirectory })
+        {
+            var ollama = new FakeOllama();
+            AssertRefused(Run(Request(), ollama, new FakeFacts { InferAllowlistPath = path }));
+            Assert.Empty(ollama.Requests);
+        }
+    }
+
+    [Fact]
+    public void Accepts_an_allowlist_at_its_size_limit_with_several_models()
+    {
+        var models = string.Join(",", Enumerable.Range(0, Infer.MaxAllowlistModels - 1).Select(index => $$"""{"name":"model-{{index}}:7b","digest":"{{new string('a', 64)}}"}"""));
+        var allowlist = $$"""{"schema":"projectbuddy/peer-infer-allowlist@1","models":[{{models}},{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"}]}""";
+        allowlist += new string(' ', Infer.MaxAllowlistBytes - Encoding.UTF8.GetByteCount(allowlist));
+        Assert.Equal(Infer.MaxAllowlistBytes, Encoding.UTF8.GetByteCount(allowlist));
+        Assert.Equal(0, Run(Request(), new FakeOllama(), Facts(allowlist)).Code);
+        Assert.Equal(Infer.MaxAllowlistModels, PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(allowlist)).Count);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.NotFound)]
+    public void An_ollama_that_cannot_list_its_models_is_an_internal_error(HttpStatusCode status)
+    {
+        var ollama = new FakeOllama { Tags = () => new HttpResponseMessage(status) { Content = new StringContent("secret detail D:\\customer") } };
+        AssertInternal(Run(Request(), ollama));
+        Assert.Empty(ollama.Chats);
+    }
+
+    public static TheoryData<string> FailedChats() => new()
+    {
+        "status",
+        "not json",
+        """{"error":"model runner crashed at D:\\customer\\x"}""",
+        """{"message":"text"}""",
+        """{"message":{"role":"assistant","content":"\ud800"}}""",
+    };
+
+    [Theory]
+    [MemberData(nameof(FailedChats))]
+    public void A_failed_prompt_fails_the_whole_call_with_no_partial_answer(string reply)
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = (body, _) => Task.FromResult(FakeOllama.Prompt(body) != "prompt 2" ? FakeOllama.Ok(FakeOllama.Reply("fine"))
+                : reply == "status" ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("secret") }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(reply, Encoding.UTF8, "application/json") }),
+        };
+        var result = Run(Request(Items(5)), ollama);
+        AssertInternal(result);
+        Assert.DoesNotContain("fine", result.Out + result.Err);
+    }
+
+    [Fact]
+    public void A_failed_prompt_stops_the_batch_at_once()
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, token) =>
+            {
+                if (FakeOllama.Prompt(body) == "prompt 0")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(30), token);
+                return FakeOllama.Ok(FakeOllama.Reply("late"));
+            },
+        };
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(Request(Items(20)), ollama, Facts(concurrency: 2), new InferLimits(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"took {watch.Elapsed}");
+
+        // No prompt waiting for a slot starts after the failure, and the one still running is cancelled.
+        Assert.True(ollama.Chats.Count() < 20);
+        Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled >= 1, TimeSpan.FromSeconds(10)));
+    }
+
+    [Theory]
+    [InlineData(1, 6, 1)]
+    [InlineData(3, 12, 3)]
+    [InlineData(4, 4, 4)]
+    [InlineData(0, 3, 1)]
+    [InlineData(-5, 2, 1)]
+    [InlineData(1000, 64, 64)]
+    public void Runs_at_most_the_configured_number_of_prompts_at_once(int concurrency, int items, int bound)
+    {
+        // Each prompt holds its slot until every allowed slot is busy (or 2 s pass), so a looser bound would show.
+        var ollama = new FakeOllama();
+        ollama.Chat = async (body, token) =>
+        {
+            var deadline = Stopwatch.StartNew();
+            while (ollama.InFlight < bound && deadline.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(5, token);
+            }
+
+            await Task.Delay(20, token);
+            return FakeOllama.Ok(FakeOllama.Reply("ok"));
+        };
+        var (code, output, _) = Run(Request(Items(items)), ollama, Facts(concurrency: concurrency));
+        Assert.Equal(0, code);
+        Assert.Equal(items, Data(output).GetProperty("items").GetArrayLength());
+        Assert.Equal(bound, ollama.MaxInFlight);
+    }
+
+    [Fact]
+    public void A_prompt_over_its_timeout_fails_the_call()
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, token) =>
+            {
+                await Task.Delay(FakeOllama.Prompt(body) == "prompt 1" ? Timeout.InfiniteTimeSpan : TimeSpan.Zero, token);
+                return FakeOllama.Ok(FakeOllama.Reply("ok"));
+            },
+        };
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(Request(Items(3)), ollama, limits: new InferLimits(TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(30))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+        Assert.Equal(1, ollama.Cancelled);
+    }
+
+    [Fact]
+    public void A_batch_over_the_whole_call_timeout_fails_and_cancels_what_is_running()
+    {
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, token) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), token);
+                return FakeOllama.Ok(FakeOllama.Reply("ok"));
+            },
+        };
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(Request(Items(8)), ollama, Facts(concurrency: 1), new InferLimits(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(1500))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled == 1, TimeSpan.FromSeconds(10)));
+        Thread.Sleep(1500);
+        Assert.InRange(ollama.Chats.Count(), 2, 3);
+    }
+
+    [Fact]
+    public void The_whole_call_timeout_covers_reading_the_request()
+    {
+        var ollama = new FakeOllama();
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(new StallingStream(), ollama, limits: new InferLimits(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(300))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.Empty(ollama.Requests);
+    }
+
+    [Fact]
+    public void Answers_may_exceed_the_other_verbs_limit_up_to_one_mebibyte()
+    {
+        var answer = new string('a', 60 * 1024);
+        var ollama = new FakeOllama { Chat = (_, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
+        var (code, output, _) = Run(Request(Items(16)), ollama);
+        Assert.Equal(0, code);
+        Assert.InRange(Encoding.UTF8.GetByteCount(output), Serve.MaxOutputBytes, Infer.MaxOutputBytes);
+    }
+
+    [Fact]
+    public void Answers_over_one_mebibyte_are_refused_as_the_output_limit()
+    {
+        var answer = new string('a', 70 * 1024);
+        var ollama = new FakeOllama { Chat = (_, _) => Task.FromResult(FakeOllama.Ok(FakeOllama.Reply(answer))) };
+        var (code, output, error) = Run(Request(Items(16)), ollama);
+        Assert.Equal(ExitCodes.OutputLimit, code);
+        Assert.Empty(output);
+        Assert.Equal(Serve.OutputLimitMessage + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public void Talks_only_to_a_loopback_ollama()
+    {
+        var ollama = new FakeOllama();
+        var facts = Facts();
+        facts.OllamaUrl = "http://192.168.1.10:11434/";
+        AssertInternal(Run(Request(), ollama, facts));
+        Assert.Empty(ollama.Requests);
+    }
+
+    [Fact]
+    public void Builds_one_user_message_per_prompt()
+    {
+        var request = new InferRequest("m:1", new InferOptions(null, 7, null), [new InferItem("a", "hello", true)]);
+        Assert.Equal(
+            """{"model":"m:1","stream":false,"messages":[{"role":"user","content":"hello"}],"options":{"seed":7},"format":"json"}""",
+            PeerAsk.Infer.ChatRequest(request, request.Items[0]).ToJsonString());
+    }
+
+    [Fact]
+    public void The_public_entry_point_uses_the_default_limits()
+    {
+        Assert.Equal(new InferLimits(TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(600)), InferLimits.Default);
+        var stdout = new StringWriter();
+        var code = Serve.Execute("infer", new FakeRunner(), Facts(), new MemoryStream(Encoding.UTF8.GetBytes(Request())), new FakeOllama(), stdout, new StringWriter());
+        Assert.Equal(0, code);
+        Assert.Equal("answer: Is the sky blue?", Data(stdout.ToString()).GetProperty("items")[0].GetProperty("answer").GetString());
+    }
+}

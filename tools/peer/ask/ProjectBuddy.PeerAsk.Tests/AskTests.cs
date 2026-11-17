@@ -224,7 +224,8 @@ public class ProgramTests
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        var code = Program.Run(args, name => name == "SSH_ORIGINAL_COMMAND" ? sshCommand : null, new FakeRunner(), new FakeFacts(), _ => true, stdout, stderr);
+        var code = Program.Run(args, name => name == "SSH_ORIGINAL_COMMAND" ? sshCommand : null, new FakeRunner(), new FakeFacts(), _ => true,
+            new UnreadableStream(), new FakeOllama(), stdout, stderr);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -234,6 +235,14 @@ public class ProgramTests
         Assert.Equal(0, Run(["serve"], "identity").Code);
         Assert.Equal(ExitCodes.Refused, Run(["serve"], "cmd.exe").Code);
         Assert.Equal(ExitCodes.Refused, Run(["serve"]).Code);
+    }
+
+    [Fact]
+    public void Serve_gives_only_infer_the_process_stdin()
+    {
+        // The helper's stdin throws when read: identity never touches it, and infer's failed read is an internal error.
+        Assert.Equal(0, Run(["serve"], "identity").Code);
+        Assert.Equal((ExitCodes.Internal, "", "projectbuddy-ask: internal error" + Environment.NewLine), Run(["serve"], "infer"));
     }
 
     [Fact]

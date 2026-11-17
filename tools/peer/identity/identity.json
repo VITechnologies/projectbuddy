@@ -1,6 +1,6 @@
 {
   "schema": "projectbuddy/peer-identity@1",
-  "identityVersion": "0.1",
+  "identityVersion": "0.2",
   "numCtx": 8192,
   "temperature": 0,
   "seed": 42,
@@ -25,7 +25,7 @@
     },
     {
       "path": "tools/peer/README.md",
-      "sha256": "038c1c0b906007a0570ad67a5268d64c03c2d924ecc86705e4f3af34251cbed8"
+      "sha256": "f6277ff3f2077aba429bcd8642c1698069b7f0c92333f0decd4e3b88ed5e5905"
     }
   ]
 }
