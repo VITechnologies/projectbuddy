@@ -14,7 +14,8 @@ public static partial class Ask
     // The peer allows diagnose its own timeout; the client waits a little longer, so the peer's answer arrives first.
     public static readonly TimeSpan DiagnoseAllowance = Serve.DiagnoseTimeout + TimeSpan.FromSeconds(20);
 
-    // Likewise for infer, whose whole-call timeout already covers reading the request.
+    // Likewise for infer: its fixed whole-call limit covers reading the request and every item, whatever the allowlist's item
+    // timeouts are.
     public static readonly TimeSpan InferAllowance = Infer.Timeout + TimeSpan.FromSeconds(20);
 
     // An infer request travels as ssh's stdin, byte for byte as read from the file.

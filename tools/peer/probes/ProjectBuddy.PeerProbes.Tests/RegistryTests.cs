@@ -7,7 +7,7 @@ namespace ProjectBuddy.PeerProbes.Tests;
 
 public sealed class RegistryTests
 {
-    private const string Identity = "projectbuddy:0.2-qwen2.5-7b";
+    private const string Identity = "projectbuddy:0.3-qwen2.5-7b";
 
     internal static Redaction Same(string text) => new(text, new Dictionary<string, int>());
 

@@ -17,7 +17,11 @@ public class InferTests
     private static string AllowlistedOn(string ports) =>
         $$"""{"schema":"projectbuddy/peer-infer-allowlist@2","models":[{"name":"other:1","digest":"{{new string('b', 64)}}"},{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"{{ports}}}]}""";
 
-    private static readonly InferLimits Fast = new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20));
+    // An allowlist second lasts 100 ms here, so the default 120 s item timeout is 12 s.
+    private static readonly InferLimits Fast = new(TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(20));
+
+    // The default item timeout lasts this long.
+    private static TimeSpan Item(TimeSpan length) => length / Infer.DefaultItemTimeoutSeconds;
 
     private static string Request(string items = """[{"id":"a","prompt":"Is the sky blue?"}]""", string? options = null, string model = FakeOllama.Model) =>
         $$"""{"schema":"{{Schema}}","model":"{{model}}",{{(options is null ? "" : $"\"options\":{options},")}}"items":{{items}}}""";
@@ -337,7 +341,7 @@ public class InferTests
             "not json",
             "[]",
             Models($"[{entry}]").Replace("{\"schema\"", "{\"extra\":1,\"schema\""),
-            Models($"[{entry}]").Replace("@1", "@3"),
+            Models($"[{entry}]").Replace("@1", "@4"),
             Models($"[{entry}]").Replace("@1", "@0"),
             Models($$"""[{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}","ports":[11434]}]"""),
             $"{{\"models\":[{entry}]}}",
@@ -467,7 +471,7 @@ public class InferTests
             },
         };
         var watch = Stopwatch.StartNew();
-        AssertInternal(Run(Request(Items(20)), ollama, Facts(concurrency: 2), new InferLimits(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60))));
+        AssertInternal(Run(Request(Items(20)), ollama, Facts(concurrency: 2), new InferLimits(Item(TimeSpan.FromSeconds(60)), TimeSpan.FromSeconds(60))));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"took {watch.Elapsed}");
 
         // No prompt waiting for a slot starts after the failure, and the one still running is cancelled.
@@ -515,9 +519,9 @@ public class InferTests
             },
         };
         var watch = Stopwatch.StartNew();
-        AssertInternal(Run(Request(Items(3)), ollama, limits: new InferLimits(TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(30))));
+        AssertInternal(Run(Request(Items(3)), ollama, limits: new InferLimits(Item(TimeSpan.FromMilliseconds(300)), TimeSpan.FromSeconds(30))));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
-        Assert.Equal(1, ollama.Cancelled);
+        Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled == 1, TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -532,7 +536,7 @@ public class InferTests
             },
         };
         var watch = Stopwatch.StartNew();
-        AssertInternal(Run(Request(Items(8)), ollama, Facts(concurrency: 1), new InferLimits(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(1500))));
+        AssertInternal(Run(Request(Items(8)), ollama, Facts(concurrency: 1), new InferLimits(Item(TimeSpan.FromSeconds(5)), TimeSpan.FromMilliseconds(1500))));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
         Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled == 1, TimeSpan.FromSeconds(10)));
         Thread.Sleep(1500);
@@ -544,7 +548,7 @@ public class InferTests
     {
         var ollama = new FakeOllama();
         var watch = Stopwatch.StartNew();
-        AssertInternal(Run(new StallingStream(), ollama, limits: new InferLimits(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(300))));
+        AssertInternal(Run(new StallingStream(), ollama, limits: new InferLimits(Item(TimeSpan.FromSeconds(5)), TimeSpan.FromMilliseconds(300))));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
         Assert.Empty(ollama.Requests);
     }
@@ -751,7 +755,7 @@ public class InferTests
         };
         var watch = Stopwatch.StartNew();
         AssertInternal(Run(Request(Items(20)), ollama, Facts(AllowlistedOn(",\"ports\":[11434,11435]"), concurrency: 1),
-            new InferLimits(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60))));
+            new InferLimits(Item(TimeSpan.FromSeconds(60)), TimeSpan.FromSeconds(60))));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"took {watch.Elapsed}");
         Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled >= 1, TimeSpan.FromSeconds(10)));
         Assert.True(ollama.Chats.Count() < 20);
@@ -765,12 +769,12 @@ public class InferTests
         var answers = new InferAnswer[1];
         var ollama = new FakeOllama();
         using var client = new ProjectBuddy.PeerOllama.OllamaClient(ollama, new Uri("http://127.0.0.1:11434/"), TimeSpan.FromSeconds(5));
-        await PeerAsk.Infer.WorkAsync(11434, client, request, queue, answers, new CancellationToken(canceled: true));
+        await PeerAsk.Infer.WorkAsync(11434, client, TimeSpan.FromSeconds(5), request, queue, answers, new CancellationToken(canceled: true));
         Assert.Single(queue);
         Assert.Null(answers[0]);
         Assert.Empty(ollama.Requests);
 
-        await PeerAsk.Infer.WorkAsync(11434, client, request, queue, answers, CancellationToken.None);
+        await PeerAsk.Infer.WorkAsync(11434, client, TimeSpan.FromSeconds(5), request, queue, answers, CancellationToken.None);
         Assert.Empty(queue);
         Assert.Equal(11434, answers[0].Port);
     }
@@ -785,6 +789,105 @@ public class InferTests
         Assert.Equal([11434, 11435], PeerAsk.Infer.AllowedPorts);
     }
 
+    private static string AllowlistedV3(string extra) =>
+        $$"""{"schema":"projectbuddy/peer-infer-allowlist@3","models":[{"name":"other:1","digest":"{{new string('b', 64)}}"},{"name":"{{FakeOllama.Model}}","digest":"{{FakeOllama.Digest}}"{{extra}}}]}""";
+
+    [Fact]
+    public void Parses_item_timeouts_and_keeps_older_allowlists()
+    {
+        var v3 = PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(AllowlistedV3(",\"ports\":[11435],\"itemTimeoutSeconds\":900")));
+        Assert.Equal(new InferModel(v3[FakeOllama.Model].Pin, v3[FakeOllama.Model].Ports, 900), v3[FakeOllama.Model]);
+        Assert.Equal([11435], v3[FakeOllama.Model].Ports);
+        Assert.Equal(120, v3["other:1"].ItemTimeoutSeconds);
+        Assert.Equal([11434], v3["other:1"].Ports);
+        Assert.Equal(30, PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(AllowlistedV3(",\"itemTimeoutSeconds\":30")))[FakeOllama.Model].ItemTimeoutSeconds);
+
+        // @2 and @1 files mean the default item timeout.
+        Assert.Equal(120, PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(AllowlistedOn(",\"ports\":[11435]")))[FakeOllama.Model].ItemTimeoutSeconds);
+        Assert.Equal(120, PeerAsk.Infer.ParseAllowlist(Encoding.UTF8.GetBytes(Allowlisted))[FakeOllama.Model].ItemTimeoutSeconds);
+        Assert.Equal((120, 30, 900), (Infer.DefaultItemTimeoutSeconds, Infer.MinItemTimeoutSeconds, Infer.MaxItemTimeoutSeconds));
+    }
+
+    public static TheoryData<string> UnusableItemTimeouts() => new()
+    {
+        AllowlistedV3(",\"itemTimeoutSeconds\":29"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":901"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":0"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":-120"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":60.5"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":120.0"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":\"120\""),
+        AllowlistedV3(",\"itemTimeoutSeconds\":null"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":true"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":1e400"),
+        AllowlistedV3(",\"itemTimeoutSeconds\":120,\"itemTimeoutSeconds\":60"),
+        AllowlistedV3(",\"itemTimeout\":120"),
+        AllowlistedV3(",\"ports\":[8080],\"itemTimeoutSeconds\":120"),
+        AllowlistedOn(",\"itemTimeoutSeconds\":120"),
+        Allowlisted.Replace("\"}]}", "\",\"itemTimeoutSeconds\":120}]}"),
+        AllowlistedV3("").Replace("@3", "@4"),
+        AllowlistedV3("").Replace("\"projectbuddy/peer-infer-allowlist@3\"", "null"),
+    };
+
+    [Theory]
+    [MemberData(nameof(UnusableItemTimeouts))]
+    public void Refuses_an_item_timeout_out_of_range_or_in_an_older_schema(string allowlist)
+    {
+        var ollama = new FakeOllama();
+        AssertRefused(Run(Request(), ollama, Facts(allowlist)));
+        Assert.Empty(ollama.Requests);
+    }
+
+    [Theory]
+    [InlineData("", ExitCodes.Internal)]
+    [InlineData(",\"itemTimeoutSeconds\":30", ExitCodes.Internal)]
+    [InlineData(",\"itemTimeoutSeconds\":300", 0)]
+    [InlineData(",\"itemTimeoutSeconds\":900", 0)]
+    public void Each_model_gets_the_item_timeout_its_allowlist_entry_sets(string timeout, int expected)
+    {
+        // An allowlist second lasts 10 ms here, and every answer takes 2 s: over 120 s and 30 s, within 300 s and 900 s.
+        var ollama = new FakeOllama
+        {
+            Chat = async (body, _, token) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), token);
+                return FakeOllama.Ok(FakeOllama.Reply("slow but fine"));
+            },
+        };
+        var (code, output, _) = Run(Request(Items(2)), ollama, Facts(AllowlistedV3(",\"ports\":[11435]" + timeout)),
+            new InferLimits(TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(30)));
+        Assert.Equal(expected, code);
+        if (expected == 0)
+        {
+            Assert.All(Data(output).GetProperty("items").EnumerateArray(), item => Assert.Equal("slow but fine", item.GetProperty("answer").GetString()));
+        }
+        else
+        {
+            // The call over its timeout is cancelled, not left running.
+            Assert.True(SpinWait.SpinUntil(() => ollama.Cancelled >= 1, TimeSpan.FromSeconds(10)));
+        }
+    }
+
+    [Fact]
+    public void The_digest_check_has_the_item_timeout_too()
+    {
+        var ollama = new FakeOllama { TagsDelay = TimeSpan.FromSeconds(5) };
+        var watch = Stopwatch.StartNew();
+        AssertInternal(Run(Request(), ollama, Facts(AllowlistedV3(",\"itemTimeoutSeconds\":30")),
+            new InferLimits(TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(30))));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(4), $"took {watch.Elapsed}");
+        Assert.Empty(ollama.Chats);
+        Assert.Single(ollama.Requests);
+    }
+
+    [Fact]
+    public void The_whole_call_limit_is_fixed_and_outlasts_any_item_timeout()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(1800), Infer.Timeout);
+        Assert.True(Infer.Timeout > TimeSpan.FromSeconds(Infer.MaxItemTimeoutSeconds));
+        Assert.Equal(Infer.Timeout + TimeSpan.FromSeconds(20), Ask.InferAllowance);
+    }
+
     [Fact]
     public void Builds_one_user_message_per_prompt()
     {
@@ -797,7 +900,7 @@ public class InferTests
     [Fact]
     public void The_public_entry_point_uses_the_default_limits()
     {
-        Assert.Equal(new InferLimits(TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(600)), InferLimits.Default);
+        Assert.Equal(new InferLimits(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1800)), InferLimits.Default);
         var stdout = new StringWriter();
         var code = Serve.Execute("infer", new FakeRunner(), Facts(), new MemoryStream(Encoding.UTF8.GetBytes(Request())), new FakeOllama(), stdout, new StringWriter());
         Assert.Equal(0, code);

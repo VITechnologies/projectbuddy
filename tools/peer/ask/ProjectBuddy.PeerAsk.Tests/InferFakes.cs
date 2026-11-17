@@ -44,6 +44,9 @@ internal sealed class FakeOllama : HttpMessageHandler
 
     public Func<int, HttpResponseMessage> Tags { get; set; } = _ => Ok(TagList((Model, Digest)));
 
+    // How long /api/tags takes to answer, as a real server would: asynchronously, and cancellable.
+    public TimeSpan TagsDelay { get; set; }
+
     // The default reply echoes the prompt, so each answer can be traced to its item.
     public Func<JsonObject, int, CancellationToken, Task<HttpResponseMessage>> Chat { get; set; } =
         (body, _, _) => Task.FromResult(Ok(Reply($"answer: {Prompt(body)}")));
@@ -97,6 +100,7 @@ internal sealed class FakeOllama : HttpMessageHandler
 
         if (path == "/api/tags")
         {
+            await Task.Delay(TagsDelay, cancellationToken);
             return Tags(uri.Port);
         }
 
