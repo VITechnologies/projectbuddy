@@ -4,6 +4,65 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.5.0
+
+- `projectbuddy-wiki` lets one profile scope declare several ID prefixes
+  (#348), so mprr's requirements can be verified by both `TEST-UNIT-NNN` and
+  `TEST-DOC-NNN`.
+  - The new profile schema `rsr/wiki-profile@2` is `@1`, except that each
+    scope has exactly one of `idPrefix` and `idPrefixes`, a non-empty array
+    of distinct prefixes. No prefix appears twice in a profile, within a scope
+    or across scopes.
+  - A scope's pages, `id-outside-scope`, the links that count,
+    `link-outside-field`, edges and whole-wiki ID pages use all of the scope's
+    prefixes.
+  - `@1` profiles, the default profile, the finding catalogues, the layouts and
+    the registry projection are unchanged.
+- The RSR pins move to v0.9.0 (#348): the consumer kit, the standards scan, and
+  projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@5`.
+  `@5` defines `rsr/wiki-profile@2` and adds a content rule: an observation
+  states only what its stimulus shows. Re-certification at v0.9.0 found no
+  regression: the 5 required gates `PASS`.
+- The RSR pins move to v0.8.0 (#346): the consumer kit, the standards scan, and
+  projectbuddy-wiki's standard pin, which is now `rsr/ecosystem-wiki-standard@4`.
+  Re-certification at v0.8.0 found no regression: the 5 required gates `PASS`.
+- `projectbuddy-kpi` measures the cost of AI-assisted work (#330, milestone K
+  of #328).
+  - It ingests the agent's session event logs into a local PostgreSQL
+    `kpi_v1` schema: billed model calls by initiator, model and category; tool
+    calls; operator messages; and active spans. A forked session's repeated
+    parent history is skipped.
+  - `track` and `resolve` list the merged requests of tracked GitHub and
+    GitLab repositories. A merge is an accepted change of the session that was
+    active when it merged.
+  - It records work markers, spec gaps, reviews, requirement counts and
+    operator time by tier.
+  - AI cost is metered in AI Units, the unit the quota is billed in (#339).
+    Each agent-session call carries its exact billed AIU. Session totals come
+    from cumulative usage checkpoints, or in CLI sessions from shutdown
+    totals. The part of each interval that no exact value accounts for is
+    shared among the calls without one. Nominal per-call costs are kept as a
+    secondary column.
+  - It reports six KPIs in premium units and USD: cost per accepted change,
+    cost per requirement, first-pass yield, rework, spec-gap rate and
+    exploration share.
+  - CI runs its tests as `KPI Tool Tests` at 100% line and branch coverage.
+
+- Move the RSR consumer kit, the standards scan pin and the compliance stamp
+  to RSR v0.6.0 (#332, north star M2). Re-certification passes all 5 required
+  gates.
+
+- `projectbuddy-wiki` implements `rsr/ecosystem-wiki-standard@2`, pinned from
+  repo-standards-review v0.6.0 (#329).
+  - A wiki may declare its governed scopes, directories, ID prefixes and
+    sections in a root `.wiki-profile.json`, so members such as lbabus
+    (`LBA-REQ`, `T`) can conform. Without one, projectbuddy's profile applies.
+  - The new whole-wiki findings `page-not-indexed` and `page-over-budget`
+    (#325) report what `Assemble-WikiSpec --strict` refuses.
+  - Realistic row estimates on the projection functions stop PostgreSQL from
+    JIT-compiling whole-wiki queries. The projection report took 1.7 s and now
+    takes 0.14 s.
+
 ## v0.4.0
 
 - Adopt the repo-standards-review consumer kit at RSR v0.5.0 (#277), and

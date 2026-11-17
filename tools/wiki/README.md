@@ -26,7 +26,13 @@ the schema `wiki_v1`:
   the projection;
 - [`Sql/0004_architecture_projection.sql`](ProjectBuddy.Wiki/Sql/0004_architecture_projection.sql):
   the Architecture Packet projection
-  ([#315](https://github.com/VITechnologies/projectbuddy/issues/315)).
+  ([#315](https://github.com/VITechnologies/projectbuddy/issues/315));
+- [`Sql/0005_wiki_profiles.sql`](ProjectBuddy.Wiki/Sql/0005_wiki_profiles.sql):
+  the [wiki profiles](#wiki-profiles) and the
+  [whole-wiki findings](#whole-wiki-findings);
+- [`Sql/0006_wiki_profile_prefixes.sql`](ProjectBuddy.Wiki/Sql/0006_wiki_profile_prefixes.sql):
+  several ID prefixes per profile scope
+  ([#348](https://github.com/VITechnologies/projectbuddy/issues/348)).
 
 The CLI only reads git and moves bytes.
 
@@ -43,15 +49,92 @@ out/projectbuddy-wiki export-registry --approval <approval record> --importer-pa
 ## Standard
 
 `projectbuddy-wiki` is the reference checker of the ecosystem wiki standard,
-`rsr/ecosystem-wiki-standard@1`. That standard ships in repo-standards-review
-`v0.5.0` (`0cab380`), as `docs/architecture/ecosystem-wiki-standard.md`
-(VITechnologies/projectbuddy#318, #319, #320).
+`rsr/ecosystem-wiki-standard@5`. That standard ships in repo-standards-review
+`v0.9.0` (`8306ebc`) as `docs/architecture/ecosystem-wiki-standard.md`
+(VITechnologies/projectbuddy#318, #319, #320, #329, #346, #348).
+
+`@3`, `@4` and `@5` added rules for the content of test pages, and an
+independent content review judges them, not this checker. `@5` also defines
+profile schema `rsr/wiki-profile@2`, which this checker implements. The
+checker's layouts, finding catalogues and registry projection are unchanged
+since `@2`.
+
+### Wiki profiles
+
+The wiki profile declares a member's governed scopes, and a wiki can supply its
+own in a root `.wiki-profile.json`. A wiki without one has projectbuddy's
+profile, which is the table under [Governed projection](#governed-projection).
+A profile names one to three scopes, `system`, `software` and `test`, each
+once. Each scope gives:
+- `directory`: one plain path segment;
+- its ID prefixes, each made of upper-case words joined by `-`, such as
+  `LBA-REQ` or `T`, in one of two keys:
+  - `idPrefix`: one prefix;
+  - `idPrefixes`: a non-empty array of distinct prefixes;
+- `sections`: the ordered section headings, other than `ID`, `Title`,
+  `Page kind` and `Body`, which are the registry text's own keys.
+
+The checker accepts two profile schemas:
+- **`rsr/wiki-profile@1`:** each scope has `idPrefix`, and `idPrefixes` is
+  not allowed.
+- **`rsr/wiki-profile@2`**
+  ([#348](https://github.com/VITechnologies/projectbuddy/issues/348)): the
+  same, except that each scope has exactly one of `idPrefix` and
+  `idPrefixes`. The pinned standard `@5` defines it.
+
+No prefix appears twice in a profile, whether in one scope or in two. Prefixes
+only need to differ: `TEST` and `TEST-UNIT` can both appear, because an ID has
+exactly one prefix, everything before its final `-NNN`. `TEST-UNIT-001` has
+the prefix `TEST-UNIT`, never `TEST`.
+
+```json
+{"schema": "rsr/wiki-profile@1", "scopes": [
+  {"scope": "software", "directory": "software-requirements", "idPrefix": "LBA-REQ", "sections": ["Requirement", "TestID", "CodeRef", "Status"]},
+  {"scope": "test", "directory": "tests", "idPrefix": "T", "sections": ["Stimulus", "Required observation"]}]}
+```
+
+A member whose requirements are verified by two test-ID families, such as
+mprr's `TEST-UNIT-NNN` and `TEST-DOC-NNN`, declares both in its test scope:
+
+```json
+{"schema": "rsr/wiki-profile@2", "scopes": [
+  {"scope": "software", "directory": "software-requirements", "idPrefix": "MPRR-REQ", "sections": ["Requirement", "TestID", "CodeRef", "Status"]},
+  {"scope": "test", "directory": "tests", "idPrefixes": ["TEST-UNIT", "TEST-DOC"], "sections": ["Stimulus", "Required observation"]}]}
+```
+
+How the profile changes the projection:
+- **IDs:** a page in a scope's directory has its ID in scope when the ID is
+  one of that scope's prefixes followed by `-NNN`. With another prefix, the
+  page is `id-outside-scope`.
+- **Links and edges:** wiki links count only with one of the profile's
+  prefixes, and edges point only into scopes the profile holds. A `TestID`
+  link must have one of the test scope's prefixes, and a `CodeRef` link one
+  of the software scope's; otherwise it is `link-outside-field`.
+- **Whole wiki:** a page whose name is any of the profile's prefixes followed
+  by `-NNN` is an ID page.
+- **Missing system scope:** the test scope's edges point into the software
+  snapshot alone, and `export-registry` exports only the profile's scopes.
+- **Invalid profile:** a profile that is not valid governs nothing. It is the
+  finding `invalid-profile`, which blocks the export.
+
+### Whole-wiki findings
+
+These apply to every Markdown page outside dot-prefixed paths. They follow
+`scripts/Assemble-WikiSpec.py --strict` (#325). They are findings (exit 1),
+but they never block the export.
+
+| Finding | Meaning |
+| --- | --- |
+| `not-utf8` | a page outside the governed and Architecture Packet families is not UTF-8 |
+| `page-not-indexed` | the wiki has a hub, and the page is not an ID page, a hub, a child in a page's final sections index, or marked `<!-- page-kind: note -->` under its title |
+| `page-over-budget` | the page exceeds 16,384 bytes |
 
 The pin is in
 [`Standard.cs`](ProjectBuddy.Wiki/Standard.cs): the standard ID, the RSR
 release and commit, and the ordered finding catalogues copied from that
 release.
-- `project` reports the pin under `standard`.
+- `project` reports the pin under `standard`, and the profile it applied under
+  `profile`.
 - A test reads the installed projection functions after every migration. It
   fails when any catalogue's findings, or their order, differ from the pin.
 - Moving to a newer standard is a deliberate change to that file.
@@ -212,7 +295,7 @@ dropped:
 | `no-id-heading` | no `# <ID>` first line |
 | `not-canonical` | not the canonical layout |
 | `id-does-not-match-path` | the heading's ID is not the file name |
-| `id-outside-scope` | the ID's prefix belongs to another directory |
+| `id-outside-scope` | the ID's prefix is not one of its directory's prefixes |
 | `id-too-long` | the ID exceeds the registry's 128 characters |
 | `unexpected-sections` | the headings differ from the directory's |
 | `unexpected-page-kind` | a marker kind other than the directory's |
@@ -386,6 +469,9 @@ timeouts. They cover:
 - every page kind and edge type;
 - every projection problem, the envelopes of each scope with their exact node
   texts, and every envelope refusal;
+- every rule of `rsr/wiki-profile@1` and `@2`, and scopes with several
+  prefixes: their pages, links, edges, ID pages and export;
+- the projection functions' row estimates after every migration;
 - the export into a registry:
   - ingest, then reuse when the content is unchanged, including from a later
     commit;

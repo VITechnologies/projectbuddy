@@ -6,11 +6,11 @@ namespace ProjectBuddy.Wiki;
 // catalogue and in order.
 public static class Standard
 {
-    public const string Id = "rsr/ecosystem-wiki-standard@1";
+    public const string Id = "rsr/ecosystem-wiki-standard@5";
 
-    public const string RsrRelease = "v0.5.0";
+    public const string RsrRelease = "v0.9.0";
 
-    public const string RsrCommit = "0cab3803284aafc66f786d7a1114d58fc04fc5e6";
+    public const string RsrCommit = "8306ebc717e9aac033cfaef2b8bbe2d5374cdf41";
 
     // Each catalogue is ordered: the first finding that applies names a page or edge.
     public static readonly string[] PageFindings =
@@ -25,4 +25,8 @@ public static class Standard
     ];
 
     public static readonly string[] EdgeFindings = ["link-outside-field", "link-outside-scope", "dangling-link"];
+
+    public static readonly string[] ProfileFindings = ["invalid-profile"];
+
+    public static readonly string[] WikiFindings = ["not-utf8", "page-not-indexed", "page-over-budget"];
 }
