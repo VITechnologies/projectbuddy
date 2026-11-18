@@ -68,7 +68,12 @@ requirement (`VITechnologies/projectbuddy#11`).
   links with no `|` alias and no `#heading` anchor, every link resolving to
   a wiki page, every ID mention linked unless it is in code formatting, and
   pages capped at 16 KiB (16,384 bytes). A violation fails the scan before
-  anything is staged.
+  anything is staged. One kind of line in an ID page's sections is exempt
+  from the ID-mention rule: a test-case item, which is a list item that
+  starts with a backtick-quoted path and ` › `, such as
+  `` - `tests/test_x.py` › test_rule[REQ-102] ``. The text after ` › ` is the
+  test runner's verbatim case name, which cannot be edited. The lead-in
+  sentence and all other lines are still checked.
 - Whenever assembly succeeds, even if a gate then fails, the scan run
   publishes the four files it staged as a generated, non-authoritative view
   for whole-table review: the job summary shows each file's SHA-256 and the

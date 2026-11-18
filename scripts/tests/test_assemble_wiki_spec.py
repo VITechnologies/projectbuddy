@@ -542,3 +542,43 @@ def test_escaped_pipes_and_other_html_stay_allowed_on_later_lines(tmp_path, caps
     code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
     assert code == 0, errors(capsys)
     assert "| Step one.<br><br>- `a` \\| `b`<br>- <kbd>Enter</kbd> then ### stays text | " in files["overview.md"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        "- `scripts/tests/test_two.py` › test_rules[allow-list-the allow-list differs from REQ-002]",
+        "  * `scripts/tests/test_two.py` › Suite › REQ-002 case",
+        "+ `scripts/tests/test_two.py` › REQ-002",
+        "3. `scripts/tests/test_two.py` › test_rule[REQ-002]",
+        "4) `scripts/tests/test_two.py` › test REQ-002",
+    ],
+)
+def test_strict_accepts_ids_in_test_case_item_names(tmp_path, capsys, item):
+    page = TEST1_ML.replace("- `scripts/tests/test_two.py`\n", f"{item}\n")
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
+    assert code == 0, errors(capsys)
+    assert f"<br>{item} |" in files["overview.md"]
+
+
+@pytest.mark.parametrize(
+    ("page", "line"),
+    [
+        ("tests/TEST-001.md", "Each test case below passes at the member commit. Together they cover REQ-002."),
+        ("tests/TEST-001.md", "- scripts/tests/test_two.py › test_rules[differs from REQ-002]"),
+        ("tests/TEST-001.md", "- `scripts/tests/test_two.py` test_rules[differs from REQ-002]"),
+        ("tests/TEST-001.md", "`scripts/tests/test_two.py` › test_rules[differs from REQ-002]"),
+        ("tests/TEST-001.md", "-`scripts/tests/test_two.py` › test_rules[differs from REQ-002]"),
+        ("Home.md", "- `scripts/tests/test_two.py` › test_rules[differs from REQ-002]"),
+    ],
+)
+def test_strict_still_refuses_the_same_id_outside_test_case_items(tmp_path, capsys, page, line):
+    overrides = dict(MULTI_LINE)
+    if page == "Home.md":
+        overrides[page] = f"# Home\n\n<!-- page-kind: note -->\n{line}\n"
+    else:
+        overrides[page] = TEST1_ML.replace("- `scripts/tests/test_two.py`\n", f"- `scripts/tests/test_two.py`\n\n{line}\n")
+    code, files = run(split_wiki(tmp_path / "wiki", overrides), tmp_path, "--strict")
+    assert code == 1
+    assert files == {}
+    assert f"{page}: unlinked mention of REQ-002" in errors(capsys)

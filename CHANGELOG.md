@@ -81,6 +81,11 @@ release's notes for the exact pinned commit.
     The assembler also refuses a literal `<br>` in any letter case, in a
     section or a title, and an unescaped `|` on any line. `--strict` link,
     budget and ID-mention checks cover every line.
+  - `--strict` does not require ID mentions to be linked in test-case items.
+    These are ID-page section lines that are list items starting with
+    `` `<path>` › ``, because the text after ` › ` is the test runner's
+    verbatim case name. The lead-in sentence and all other lines are still
+    checked.
   - One-line pages assemble to the same bytes as before.
 
 ## v0.5.0

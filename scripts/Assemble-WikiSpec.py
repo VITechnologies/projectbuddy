@@ -79,6 +79,11 @@ WIKILINK = re.compile(r"\[\[([^\]\n]*)\]\]")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 FENCE = re.compile(r"^(```|~~~)")
 ATX_HEADING = re.compile(r"^#{1,6} ")
+# A test-case item of ecosystem wiki standard @7: a list item that starts with a backtick-quoted path and " ›",
+# such as "- `tests/test_x.py` › test_rule[differs from REQ-102]". The text after "›" is the test runner's
+# verbatim case name, so an ID in it can be neither linked nor put in code without breaking the item. --strict
+# therefore skips these lines of ID-page sections when it looks for unlinked ID mentions.
+TEST_CASE_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s+`[^`\n]+` ›")
 TITLE_COLUMN = "Requirement (short)"
 MAX_DEPTH = 6
 
@@ -434,7 +439,13 @@ class Wiki:
                     self.error(f"{page.rel}: heading-anchor link [[{target}]]; link the section page instead")
                 elif target not in names:
                     self.error(f"{page.rel}: unresolved link [[{target}]]")
-            for ident in plain_mentions(page.text):
+            mention_text = page.text
+            if page.is_id and not page.kind:
+                # Only test-case item lines are exempt; the lead-in sentence and every other line are still checked.
+                mention_text = "".join(
+                    "\n" if TEST_CASE_ITEM.match(line) else line for line in page.text.splitlines(keepends=True)
+                )
+            for ident in plain_mentions(mention_text):
                 if ident != page.name and ident in names:
                     self.error(f"{page.rel}: unlinked mention of {ident}; write [[{ident}]] or put it in code")
 
