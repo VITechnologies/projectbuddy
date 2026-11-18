@@ -21,7 +21,8 @@ it may not start or end with whitespace or contain a `## ` heading line. The
 table cell joins the lines with `<br>`, so each row stays on one line. A
 literal `<br>`, in any letter case, is refused in sections and titles, so
 splitting a cell at `<br>` gives the text back. No line may hold an unescaped
-`|`.
+`|` or be a code fence line (```` ``` ```` or `~~~`), since a table cell
+cannot hold a fenced block.
 
 This tool rebuilds the monolithic files the standards scan reads and fails
 closed on any structural problem, so no page content can silently drop out
@@ -67,6 +68,7 @@ UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 CELL_BREAK = "<br>"
 CELL_BREAK_TEXT = re.compile(re.escape(CELL_BREAK), re.I)
 H2_LINE = re.compile(r" {0,3}##(?:[ \t]|\Z)")
+FENCE_LINE = re.compile(r" {0,3}(?:```|~~~)")
 TABLE_BLOCK = re.compile(
     r"^<!-- table: (\|.*\|) -->\n((?:- \[\[[^\]\n]+\]\]\n)*)<!-- /table -->$", re.M
 )
@@ -233,6 +235,9 @@ class Wiki:
                 return f"contains a literal {CELL_BREAK}{at}; the hub table cell uses it as the line break"
             if UNESCAPED_PIPE.search(line):
                 return f"contains an unescaped table pipe{at}"
+            # On the page a fence hides its lines from the strict checks; in the joined cell it means nothing.
+            if FENCE_LINE.match(line):
+                return f"contains a code fence line{at}; a table cell cannot hold a fenced block"
             if multiline and H2_LINE.match(line):
                 return f"contains a '## ' heading line{at}"
         return None

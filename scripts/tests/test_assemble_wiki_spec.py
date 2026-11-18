@@ -582,3 +582,51 @@ def test_strict_still_refuses_the_same_id_outside_test_case_items(tmp_path, caps
     assert code == 1
     assert files == {}
     assert f"{page}: unlinked mention of REQ-002" in errors(capsys)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, "Step one.\n\n~~~\nSee [[Missing]] and REQ-002.\n~~~")},
+            "tests/TEST-001.md: section 'Stimulus' contains a code fence line on line 3; a table cell cannot hold a fenced block",
+        ),
+        (
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, "Step one.\n```sh\nrun [[Arch#context-view]]\n```")},
+            "tests/TEST-001.md: section 'Stimulus' contains a code fence line on line 2",
+        ),
+        (
+            # Unclosed: on the page it would hide the later Required observation, and its bare ID, from --strict.
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, "Step one.\n```").replace("[[REQ-001]]", "REQ-002")},
+            "tests/TEST-001.md: section 'Stimulus' contains a code fence line on line 2",
+        ),
+        (
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, "Step one.\n   ~~~ indented\nStep two.")},
+            "tests/TEST-001.md: section 'Stimulus' contains a code fence line on line 2",
+        ),
+        (
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, "~~~")},
+            "tests/TEST-001.md: section 'Stimulus' contains a code fence line; a table cell cannot hold a fenced block",
+        ),
+        (
+            {"req/REQ-001.md": REQ1.replace("The engine shall do one thing.", "```one thing.```")},
+            "req/REQ-001.md: section 'Requirement' contains a code fence line; a table cell",
+        ),
+        (
+            {"req/REQ-001.md": REQ1.replace("# REQ-001: First", "# REQ-001: ~~~First")},
+            "req/REQ-001.md: title contains a code fence line; a table cell",
+        ),
+    ],
+)
+def test_code_fence_lines_are_refused(tmp_path, capsys, overrides, message):
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, **overrides}), tmp_path, "--strict")
+    assert code == 1
+    assert files == {}
+    assert message in errors(capsys)
+
+
+def test_triple_backticks_inside_a_line_stay_allowed(tmp_path, capsys):
+    page = TEST1_ML.replace(STIMULUS, "Step one.\n\nRun ```a `b` c``` and `d`.")
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
+    assert code == 0, errors(capsys)
+    assert "| Step one.<br><br>Run ```a `b` c``` and `d`. | " in files["overview.md"]

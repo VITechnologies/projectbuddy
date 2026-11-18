@@ -62,7 +62,9 @@ requirement (`VITechnologies/projectbuddy#11`).
   on one line and splitting a cell at `<br>` gives the section text back. It
   refuses a section that starts or ends with whitespace, contains a `## `
   heading line or a literal `<br>` in any letter case, or has an unescaped
-  `|` on any line.
+  `|` or a code fence line (```` ``` ```` or `~~~`) on any line. A table
+  cell cannot hold a fenced block, and on the page a fence would hide its
+  lines from the `--strict` checks.
 - The scan runs the assembler with `--strict --max-page-bytes 16384`, so it
   enforces the wiki `Home` page's link conventions: unpiped `[[Page-Name]]`
   links with no `|` alias and no `#heading` anchor, every link resolving to

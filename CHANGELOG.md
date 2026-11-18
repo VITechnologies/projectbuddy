@@ -78,9 +78,11 @@ release's notes for the exact pinned commit.
     back.
   - A section is still one blank line, its text, then a blank line. The text
     may not start or end with whitespace or contain a `## ` heading line.
-    The assembler also refuses a literal `<br>` in any letter case, in a
-    section or a title, and an unescaped `|` on any line. `--strict` link,
-    budget and ID-mention checks cover every line.
+    The assembler also refuses, in a section or a title, a literal `<br>` in
+    any letter case, and an unescaped `|` or a code fence line
+    (```` ``` ```` or `~~~`) on any line. A table cell cannot hold a fenced
+    block, and on the page a fence would hide its lines from `--strict`.
+    `--strict` link, budget and ID-mention checks cover every line.
   - `--strict` does not require ID mentions to be linked in test-case items.
     These are ID-page section lines that are list items starting with
     `` `<path>` › ``, because the text after ` › ` is the test runner's
