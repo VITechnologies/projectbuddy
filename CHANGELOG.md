@@ -70,6 +70,18 @@ release's notes for the exact pinned commit.
   `.repo-standards-review/observations.py`. Conformance is unchanged.
   Re-certification at v0.10.0 found no regression: the 5 required gates
   `PASS`.
+- `scripts/Assemble-WikiSpec.py` accepts multi-line ID-page sections (#366),
+  so test pages can hold the numbered stimulus steps and observation lists
+  of `rsr/ecosystem-wiki-standard@7`.
+  - The hub table cell joins the section's lines with `<br>`, so each row
+    stays on one line. Splitting the cell at `<br>` gives the section text
+    back.
+  - A section is still one blank line, its text, then a blank line. The text
+    may not start or end with whitespace or contain a `## ` heading line.
+    The assembler also refuses a literal `<br>` in any letter case, in a
+    section or a title, and an unescaped `|` on any line. `--strict` link,
+    budget and ID-mention checks cover every line.
+  - One-line pages assemble to the same bytes as before.
 
 ## v0.5.0
 

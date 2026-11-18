@@ -14,6 +14,15 @@ pages forming each table or section tree:
     - [[Context-View]]
     <!-- /sections -->
 
+An ID page holds one `## <Column>` section per table column. Each section is
+one blank line, its text, then a blank line, or the page's final newline after
+the last section. The text may span several lines, including blank lines, but
+it may not start or end with whitespace or contain a `## ` heading line. The
+table cell joins the lines with `<br>`, so each row stays on one line. A
+literal `<br>`, in any letter case, is refused in sections and titles, so
+splitting a cell at `<br>` gives the text back. No line may hold an unescaped
+`|`.
+
 This tool rebuilds the monolithic files the standards scan reads and fails
 closed on any structural problem, so no page content can silently drop out
 of the governed scan input. In the split layout every page must be a hub, a
@@ -55,6 +64,9 @@ KIND_LINE = re.compile(r"\n<!-- page-kind: ([a-z-]*) -->\n")
 ID_KINDS = {"retired", "stub"}
 NOTE_KIND = "note"
 UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+CELL_BREAK = "<br>"
+CELL_BREAK_TEXT = re.compile(re.escape(CELL_BREAK), re.I)
+H2_LINE = re.compile(r" {0,3}##(?:[ \t]|\Z)")
 TABLE_BLOCK = re.compile(
     r"^<!-- table: (\|.*\|) -->\n((?:- \[\[[^\]\n]+\]\]\n)*)<!-- /table -->$", re.M
 )
@@ -205,11 +217,19 @@ class Wiki:
         if page.kind in ID_KINDS and SECTION_HEADING.search(rest[placed.end() :]):
             self.error(f"{page.rel}: {page.kind} pages may not hold column sections; remove the marker to govern them")
 
-    def _cell_error(self, value: str | None) -> str | None:
-        if not value or "\n" in value or value != value.strip():
-            return "must be one nonblank line without edge whitespace"
-        if UNESCAPED_PIPE.search(value):
-            return "contains an unescaped table pipe"
+    def _cell_error(self, value: str | None, multiline: bool = False) -> str | None:
+        """Name why value cannot be a table cell; a multiline value becomes one cell joined with CELL_BREAK."""
+        if not value or value != value.strip() or (not multiline and "\n" in value):
+            return "must be nonblank text without edge whitespace" if multiline else "must be one nonblank line without edge whitespace"
+        lines = value.split("\n")
+        for number, line in enumerate(lines, 1):
+            at = f" on line {number}" if len(lines) > 1 else ""
+            if CELL_BREAK_TEXT.search(line):
+                return f"contains a literal {CELL_BREAK}{at}; the hub table cell uses it as the line break"
+            if UNESCAPED_PIPE.search(line):
+                return f"contains an unescaped table pipe{at}"
+            if multiline and H2_LINE.match(line):
+                return f"contains a '## ' heading line{at}"
         return None
 
     def _parse_id_pages(self) -> None:
@@ -243,9 +263,9 @@ class Wiki:
                 framed = body.startswith("\n") and body.endswith(tail) and len(body) > len(tail)
                 value = body[1 : -len(tail)] if framed else None
                 if not framed:
-                    self.error(f"{page.rel}: section '{column}' must be one blank line, one nonblank line, then a blank line")
+                    self.error(f"{page.rel}: section '{column}' must be one blank line, its text, then a blank line")
                     continue
-                if problem := self._cell_error(value):
+                if problem := self._cell_error(value, multiline=True):
                     self.error(f"{page.rel}: section '{column}' {problem}")
                     continue
                 if column in page.sections:
@@ -326,7 +346,7 @@ class Wiki:
                     if value is None:
                         self.error(f"{page.rel}: missing '{column}' required by {owner.name}")
                         value = ""
-                    cells.append(value)
+                    cells.append(value.replace("\n", CELL_BREAK))
                 lines.append("| " + " | ".join(cells) + " |")
             return "\n".join(lines)
 

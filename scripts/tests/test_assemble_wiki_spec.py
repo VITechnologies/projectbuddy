@@ -212,7 +212,7 @@ def test_fenced_code_is_left_alone(tmp_path, capsys):
         ({"req/REQ-002.md": None}, "table lists missing ID page [[REQ-002]]"),
         ({"req/REQ-002.md": "# REQ-002\n\n<!-- page-kind: retired -->\nGone.\n"}, "table lists retired page [[REQ-002]]"),
         ({"req/REQ-001.md": REQ1.replace("# REQ-001: First\n", "# REQ-001: First\nstray\n")}, "only '## <Column>' sections"),
-        ({"req/REQ-001.md": REQ1.replace("one thing.", "one\nthing.")}, "section 'Requirement' must be"),
+        ({"req/REQ-001.md": REQ1.replace("one thing.", "one thing.\n")}, "section 'Requirement' must be nonblank text without edge whitespace"),
         ({"req/REQ-001.md": REQ1.replace("one thing.", "one | thing.")}, "unescaped table pipe"),
         ({"req/REQ-001.md": REQ1 + "\n## Verification\n\nAgain.\n"}, "duplicate section 'Verification'"),
         ({"req/REQ-001.md": REQ1 + "\n## Notes\n\nExtra.\n"}, "not consumed by any table: ['Notes']"),
@@ -235,7 +235,7 @@ def test_fenced_code_is_left_alone(tmp_path, capsys):
         ({"Arch.md": ARCH.replace("- [[Context-View]]\n", ""), "arch/Context-View.md": "# Context View\n\nText.\n"}, "arch/Context-View.md: page is in no hub index"),
         ({"req/REQ-001.md": REQ1.replace("# REQ-001: First", "# REQ-001: First | extra")}, "title contains an unescaped table pipe"),
         ({"req/REQ-001.md": REQ1.replace("# REQ-001: First", "# REQ-001:  First")}, "title must be one nonblank line"),
-        ({"req/REQ-001.md": REQ1.replace("## Requirement\n\n", "## Requirement\n")}, "section 'Requirement' must be one blank line, one nonblank line"),
+        ({"req/REQ-001.md": REQ1.replace("## Requirement\n\n", "## Requirement\n")}, "section 'Requirement' must be one blank line, its text, then a blank line"),
         ({"req/REQ-001.md": REQ1 + "\n<!-- page-kind: stub -->\n"}, "marker must appear once, directly after the title"),
         ({"tests/TEST-002.md": TEST2 + "\n## Stimulus\n\nHidden governed text.\n"}, "stub pages may not hold column sections"),
         ({"tests/TEST-002.md": TEST2.replace("stub", "note")}, "page-kind 'note' is not allowed here"),
@@ -406,3 +406,139 @@ def test_view_is_checked_like_emit(tmp_path, capsys):
     assert "--view REQ-001: not a hub page" in err
     assert "--view Arch: output path" in err and "is used twice" in err
     assert not out.exists() and not (tmp_path / "v.md").exists()
+
+
+STIMULUS = (
+    "Member commit: projectbuddy `0123abc`. Run these steps in a clean checkout of it, on linux-x64:\n"
+    "\n"
+    "1. `python3 -m pytest scripts/tests/test_one.py`\n"
+    "2. `python3 -m pytest scripts/tests/test_two.py`"
+)
+OBSERVATION = (
+    "Each test case below passes at the member commit. Together they cover [[REQ-001]].\n"
+    "\n"
+    "- `scripts/tests/test_one.py` › test_first\n"
+    "- `scripts/tests/test_two.py`"
+)
+CASES_ML = CASES.replace("| Test | Stimulus |", "| Test | Stimulus | Required observation |")
+TEST1_ML = f"# TEST-001\n\n## Stimulus\n\n{STIMULUS}\n\n## Required observation\n\n{OBSERVATION}\n"
+REQ1_ML = REQ1.replace("Run [[TEST-001]].", "Run the planned case:\n\n- [[TEST-001]] in [[Planned-Cases]]")
+MULTI_LINE = {"arch/Planned-Cases.md": CASES_ML, "tests/TEST-001.md": TEST1_ML, "req/REQ-001.md": REQ1_ML}
+ROW_ML = (
+    "| TEST-001 | Member commit: projectbuddy `0123abc`. Run these steps in a clean checkout of it, on linux-x64:"
+    "<br><br>1. `python3 -m pytest scripts/tests/test_one.py`<br>2. `python3 -m pytest scripts/tests/test_two.py` | "
+    "Each test case below passes at the member commit. Together they cover REQ-001."
+    "<br><br>- `scripts/tests/test_one.py` › test_first<br>- `scripts/tests/test_two.py` |"
+)
+EXPECTED_ARCH_ML = EXPECTED_ARCH.replace(
+    "| Test | Stimulus |\n| --- | --- |\n| TEST-001 | Poke REQ-001. |\n",
+    f"| Test | Stimulus | Required observation |\n| --- | --- | --- |\n{ROW_ML}\n",
+)
+EXPECTED_SRS_ML = EXPECTED_SRS.replace(
+    "| Run TEST-001. |", "| Run the planned case:<br><br>- TEST-001 in [[Arch#planned-cases]] |"
+)
+
+
+def test_one_line_sections_assemble_as_before(tmp_path, capsys):
+    # EXPECTED_* predate multi-line sections; one-line pages must still give exactly these bytes.
+    code, files = run(split_wiki(tmp_path / "wiki"), tmp_path, "--strict", "--max-page-bytes", "4096")
+    assert code == 0, errors(capsys)
+    assert files == {"srs.md": EXPECTED_SRS, "rtm.md": EXPECTED_RTM, "overview.md": EXPECTED_ARCH}
+    assert not any("<br>" in text.lower() for text in files.values())
+
+
+def test_multi_line_sections_become_one_br_joined_cell(tmp_path, capsys):
+    code, files = run(split_wiki(tmp_path / "wiki", MULTI_LINE), tmp_path, "--strict", "--max-page-bytes", "4096")
+    assert code == 0, errors(capsys)
+    assert files == {"srs.md": EXPECTED_SRS_ML, "rtm.md": EXPECTED_RTM, "overview.md": EXPECTED_ARCH_ML}
+    rows = [line for line in files["overview.md"].split("\n") if line.startswith("| TEST-001 ")]
+    assert rows == [ROW_ML]
+
+
+def test_multi_line_cells_split_back_into_their_sections(tmp_path, capsys):
+    code, files = run(split_wiki(tmp_path / "wiki", MULTI_LINE), tmp_path)
+    assert code == 0, errors(capsys)
+    row = next(line for line in files["overview.md"].split("\n") if line.startswith("| TEST-001 "))
+    _, stimulus, observation = row[2:-2].split(" | ")
+    assert stimulus.replace("<br>", "\n") == STIMULUS
+    assert observation.replace("<br>", "\n") == OBSERVATION.replace("[[REQ-001]]", "REQ-001")
+
+
+def test_assembled_multi_line_hubs_reassemble_unchanged(tmp_path, capsys):
+    code, files = run(split_wiki(tmp_path / "wiki", MULTI_LINE), tmp_path)
+    assert code == 0, errors(capsys)
+    unsplit = write(tmp_path / "unsplit", {"SRS.md": files["srs.md"], "RTM.md": files["rtm.md"], "Arch.md": files["overview.md"]})
+    args = ["--wiki", str(unsplit)]
+    for name in ("SRS", "RTM", "Arch"):
+        args += ["--emit", f"{name}={unsplit / (name + '.md')}"]
+    assert assemble_wiki_spec.main(args) == 0, errors(capsys)
+    assert (unsplit / "Arch.md").read_bytes() == files["overview.md"].encode("utf-8")
+    assert (unsplit / "SRS.md").read_bytes() == files["srs.md"].encode("utf-8")
+
+
+def test_view_rewrites_links_on_later_lines(tmp_path, capsys):
+    views = tmp_path / "views"
+    code, _ = run(
+        split_wiki(tmp_path / "wiki", MULTI_LINE), tmp_path, "--strict",
+        "--view", f"SRS={views / 'srs.md'}", "--view", f"Arch={views / 'arch.md'}", "--link-base", BASE,
+    )
+    assert code == 0, errors(capsys)
+    srs = (views / "srs.md").read_text(encoding="utf-8")
+    assert f"| Run the planned case:<br><br>- [TEST-001]({BASE}/TEST-001) in [Planned-Cases]({BASE}/Planned-Cases) |" in srs
+    arch = (views / "arch.md").read_text(encoding="utf-8")
+    assert f"Together they cover [REQ-001]({BASE}/REQ-001).<br><br>- `scripts/tests/test_one.py`" in arch
+
+
+@pytest.mark.parametrize(
+    ("later_line", "message"),
+    [
+        ("See [[Missing]].", "tests/TEST-001.md: unresolved link [[Missing]]"),
+        ("See [[Arch#context-view]].", "tests/TEST-001.md: heading-anchor link [[Arch#context-view]]"),
+        ("Also REQ-002.", "tests/TEST-001.md: unlinked mention of REQ-002"),
+    ],
+)
+def test_strict_checks_links_on_later_lines(tmp_path, capsys, later_line, message):
+    page = TEST1_ML.replace("- `scripts/tests/test_two.py`\n", f"- `scripts/tests/test_two.py`\n\n{later_line}\n")
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
+    assert code == 1
+    assert files == {}
+    assert message in errors(capsys)
+
+
+@pytest.mark.parametrize(
+    ("stimulus", "message"),
+    [
+        ("Step one.<br>Step two.", "section 'Stimulus' contains a literal <br>; the hub table cell uses it"),
+        ("Step one.\n\nStep <BR> two.", "section 'Stimulus' contains a literal <br> on line 3"),
+        ("Step one.\nStep <Br> two.", "section 'Stimulus' contains a literal <br> on line 2"),
+        ("\nStep one.\nStep two.", "section 'Stimulus' must be nonblank text without edge whitespace"),
+        ("Step one.\nStep two.\n", "section 'Stimulus' must be nonblank text without edge whitespace"),
+        (" Step one.\nStep two.", "section 'Stimulus' must be nonblank text without edge whitespace"),
+        ("Step one.\nStep two. ", "section 'Stimulus' must be nonblank text without edge whitespace"),
+        ("Step one.\n\n- `a` | `b`", "section 'Stimulus' contains an unescaped table pipe on line 3"),
+        ("Step one.\n##\nStep two.", "section 'Stimulus' contains a '## ' heading line on line 2"),
+        ("Step one.\n## \nStep two.", "section 'Stimulus' contains a '## ' heading line on line 2"),
+        ("Step one.\n  ##\tStep two.", "section 'Stimulus' contains a '## ' heading line on line 2"),
+    ],
+)
+def test_multi_line_sections_fail_closed(tmp_path, capsys, stimulus, message):
+    page = TEST1_ML.replace(STIMULUS, stimulus)
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path)
+    assert code == 1
+    assert files == {}
+    assert f"tests/TEST-001.md: {message}" in errors(capsys)
+
+
+def test_title_may_not_hold_a_cell_break(tmp_path, capsys):
+    page = REQ1.replace("# REQ-001: First", "# REQ-001: First<br>Second")
+    code, _ = run(split_wiki(tmp_path / "wiki", {"req/REQ-001.md": page}), tmp_path)
+    assert code == 1
+    assert "req/REQ-001.md: title contains a literal <br>; the hub table cell uses it" in errors(capsys)
+
+
+def test_escaped_pipes_and_other_html_stay_allowed_on_later_lines(tmp_path, capsys):
+    stimulus = "Step one.\n\n- `a` \\| `b`\n- <kbd>Enter</kbd> then ### stays text"
+    page = TEST1_ML.replace(STIMULUS, stimulus)
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
+    assert code == 0, errors(capsys)
+    assert "| Step one.<br><br>- `a` \\| `b`<br>- <kbd>Enter</kbd> then ### stays text | " in files["overview.md"]

@@ -55,6 +55,14 @@ requirement (`VITechnologies/projectbuddy#11`).
   closed if any page content would be left out; an unsplit wiki assembles
   byte-for-byte unchanged. The System Specification is staged as
   `docs/requirements/syrs.md`.
+- Each ID page holds one `## <Column>` section per table column: one blank
+  line, the section text, then a blank line. The text may span several
+  lines, including blank lines, such as a test's numbered stimulus steps
+  (#366). The assembler joins the lines with `<br>`, so each table row stays
+  on one line and splitting a cell at `<br>` gives the section text back. It
+  refuses a section that starts or ends with whitespace, contains a `## `
+  heading line or a literal `<br>` in any letter case, or has an unescaped
+  `|` on any line.
 - The scan runs the assembler with `--strict --max-page-bytes 16384`, so it
   enforces the wiki `Home` page's link conventions: unpiped `[[Page-Name]]`
   links with no `|` alias and no `#heading` anchor, every link resolving to
