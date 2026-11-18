@@ -6,15 +6,28 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.10.0 sha=2065a7de48bd7e510c1371c85c9b34eab2f55ba9 -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.11.0 sha=6fefbc255ae7b61a1a582beb2a36d49fb210f8b1 -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.10.0` |
-| Version (commit SHA) | `2065a7de48bd7e510c1371c85c9b34eab2f55ba9` |
+| Version (tag) | `v0.11.0` |
+| Version (commit SHA) | `6fefbc255ae7b61a1a582beb2a36d49fb210f8b1` |
 | Assessed | 2026-11-18 |
 | Profile | `release-gate` |
+
+`v0.11.0` adds `rsr/ecosystem-wiki-standard@7` (#369). A test-case item may
+instead be a file item, `` `file` ``, which requires every test case of that
+file to pass. `generate` writes file items only when a page would exceed its
+page or registry-text budget. A test file that its runner cannot load counts
+as one failing `(load error)` test case. The consumer kit's
+`observations.py` adds `evidence --format pytest-junit` and `stimulus`.
+`projectbuddy-wiki` pins `@7`, and its layouts and finding catalogues are
+those of `@2`. This repository's wiki passes the observation check for 30
+test pages (#366). Re-certification against `v0.11.0` on 2026-11-18 ran the
+steps of `.github/workflows/standards-assurance-scan.yml` locally against the
+pinned commit. It found no regression: the 5 required gates `PASS` at High
+confidence (99-100%), and DoD stays the optional `FAIL`.
 
 `v0.10.0` adds `rsr/ecosystem-wiki-standard@6` (#364). When a stimulus step
 runs a test file, each Required observation item names one test case
@@ -212,7 +225,7 @@ maturity), and tag the wiki repository at each release boundary going
 forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
 `CHANGELOG.md` entry for the full, per-issue resolution detail.
 
-## Current gate status (as of the stamped `v0.10.0`)
+## Current gate status (as of the stamped `v0.11.0`)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just
@@ -238,7 +251,7 @@ re-run the gates.
 |---|---|---|---|
 | CM (incl. GitFlow branch governance) | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#6` (closed) |
 | Coverage | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#8` (closed) |
-| REQ | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#9` (closed) |
+| REQ | ✅ PASS | High (99%) | `VITechnologies/projectbuddy#9` (closed) |
 | ARCH | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#10` (closed) |
 | DOC | ✅ PASS | High (100%) | `VITechnologies/projectbuddy#11` (closed) |
 | DoD | FAIL (optional, not required) | 3/5, 60% completion, Med (88%) | not tracked |

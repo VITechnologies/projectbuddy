@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and check the test-case items of a wiki's test pages (rsr/ecosystem-wiki-standard@6).
+"""Generate and check the test-case items of a wiki's test pages (rsr/ecosystem-wiki-standard@7).
 
 Managed by the repo-standards-review consumer kit (templates/consumer); update it
 with `cruft update`. It needs only Python 3.9+ and Git.
@@ -8,17 +8,27 @@ Commands:
 - `evidence` turns a test runner's report into execution evidence
   (`rsr/test-evidence@1`). Run the tests in a clean checkout of the member
   commit; the evidence records that commit and a platform label. It reads
-  Jest-compatible JSON reports, such as `vitest run --reporter=json`.
+  Jest-compatible JSON reports, such as `vitest run --reporter=json`, or with
+  `--format pytest-junit` pytest's `--junitxml` report, where the node ID
+  `file::Class::test[param]` becomes `` `file` › Class › test[param] ``.
+- `stimulus` writes a repeatable stimulus for each test page whose stimulus names
+  no test file that the evidence ran, from the test files that the evidence ran
+  and that the `TestArtifact` sections of the requirements linking the page
+  name. Each step is a given command; `{files}` in the last one becomes those
+  files. A second run changes nothing.
 - `generate` writes the test-case items of each test page whose stimulus names
   a test file that the evidence ran: every test case of those files, in runner
-  order, as `` `file` › describe chain › title ``. A page without test-case items
-  gets a new Required observation; otherwise only its list of test-case items is
-  replaced. The output depends only on the pages and the evidence, so a second
-  run changes nothing.
+  order, as `` `file` › describe chain › title ``. When that would put the page
+  over the 16,384-byte page budget or the 16,384-character registry-text budget,
+  it names whole files instead (`` `file` ``, a file item), largest first, until
+  the page fits. A page without test-case items gets a new Required observation;
+  otherwise only its list of test-case items is replaced. The output depends
+  only on the pages and the evidence, so a second run changes nothing.
 - `check` reads the test pages of one wiki commit and reports each test-case item
   that names no test case the evidence lists for its file
   (`observation-test-missing`), that adds words to one (`observation-not-verbatim`),
-  or whose test case the evidence does not show passing (`observation-not-passing`).
+  or whose test case, or for a file item any test case of its file, the evidence
+  does not show passing (`observation-not-passing`).
 
 Exit 0 on success, 1 with findings or refused pages, 2 when the command cannot run.
 """
@@ -31,6 +41,8 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ElementTree
+import xml.parsers.expat
 from pathlib import Path, PurePosixPath
 
 EVIDENCE_SCHEMA = "rsr/test-evidence@1"
@@ -39,6 +51,10 @@ PROFILE_FILE = ".wiki-profile.json"
 PROFILE_SCHEMAS = ("rsr/wiki-profile@1", "rsr/wiki-profile@2")
 SEPARATOR = " \u203a "
 LEAD_IN = "Each test case below passes at the member commit."
+# A test file that its runner reports but cannot load counts as one failing test case of this name.
+LOAD_ERROR = "(load error)"
+# The ecosystem wiki standard's page budget (bytes) and registry-text budget (characters).
+BUDGET = 16384
 # Jest and vitest assertion statuses; anything that did not run counts as skipped.
 STATUSES = {"passed": "passed", "failed": "failed", "skipped": "skipped", "pending": "skipped", "todo": "skipped",
             "disabled": "skipped"}
@@ -61,6 +77,10 @@ ITEM_FILE = re.compile(r"`([^`\n]+)`")
 LINK = re.compile(r"\[\[([^\]|#\n]+)")
 TOKEN = re.compile(r"[^\s`'\"()\[\]{},;]+")
 CODE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]+`", re.S)
+MEMBER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+# A stimulus names its files unquoted, so that a later run finds them again.
+PLAIN_FILE = re.compile(r"[A-Za-z0-9_./+-]+")
+FORMATS = ("jest-json", "pytest-junit")
 
 
 class Refused(Exception):
@@ -227,13 +247,61 @@ def list_items(body: str) -> list[list]:
     return items
 
 
-def test_case(text: str, files: dict) -> tuple[str, str] | None:
+def test_case(text: str, files) -> tuple[str, str] | None:
     """The file and the rest of a test-case item, or None for any other item."""
     match = ITEM_FILE.match(text)
     if match is None:
         return None
-    rest = text[match.end():]
-    return (match.group(1), rest) if "\u203a" in rest or match.group(1) in files else None
+    file, rest = match.group(1), text[match.end():]
+    return (file, rest) if "\u203a" in rest or file in files else None
+
+
+def test_case_items(body: str, files, named: tuple = ()) -> list[tuple[int, int, int, str, str]]:
+    """Each test-case item of a body as (first line, last line, indent, file, rest).
+
+    A file item for a path that the stimulus names but no evidence ran also counts when it is in the same list as
+    another test-case item, or in a list that directly follows a paragraph beginning with the lead-in sentence, so
+    that a file missing from the evidence is still judged.
+    """
+    lines = body.split("\n")
+    # Group items by list: a deeper item opens a nested list, and a paragraph at or above a level ends its list.
+    groups: list[list] = []
+    open_lists: list[tuple[int, int]] = []
+    previous = -1
+    for first, last, text, indent in list_items(body):
+        gap = [line for line in lines[previous + 1:first] if line.strip()]
+        if gap:
+            outdent = min(len(line) - len(line.lstrip(" \t")) for line in gap)
+            while open_lists and open_lists[-1][0] >= outdent:
+                open_lists.pop()
+        while open_lists and open_lists[-1][0] > indent:
+            open_lists.pop()
+        strict = test_case(text, files)
+        match = ITEM_FILE.match(text)
+        loose = (match.group(1), "") if strict is None and match and text[match.end():] == "" \
+            and match.group(1) in named else None
+        entry = (first, last, indent, strict, loose)
+        if open_lists and open_lists[-1][0] == indent:
+            groups[open_lists[-1][1]].append(entry)
+        else:
+            groups.append([entry])
+            open_lists.append((indent, len(groups) - 1))
+        previous = last
+    found = []
+    for group in groups:
+        before = group[0][0] - 1
+        while before >= 0 and not lines[before].strip():
+            before -= 1
+        start = before
+        while start > 0 and lines[start - 1].strip():
+            start -= 1
+        led = before >= 0 and lines[start].lstrip().startswith(LEAD_IN)
+        listed = led or any(entry[3] for entry in group)
+        for first, last, indent, strict, loose in group:
+            part = strict or (loose if listed else None)
+            if part:
+                found.append((first, last, indent, *part))
+    return found
 
 
 def stimulus_tokens(stimulus: str) -> list[str]:
@@ -297,21 +365,38 @@ def coverage(wiki: Path, scopes: list[dict], test: dict) -> dict[str, list[str]]
     return {identifier: sorted(requirements) for identifier, requirements in covered.items()}
 
 
-def generated_body(body: str, items: list[str], requirements: list[str], evidence: Evidence) -> str | None:
+def over_budget(text: str, identifier: str, sections: list[str]) -> bool:
+    """Whether a canonical page exceeds the page budget or its registry text the registry-text budget."""
+    spans = parse_page(text, identifier, sections)
+    if spans is None:
+        return True
+    fields = {"ID": identifier}
+    after = text.split("\n", 1)[0][2 + len(identifier):]
+    if after.startswith(": "):
+        fields["Title"] = after[2:]
+    for heading, (start, end) in zip(sections, spans):
+        fields[heading] = text[start:end]
+    # The registry text is the page's fields as compact JSON with keys in code-point order.
+    registry = json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return len(text.encode("utf-8")) > BUDGET or len(registry) > BUDGET
+
+
+def item_lines(files: list[str], evidence: Evidence, whole: set) -> list[str]:
+    return [line for file in files for line in ([f"- `{file}`"] if file in whole else
+                                                [f"- `{file}`{SEPARATOR}{name}" for name in evidence.order[file]])]
+
+
+def generated_body(body: str, items: list[str], requirements: list[str], evidence: Evidence,
+                   named: tuple = ()) -> str | None:
     """The new required observation, or None when the body holds more than one list of test-case items."""
     lines = body.split("\n")
     blocks: list[list[int]] = []
-    joinable = False
-    for first, last, text, indent in list_items(body):
-        if test_case(text, evidence.order) is None:
-            joinable = False
-            continue
+    for first, last, indent, _, _ in test_case_items(body, evidence.order, named):
         # Test-case items separated only by blank lines are one list.
-        if joinable and not any(lines[number].strip() for number in range(blocks[-1][1] + 1, first)):
+        if blocks and not any(lines[number].strip() for number in range(blocks[-1][1] + 1, first)):
             blocks[-1][1] = last
         else:
             blocks.append([first, last, indent])
-        joinable = True
     if len(blocks) > 1:
         return None
     if blocks:
@@ -332,27 +417,20 @@ def page_ids(paths: list, ids: list[str], stem) -> list:
     return [known[identifier] for identifier in sorted(set(ids))]
 
 
-def command_evidence(options: argparse.Namespace) -> int:
-    if not PLATFORM.fullmatch(options.platform):
-        raise Refused(f"--platform must match {PLATFORM.pattern}, for example linux-x64")
-    top = Path(os.path.realpath(git(Path(options.root), ["rev-parse", "--show-toplevel"]).decode().strip()))
-    commit = git(top, ["rev-parse", "HEAD"]).decode().strip()
-    if git(top, ["status", "--porcelain", "--untracked-files=no"]).strip():
-        raise Refused("tracked files differ from HEAD; run the tests in a clean checkout of the member commit")
-    tracked = set(git(top, ["ls-tree", "-r", "-z", "--name-only", "HEAD"]).decode("utf-8", "surrogateescape").split("\0"))
+def jest_cases(report_path: Path, top: Path, tracked: set, commit: str) -> list[dict]:
     try:
-        report = json.loads(Path(options.report).read_text(encoding="utf-8"))
+        report = json.loads(report_path.read_text(encoding="utf-8"))
     except ValueError as error:
-        raise Refused(f"{options.report}: not JSON: {error}") from None
+        raise Refused(f"{report_path}: not JSON: {error}") from None
     results = report.get("testResults") if isinstance(report, dict) else None
     if not isinstance(results, list):
-        raise Refused(f"{options.report} has no testResults list; give a Jest-compatible JSON report")
+        raise Refused(f"{report_path} has no testResults list; give a Jest-compatible JSON report")
     cases = []
     for result in results:
         name = result.get("name") if isinstance(result, dict) else None
         assertions = result.get("assertionResults") if isinstance(result, dict) else None
         if not isinstance(name, str) or not isinstance(assertions, list):
-            raise Refused(f"{options.report}: each test result needs a name and assertionResults")
+            raise Refused(f"{report_path}: each test result needs a name and assertionResults")
         path = Path(name) if Path(name).is_absolute() else top / name
         try:
             relative = Path(os.path.realpath(path)).relative_to(top).as_posix()
@@ -361,7 +439,12 @@ def command_evidence(options: argparse.Namespace) -> int:
         if relative not in tracked:
             raise Refused(f"{relative} is not in the member commit {commit[:12]}; commit it or remove it")
         if not assertions:
-            sys.stderr.write(f"NOTE: {relative} reported no test cases\n")
+            if result.get("status") == "failed":
+                # The runner could not load the file, so none of its test cases ran.
+                cases.append({"file": relative, "name": LOAD_ERROR, "status": "failed"})
+                sys.stderr.write(f"NOTE: {relative} failed to load; it counts as one failing test case\n")
+            else:
+                sys.stderr.write(f"NOTE: {relative} reported no test cases\n")
         for assertion in assertions:
             titles = assertion.get("ancestorTitles") if isinstance(assertion, dict) else None
             title = assertion.get("title") if isinstance(assertion, dict) else None
@@ -371,7 +454,73 @@ def command_evidence(options: argparse.Namespace) -> int:
             if not isinstance(status, str) or status not in STATUSES:
                 raise Refused(f"{relative}: unknown test status {status!r}")
             cases.append({"file": relative, "name": SEPARATOR.join([*titles, title]), "status": STATUSES[status]})
-    document = {"schema": EVIDENCE_SCHEMA, "commit": commit, "platform": options.platform, "format": "jest-json",
+    return cases
+
+
+def refuse_document_type(*_: object) -> None:
+    raise Refused("a report with a document type or entity declarations is refused")
+
+
+def module_file(dotted: str, tracked: set, declared: str | None, commit: str) -> tuple[str, int]:
+    """The tracked .py file a dotted pytest path names, and how many of its parts the file takes."""
+    parts = dotted.split(".")
+    candidates = [("/".join(parts[:size]) + ".py", size) for size in range(1, len(parts) + 1)]
+    matches = [candidate for candidate in candidates if candidate[0] in tracked]
+    if len(matches) > 1 and declared is not None:
+        # The file attribute only chooses between candidates: xunit1 reports an inherited test's defining module.
+        matches = [candidate for candidate in matches if candidate[0] == declared.replace("\\", "/")] or matches
+    if len(matches) != 1:
+        reason = "no file" if not matches else f"{len(matches)} files"
+        raise Refused(f"{dotted} names {reason} of the member commit {commit[:12]}; run pytest from the checkout's root")
+    return matches[0]
+
+
+def pytest_cases(report_path: Path, top: Path, tracked: set, commit: str) -> list[dict]:
+    """Test cases from pytest's JUnit XML report, made from the checkout's root."""
+    raw = report_path.read_bytes()
+    # A runner's report never needs a document type. Refusing one at the parser, in any encoding, rules out entity
+    # expansion before ElementTree reads the report.
+    guard = xml.parsers.expat.ParserCreate()
+    guard.StartDoctypeDeclHandler = refuse_document_type
+    guard.EntityDeclHandler = refuse_document_type
+    try:
+        guard.Parse(raw, True)
+        root = ElementTree.fromstring(raw)
+    except Refused as error:
+        raise Refused(f"{report_path}: {error}") from None
+    except (xml.parsers.expat.ExpatError, ElementTree.ParseError, LookupError, ValueError) as error:
+        raise Refused(f"{report_path}: not readable XML: {error}") from None
+    if root.tag not in ("testsuites", "testsuite"):
+        raise Refused(f"{report_path}: not a JUnit report; give pytest --junitxml output")
+    cases = []
+    for case in root.iter("testcase"):
+        classname, name = case.get("classname"), case.get("name")
+        if classname is None or not name:
+            raise Refused(f"{report_path}: each testcase needs a classname and a name")
+        tags = {child.tag for child in case}
+        status = "failed" if tags & {"failure", "error"} else "skipped" if "skipped" in tags else "passed"
+        if not classname:
+            # pytest reports a module it could not collect as a test case named after the module.
+            file, _ = module_file(name, tracked, None, commit)
+            cases.append({"file": file, "name": LOAD_ERROR, "status": "failed"})
+            sys.stderr.write(f"NOTE: pytest could not collect {file}; it counts as one failing test case\n")
+            continue
+        file, size = module_file(classname, tracked, case.get("file"), commit)
+        cases.append({"file": file, "name": SEPARATOR.join([*classname.split(".")[size:], name]), "status": status})
+    return cases
+
+
+def command_evidence(options: argparse.Namespace) -> int:
+    if not PLATFORM.fullmatch(options.platform):
+        raise Refused(f"--platform must match {PLATFORM.pattern}, for example linux-x64")
+    top = Path(os.path.realpath(git(Path(options.root), ["rev-parse", "--show-toplevel"]).decode().strip()))
+    commit = git(top, ["rev-parse", "HEAD"]).decode().strip()
+    if git(top, ["status", "--porcelain", "--untracked-files=no"]).strip():
+        raise Refused("tracked files differ from HEAD; run the tests in a clean checkout of the member commit")
+    tracked = set(git(top, ["ls-tree", "-r", "-z", "--name-only", "HEAD"]).decode("utf-8", "surrogateescape").split("\0"))
+    read = pytest_cases if options.format == "pytest-junit" else jest_cases
+    cases = read(Path(options.report), top, tracked, commit)
+    document = {"schema": EVIDENCE_SCHEMA, "commit": commit, "platform": options.platform, "format": options.format,
                 "cases": cases}
     problem = evidence_problem(document)
     if problem:
@@ -408,12 +557,24 @@ def command_generate(options: argparse.Namespace) -> int:
         if not files:
             plain += 1
             continue
-        items = [f"- `{file}`{SEPARATOR}{name}" for file in files for name in evidence.order[file]]
-        body = generated_body(text[start:end], items, covered.get(path.stem, []), evidence)
+        # Largest files first, then stimulus order, so the choice depends only on the page and the evidence.
+        largest = sorted(files, key=lambda file: (-len(evidence.order[file]), files.index(file)))
+        whole: set = set()
+        while True:
+            body = generated_body(text[start:end], item_lines(files, evidence, whole), covered.get(path.stem, []),
+                                  evidence, tuple(stimulus_tokens(text[stimulus_start:stimulus_end])))
+            if body is None:
+                break
+            updated = text[:start] + body + text[end:]
+            if not over_budget(updated, path.stem, test["sections"]) or len(whole) == len(files):
+                break
+            whole.add(largest[len(whole)])
         if body is None:
             refused.append(f"{path}: the required observation holds more than one list of test-case items")
             continue
-        updated = text[:start] + body + text[end:]
+        if over_budget(updated, path.stem, test["sections"]):
+            refused.append(f"{path}: the page exceeds the page or registry-text budget even with file items")
+            continue
         if updated != text:
             updates[path] = updated.replace("\n", "\r\n") if crlf else updated
     for message in refused:
@@ -427,6 +588,105 @@ def command_generate(options: argparse.Namespace) -> int:
             path.write_bytes(updates[path].encode("utf-8"))
     print(f"{'FAIL' if options.dry_run and updates else 'PASS'}: {len(updates)} pages "
           f"{'to update' if options.dry_run else 'updated'}, {plain} pages name no test file that the evidence ran")
+    return 1 if options.dry_run and updates else 0
+
+
+def linked_sections(wiki: Path, scopes: list[dict], test: dict, section: str) -> dict[str, list[tuple[str, str]]]:
+    """Test ID -> (requirement ID, the text of its section) for each requirement whose TestID section links it."""
+    linked: dict[str, list[tuple[str, str]]] = {}
+    for scope in scopes:
+        if scope["scope"] not in ("system", "software") or "TestID" not in scope["sections"] \
+                or section not in scope["sections"]:
+            continue
+        for path in sorted((wiki / scope["directory"]).glob("*.md")):
+            read = read_text(path)
+            spans = None if read is None else parse_page(read[0], path.stem, scope["sections"])
+            if spans is None:
+                continue
+            start, end = spans[scope["sections"].index("TestID")]
+            body = read[0][slice(*spans[scope["sections"].index(section)])]
+            for link in dict.fromkeys(link.strip() for link in LINK.findall(read[0][start:end])):
+                if has_prefix(link, test["prefixes"]):
+                    linked.setdefault(link, []).append((path.stem, body))
+    return linked
+
+
+def join_words(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def stimulus_body(evidence: Evidence, member: str, steps: list[str], files: list[str]) -> str:
+    platforms = sorted({platform for file in files for name in evidence.order[file]
+                        for platform in evidence.statuses[(file, name)]})
+    owner = f"{member} " if member else ""
+    lines = [f"Member commit: {owner}`{evidence.commit}`. Run these steps in a clean checkout of it, "
+             f"on {join_words(platforms)}:", ""]
+    arguments = " ".join(files)
+    for number, step in enumerate(steps, 1):
+        lines.append(f"{number}. `{step.replace('{files}', arguments)}`")
+    return "\n".join(lines)
+
+
+def command_stimulus(options: argparse.Namespace) -> int:
+    steps = [*options.step, options.last_step]
+    if any(not step.strip() or "\n" in step or "\r" in step or "`" in step for step in steps):
+        raise Refused("each step is one line of shell without backticks")
+    if options.last_step.count("{files}") != 1 or any("{files}" in step for step in options.step):
+        raise Refused("--command must hold {files} exactly once, and no --step may hold it")
+    if options.member and not MEMBER.fullmatch(options.member):
+        raise Refused(f"--member must match {MEMBER.pattern}")
+    wiki = Path(options.wiki)
+    evidence = load_evidence(options.evidence)
+    profile = wiki / PROFILE_FILE
+    scopes = load_profile(profile.read_bytes() if profile.is_file() else None)
+    test = test_scope(scopes)
+    linked = linked_sections(wiki, scopes, test, options.artifact_section)
+    pages = page_ids(sorted((wiki / test["directory"]).glob("*.md")), options.ids, lambda path: path.stem)
+    updates, refused, runnable, unmatched = {}, [], 0, []
+    for path in pages:
+        read = read_text(path)
+        text, crlf = read if read is not None else ("", False)
+        spans = None if read is None else parse_page(text, path.stem, test["sections"])
+        if spans is None:
+            if options.ids:
+                refused.append(f"{path}: not a canonical section page")
+            continue
+        start, end = spans[0]
+        if stimulus_files(text[start:end], evidence.order):
+            runnable += 1
+            continue
+        files: list[str] = []
+        for _, artifact in linked.get(path.stem, []):
+            files += [file for file in stimulus_files(artifact, evidence.order) if file not in files]
+        if not files:
+            unmatched.append(path.stem)
+            continue
+        unsafe = [file for file in files if not PLAIN_FILE.fullmatch(file)]
+        if unsafe:
+            refused.append(f"{path}: a step cannot name {', '.join(unsafe)} unquoted")
+            continue
+        body = stimulus_body(evidence, options.member, steps, files)
+        if stimulus_files(body, evidence.order) != files:
+            refused.append(f"{path}: the written stimulus would not name its test files again; "
+                           "put {files} on its own between spaces")
+            continue
+        updated = text[:start] + body + text[end:]
+        if updated != text:
+            updates[path] = updated.replace("\n", "\r\n") if crlf else updated
+    for message in refused:
+        print(f"REFUSED: {message}")
+    if refused:
+        print("FAIL: no page was written")
+        return 1
+    for path in sorted(updates):
+        print(f"{'WOULD UPDATE' if options.dry_run else 'UPDATED'}: {path}")
+        if not options.dry_run:
+            path.write_bytes(updates[path].encode("utf-8"))
+    if unmatched:
+        print(f"NOTE: {len(unmatched)} pages have no {options.artifact_section} test file that the evidence ran: "
+              f"{', '.join(unmatched)}")
+    print(f"{'FAIL' if options.dry_run and updates else 'PASS'}: {len(updates)} pages "
+          f"{'to update' if options.dry_run else 'updated'}, {runnable} already name a test file that the evidence ran")
     return 1 if options.dry_run and updates else 0
 
 
@@ -464,6 +724,14 @@ def judge(evidence: Evidence, file: str, rest: str, runs: bool | None) -> tuple[
     names = evidence.order.get(file)
     if names is None:
         return "observation-not-passing", f"no evidence ran `{file}`"
+    if rest == "":
+        # A file item: every test case of the file passes.
+        failing = [name for name in names if "failed" in evidence.statuses[(file, name)].values()
+                   or "passed" not in evidence.statuses[(file, name)].values()]
+        if failing:
+            return "observation-not-passing", (f"`{file}`: {len(failing)} of {len(names)} test cases do not pass, "
+                                               f"first {failing[0]!r}")
+        return None
     name = rest[len(SEPARATOR):] if rest.startswith(SEPARATOR) else None
     if name is None or (file, name) not in evidence.statuses:
         contained = [candidate for candidate in names if candidate in rest]
@@ -507,11 +775,9 @@ def command_check(options: argparse.Namespace) -> int:
             continue
         (stimulus_start, stimulus_end), (start, end) = spans[0], spans[1]
         first_line = text.count("\n", 0, start) + 1
-        page_items = []
-        for first, _, item, _ in list_items(text[start:end]):
-            parts = test_case(item, evidence.order)
-            if parts is not None:
-                page_items.append((first_line + first, *parts))
+        named = tuple(stimulus_tokens(text[stimulus_start:stimulus_end]))
+        page_items = [(first_line + first, file, rest)
+                      for first, _, _, file, rest in test_case_items(text[start:end], evidence.order, named)]
         if not page_items:
             if stimulus_files(text[stimulus_start:stimulus_end], evidence.order):
                 notes.append(f"{path}: its stimulus names a test file that the evidence ran, "
@@ -544,6 +810,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     evidence = commands.add_parser("evidence", help="write execution evidence from a test runner's report")
+    evidence.add_argument("--format", choices=FORMATS, default="jest-json",
+                          help="report format: jest-json (default) or pytest-junit (pytest --junitxml)")
     evidence.add_argument("--report", required=True,
                           help="Jest-compatible JSON report, such as vitest run --reporter=json --outputFile=<file>")
     evidence.add_argument("--platform", required=True, help="platform the tests ran on, for example linux-x64")
@@ -554,6 +822,15 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("--evidence", action="append", required=True, help="evidence file; repeat once per platform")
     generate.add_argument("--dry-run", action="store_true", help="write nothing; exit 1 when a page would change")
     generate.add_argument("ids", nargs="*", help="test page IDs (default: every test page)")
+    stimulus = commands.add_parser("stimulus", help="write a repeatable stimulus from the requirements' test artifacts")
+    stimulus.add_argument("--wiki", required=True, help="wiki working tree")
+    stimulus.add_argument("--evidence", action="append", required=True, help="evidence file; repeat once per platform")
+    stimulus.add_argument("--command", dest="last_step", required=True, help="last step, holding {files}, for example 'python -m pytest {files}'")
+    stimulus.add_argument("--step", action="append", default=[], help="an earlier step, in order; repeat as needed")
+    stimulus.add_argument("--member", default="", help="the member's name, shown with the member commit")
+    stimulus.add_argument("--artifact-section", default="TestArtifact", help="requirement section naming test files")
+    stimulus.add_argument("--dry-run", action="store_true", help="write nothing; exit 1 when a page would change")
+    stimulus.add_argument("ids", nargs="*", help="test page IDs (default: every test page)")
     check = commands.add_parser("check", help="report observation findings for the test pages of one wiki commit")
     check.add_argument("--wiki", required=True, help="wiki repository")
     check.add_argument("--commit", default="HEAD", help="wiki commit to check (default: HEAD)")
@@ -561,10 +838,11 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--evidence", action="append", required=True, help="evidence file; repeat once per platform")
     check.add_argument("ids", nargs="*", help="test page IDs (default: every test page)")
     options = parser.parse_args(argv)
-    handlers = {"evidence": command_evidence, "generate": command_generate, "check": command_check}
+    handlers = {"evidence": command_evidence, "generate": command_generate, "stimulus": command_stimulus,
+                "check": command_check}
     try:
         return handlers[options.command](options)
-    except (Refused, OSError, UnicodeDecodeError, TypeError, ValueError, KeyError) as error:
+    except (Refused, OSError, UnicodeDecodeError, TypeError, ValueError, KeyError, LookupError) as error:
         sys.stderr.write(f"UNKNOWN: {error}\n")
         return 2
 
