@@ -83,9 +83,12 @@ FENCE = re.compile(r"^(```|~~~)")
 ATX_HEADING = re.compile(r"^#{1,6} ")
 # A test-case item of ecosystem wiki standard @7: a list item that starts with a backtick-quoted path and " ›",
 # such as "- `tests/test_x.py` › test_rule[differs from REQ-102]". The text after "›" is the test runner's
-# verbatim case name, so an ID in it can be neither linked nor put in code without breaking the item. --strict
-# therefore skips these lines of ID-page sections when it looks for unlinked ID mentions.
+# verbatim case name, so an ID in it can be neither linked nor put in code without breaking the item. Such items
+# live only in a TEST page's Required observation section, the section the standard's observation check reads,
+# so --strict skips them there, and only there, when it looks for unlinked ID mentions. Anywhere else the same
+# prefix could hide an unlinked trace claim, such as a TestID cell naming a test.
 TEST_CASE_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s+`[^`\n]+` ›")
+OBSERVATION_COLUMN = "Required observation"
 TITLE_COLUMN = "Requirement (short)"
 MAX_DEPTH = 6
 
@@ -444,15 +447,25 @@ class Wiki:
                     self.error(f"{page.rel}: heading-anchor link [[{target}]]; link the section page instead")
                 elif target not in names:
                     self.error(f"{page.rel}: unresolved link [[{target}]]")
-            mention_text = page.text
-            if page.is_id and not page.kind:
-                # Only test-case item lines are exempt; the lead-in sentence and every other line are still checked.
-                mention_text = "".join(
-                    "\n" if TEST_CASE_ITEM.match(line) else line for line in page.text.splitlines(keepends=True)
-                )
-            for ident in plain_mentions(mention_text):
+            for ident in plain_mentions(self._mention_text(page)):
                 if ident != page.name and ident in names:
                     self.error(f"{page.rel}: unlinked mention of {ident}; write [[{ident}]] or put it in code")
+
+    def _mention_text(self, page: Page) -> str:
+        """The page text --strict checks for unlinked ID mentions: all of it, except the test-case item lines of
+        a TEST page's Required observation section. The lead-in sentence and every other line stay checked."""
+        if not (page.is_id and not page.kind and page.name.startswith("TEST-")):
+            return page.text
+        kept: list[str] = []
+        column = None
+        for line in page.text.splitlines(keepends=True):
+            heading = SECTION_HEADING.match(line)
+            if heading:
+                column = heading.group(1)
+            elif column == OBSERVATION_COLUMN and TEST_CASE_ITEM.match(line):
+                line = "\n"
+            kept.append(line)
+        return "".join(kept)
 
 
 def parse_emit(values: list[str], flag: str = "--emit") -> list[tuple[str, Path]]:

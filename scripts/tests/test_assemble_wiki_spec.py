@@ -630,3 +630,31 @@ def test_triple_backticks_inside_a_line_stay_allowed(tmp_path, capsys):
     code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, "tests/TEST-001.md": page}), tmp_path, "--strict")
     assert code == 0, errors(capsys)
     assert "| Step one.<br><br>Run ```a `b` c``` and `d`. | " in files["overview.md"]
+
+
+ITEM_CLAIM = "- `scripts/tests/test_x.py` › {}"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"req/REQ-001.md": REQ1_ML.replace("## TestID\n\n[[TEST-001]]\n", f"## TestID\n\n[[TEST-001]]\n\n{ITEM_CLAIM.format('TEST-002')}\n")},
+            "req/REQ-001.md: unlinked mention of TEST-002",
+        ),
+        (
+            {"req/REQ-001.md": REQ1_ML.replace("in [[Planned-Cases]]", f"in [[Planned-Cases]]\n{ITEM_CLAIM.format('TEST-002')}")},
+            "req/REQ-001.md: unlinked mention of TEST-002",
+        ),
+        (
+            {"tests/TEST-001.md": TEST1_ML.replace(STIMULUS, f"{STIMULUS}\n3. `scripts/tests/test_x.py` › REQ-002")},
+            "tests/TEST-001.md: unlinked mention of REQ-002",
+        ),
+    ],
+    ids=["req-testid", "req-verification", "test-stimulus"],
+)
+def test_test_case_item_exemption_is_only_for_required_observation(tmp_path, capsys, overrides, message):
+    code, files = run(split_wiki(tmp_path / "wiki", {**MULTI_LINE, **overrides}), tmp_path, "--strict")
+    assert code == 1
+    assert files == {}
+    assert message in errors(capsys)

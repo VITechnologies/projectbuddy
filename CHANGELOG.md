@@ -84,10 +84,11 @@ release's notes for the exact pinned commit.
     block, and on the page a fence would hide its lines from `--strict`.
     `--strict` link, budget and ID-mention checks cover every line.
   - `--strict` does not require ID mentions to be linked in test-case items.
-    These are ID-page section lines that are list items starting with
-    `` `<path>` › ``, because the text after ` › ` is the test runner's
-    verbatim case name. The lead-in sentence and all other lines are still
-    checked.
+    These are list items starting with `` `<path>` › `` in a `TEST-###`
+    page's `Required observation` section, because the text after ` › ` is
+    the test runner's verbatim case name. The lead-in sentence, every other
+    line and every other section, such as a requirement's `TestID`, are
+    still checked.
   - One-line pages assemble to the same bytes as before.
 
 ## v0.5.0
