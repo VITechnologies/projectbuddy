@@ -90,6 +90,15 @@ release's notes for the exact pinned commit.
     line and every other section, such as a requirement's `TestID`, are
     still checked.
   - One-line pages assemble to the same bytes as before.
+- The RSR pins move to v0.11.0 (#369): the consumer kit, the standards scan,
+  and projectbuddy-wiki's standard pin, which is now
+  `rsr/ecosystem-wiki-standard@7`. In `@7`, a test-case item may instead be
+  a file item, `` `file` ``, which requires every test case of that file to
+  pass. The vendored `.repo-standards-review/observations.py` adds
+  `evidence --format pytest-junit` and `stimulus`. Conformance is unchanged.
+  This repository's wiki passes the observation check for 30 test pages
+  (#366). Re-certification at v0.11.0 found no regression: the 5 required
+  gates `PASS`.
 
 ## v0.5.0
 
