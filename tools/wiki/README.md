@@ -49,15 +49,20 @@ out/projectbuddy-wiki export-registry --approval <approval record> --importer-pa
 ## Standard
 
 `projectbuddy-wiki` is the reference checker of the ecosystem wiki standard,
-`rsr/ecosystem-wiki-standard@5`. That standard ships in repo-standards-review
-`v0.9.0` (`8306ebc`) as `docs/architecture/ecosystem-wiki-standard.md`
-(VITechnologies/projectbuddy#318, #319, #320, #329, #346, #348).
+`rsr/ecosystem-wiki-standard@6`. That standard ships in repo-standards-review
+`v0.10.0` (`2065a7d`) as `docs/architecture/ecosystem-wiki-standard.md`
+(VITechnologies/projectbuddy#318, #319, #320, #329, #346, #348, #364).
 
-`@3`, `@4` and `@5` added rules for the content of test pages, and an
-independent content review judges them, not this checker. `@5` also defines
-profile schema `rsr/wiki-profile@2`, which this checker implements. The
-checker's layouts, finding catalogues and registry projection are unchanged
-since `@2`.
+`@3` to `@6` added rules for the content of test pages, which this checker
+does not judge. In `@6`, when a stimulus step runs a test file, each Required
+observation item names one test case verbatim, as
+`` `file` › describe chain › title ``. An observation check judges those
+items: the RSR consumer kit's `.repo-standards-review/observations.py` reports
+`observation-test-missing`, `observation-not-verbatim` and
+`observation-not-passing`. An independent content review judges the other
+rules. `@5` also defines profile schema `rsr/wiki-profile@2`, which this
+checker implements. The checker's layouts, finding catalogues and registry
+projection are unchanged since `@2`.
 
 ### Wiki profiles
 
@@ -80,7 +85,7 @@ The checker accepts two profile schemas:
 - **`rsr/wiki-profile@2`**
   ([#348](https://github.com/VITechnologies/projectbuddy/issues/348)): the
   same, except that each scope has exactly one of `idPrefix` and
-  `idPrefixes`. The pinned standard `@5` defines it.
+  `idPrefixes`. The pinned standard `@6` defines it.
 
 No prefix appears twice in a profile, whether in one scope or in two. Prefixes
 only need to differ: `TEST` and `TEST-UNIT` can both appear, because an ID has

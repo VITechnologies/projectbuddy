@@ -1,7 +1,7 @@
 {
   "template": "https://github.com/svelderrainruiz/repo-standards-review-consumer-kit",
-  "commit": "f6eb814076ef9bbf649f2f72293781d3b4df264e",
-  "checkout": "v0.9.0",
+  "commit": "097a1a589fe803f5cfff7e2240541e5225a87230",
+  "checkout": "v0.10.0",
   "context": {
     "cookiecutter": {
       "repo_name": "projectbuddy",
@@ -12,16 +12,17 @@
       "script_dirs": "vm,docker,scripts,.github/scripts",
       "lf_paths": "Run-Pipeline.sh",
       "exempt_paths": "vm/windows-labview/unattended-template.xml",
-      "rsr_tag": "v0.9.0",
-      "rsr_commit": "8306ebc717e9aac033cfaef2b8bbe2d5374cdf41",
-      "workbench_image": "registry.gitlab.com/svelderrainruiz/repo-standards-review/assurance-workbench@sha256:22a05f23113b96e5239d5d9d9c7709a1536560d099ed778761d066fd86a63582",
+      "rsr_tag": "v0.10.0",
+      "rsr_commit": "2065a7de48bd7e510c1371c85c9b34eab2f55ba9",
+      "workbench_image": "registry.gitlab.com/svelderrainruiz/repo-standards-review/assurance-workbench@sha256:da37a471eea8257baebf16295d4a82e752a910ddacb8713ef96d3a521d06b793",
       "__kit_dir": "projectbuddy",
       "_copy_without_render": [
-        ".repo-standards-review/check_consumer.py"
+        ".repo-standards-review/check_consumer.py",
+        ".repo-standards-review/observations.py"
       ],
       "_gitattributes": ".gitattributes",
       "_template": "https://github.com/svelderrainruiz/repo-standards-review-consumer-kit",
-      "_commit": "f6eb814076ef9bbf649f2f72293781d3b4df264e"
+      "_commit": "097a1a589fe803f5cfff7e2240541e5225a87230"
     }
   },
   "directory": null
