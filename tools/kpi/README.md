@@ -28,7 +28,8 @@ out/projectbuddy-kpi report --port 55432 --password-file ...
   - over a window of an agent session, the quota fell by 305.1. Its calls'
     exact AIU summed to 305.1, and their nominal costs to 615.
 
-  USD = AIU × `usd_per_unit` (0.04 per quota unit). A usage record's `cost`
+  USD = AIU × `usd_per_unit`: 0.01, the gross price of a Copilot AI credit in
+  GitHub's billing usage report (#371). A usage record's `cost`
   (15 per claude-opus-5.5 call) is nominal and is kept as `nominal_units`.
 - **Operator:** active time is the union of all sessions' spans, where a gap
   over `idle_gap_minutes` (30) ends a span. It is priced at the T1 rate.

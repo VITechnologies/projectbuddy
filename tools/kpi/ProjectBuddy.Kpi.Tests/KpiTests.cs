@@ -76,9 +76,9 @@ public sealed class DatabaseTests : IDisposable
         var connection = server.NewDatabase();
         Assert.Contains("does not exist", Cli.Run(["migrate", .. connection]).Error);
         var first = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
+        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
         var again = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
+        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
         server.Execute(connection, "UPDATE public.kpi_schema_migrations SET sha256 = repeat('0', 64)");
         Assert.Contains("migration 0001_kpi_v1.sql changed after it was applied", Cli.Run(["migrate", .. connection]).Error);
     }
@@ -88,10 +88,10 @@ public sealed class DatabaseTests : IDisposable
     {
         var connection = server.NewDatabase();
         server.Execute([.. connection[..^1], "postgres"], $"CREATE DATABASE \"{connection[^1]}\"");
-        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 2 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
+        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 3 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
         var behind = server.Migrated();
         server.Execute(behind, "DELETE FROM public.kpi_schema_migrations");
-        Assert.Contains("has 0 of 2 migrations", Cli.Run(["report", .. behind]).Error);
+        Assert.Contains("has 0 of 3 migrations", Cli.Run(["report", .. behind]).Error);
     }
 
     [Fact]
@@ -324,13 +324,13 @@ public sealed class ReportTests : IDisposable
         Cli.Json(["operator", "--tier", "T4", "--minutes", "30", "--activity", "technician", .. connection]);
 
         var report = Cli.Json(["report", .. connection]);
-        Assert.Equal((2, 3, 33m, 1.32m), ((int)report["sessions"]!, (int)report["ai"]!["calls"]!, (decimal)report["ai"]!["aiu"]!, (decimal)report["ai"]!["usd"]!));
+        Assert.Equal((2, 3, 33m, 0.33m), ((int)report["sessions"]!, (int)report["ai"]!["calls"]!, (decimal)report["ai"]!["aiu"]!, (decimal)report["ai"]!["usd"]!));
         Assert.Equal((3, 33m, 33m), ((int)report["ai"]!["measuredCalls"]!, (decimal)report["ai"]!["nominalUnits"]!, (decimal)report["ai"]!["measuredAiu"]!));
         // Active time is the union of A (1 to 26 minutes) and B (1 to 8 minutes): 25 minutes at T1 (62.50 USD), plus 30
         // minutes at T4 (22.50 USD).
         Assert.Equal((0.42m, 0.5m, 85m, 1, 10.0m), ((decimal)report["operator"]!["activeHours"]!, (decimal)report["operator"]!["entryHours"]!,
             (decimal)report["operator"]!["usd"]!, (int)report["operator"]!["prompts"]!, (decimal)report["operator"]!["promptMinutesCapped"]!));
-        Assert.Equal(86.32m, (decimal)report["totalUsd"]!);
+        Assert.Equal(85.33m, (decimal)report["totalUsd"]!);
         Assert.Equal((30m, 3m), ((decimal)report["aiuByInitiator"]!["agent"]!, (decimal)report["aiuByInitiator"]!["sub-agent"]!));
         Assert.Equal(33m, (decimal)report["aiuByModel"]!["claude-opus-5.5"]!);
         Assert.Equal((15m, 15m, 3m), ((decimal)report["aiuByCategory"]!["explore"]!, (decimal)report["aiuByCategory"]!["edit"]!, (decimal)report["aiuByCategory"]!["run"]!));
@@ -341,12 +341,12 @@ public sealed class ReportTests : IDisposable
         Assert.Equal(2, (int)report["acceptedChanges"]!["count"]!);
         var recent = report["recentChanges"]!.AsArray();
         Assert.Equal(["o/r#2", "o/r#1"], recent.Select(change => (string)change!["change"]!));
-        Assert.Equal((1, 3m, 0.12m, 0.05m, 7.62m), ((int)recent[0]!["calls"]!, (decimal)recent[0]!["aiu"]!, (decimal)recent[0]!["aiUsd"]!,
+        Assert.Equal((1, 3m, 0.03m, 0.05m, 7.53m), ((int)recent[0]!["calls"]!, (decimal)recent[0]!["aiu"]!, (decimal)recent[0]!["aiUsd"]!,
             (decimal)recent[0]!["operatorHours"]!, (decimal)recent[0]!["totalUsd"]!));
-        Assert.Equal((2, 30m, 1.2m), ((int)recent[1]!["calls"]!, (decimal)recent[1]!["aiu"]!, (decimal)recent[1]!["aiUsd"]!));
+        Assert.Equal((2, 30m, 0.3m), ((int)recent[1]!["calls"]!, (decimal)recent[1]!["aiu"]!, (decimal)recent[1]!["aiUsd"]!));
 
-        // Items: o/r#1 costs 1.20 USD for 2 requirements; its rework is the call after its first review (15 AIU).
-        Assert.Equal((0.6m, 0.5m, 15m), ((decimal)report["costPerRequirementUsd"]!, (decimal)report["firstPassYield"]!, (decimal)report["reworkAiu"]!));
+        // Items: o/r#1 costs 0.30 USD for 2 requirements; its rework is the call after its first review (15 AIU).
+        Assert.Equal((0.15m, 0.5m, 15m), ((decimal)report["costPerRequirementUsd"]!, (decimal)report["firstPassYield"]!, (decimal)report["reworkAiu"]!));
         Assert.Equal((1, 0.5m), ((int)report["specGaps"]!["count"]!, (decimal)report["specGaps"]!["perAcceptedChange"]!));
     }
 }
