@@ -6,15 +6,28 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.9.0 sha=8306ebc717e9aac033cfaef2b8bbe2d5374cdf41 -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.10.0 sha=2065a7de48bd7e510c1371c85c9b34eab2f55ba9 -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.9.0` |
-| Version (commit SHA) | `8306ebc717e9aac033cfaef2b8bbe2d5374cdf41` |
-| Assessed | 2026-11-17 |
+| Version (tag) | `v0.10.0` |
+| Version (commit SHA) | `2065a7de48bd7e510c1371c85c9b34eab2f55ba9` |
+| Assessed | 2026-11-18 |
 | Profile | `release-gate` |
+
+`v0.10.0` adds `rsr/ecosystem-wiki-standard@6` (#364). When a stimulus step
+runs a test file, each Required observation item names one test case
+verbatim, as `` `file` › describe chain › title ``. A new observation check,
+outside conformance like the content review, judges those items: the
+consumer kit's `.repo-standards-review/observations.py` reports
+`observation-test-missing`, `observation-not-verbatim` and
+`observation-not-passing`. `projectbuddy-wiki` pins `@6`. Its layouts and
+finding catalogues are those of `@2`, and this repository's wiki still
+conforms with zero findings. Re-certification against `v0.10.0` on
+2026-11-18 ran the steps of `.github/workflows/standards-assurance-scan.yml`
+locally against the pinned commit. It found no regression: the 5 required
+gates `PASS` at High confidence (99-100%), and DoD stays the optional `FAIL`.
 
 `v0.9.0` adds `rsr/ecosystem-wiki-standard@5` (#348). It defines profile
 schema `rsr/wiki-profile@2`, in which a scope can declare several ID prefixes,
@@ -199,7 +212,7 @@ maturity), and tag the wiki repository at each release boundary going
 forward (`v0.3.31` is the first tagged wiki revision). See `v0.3.31`'s
 `CHANGELOG.md` entry for the full, per-issue resolution detail.
 
-## Current gate status (as of the stamped `v0.9.0`)
+## Current gate status (as of the stamped `v0.10.0`)
 
 All 5 required gates now `PASS` at `High` confidence (99-100%), verified
 via real CI (`.github/workflows/standards-assurance-scan.yml`), not just

@@ -61,6 +61,15 @@ release's notes for the exact pinned commit.
     question reports `identity-present` only when the 0.3 identity is
     installed. Rebuild the identity on the peer before deploying probes or
     diagnose from this release.
+- The RSR pins move to v0.10.0 (#364): the consumer kit, the standards scan,
+  and projectbuddy-wiki's standard pin, which is now
+  `rsr/ecosystem-wiki-standard@6`. In `@6`, when a stimulus step runs a test
+  file, each Required observation item names one test case verbatim, as
+  `` `file` › describe chain › title ``. A new observation check judges those
+  items, with the consumer kit's newly vendored
+  `.repo-standards-review/observations.py`. Conformance is unchanged.
+  Re-certification at v0.10.0 found no regression: the 5 required gates
+  `PASS`.
 
 ## v0.5.0
 
