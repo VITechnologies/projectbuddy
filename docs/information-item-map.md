@@ -55,12 +55,29 @@ requirement (`VITechnologies/projectbuddy#11`).
   closed if any page content would be left out; an unsplit wiki assembles
   byte-for-byte unchanged. The System Specification is staged as
   `docs/requirements/syrs.md`.
+- Each ID page holds one `## <Column>` section per table column: one blank
+  line, the section text, then a blank line. The text may span several
+  lines, including blank lines, such as a test's numbered stimulus steps
+  (#366). The assembler joins the lines with `<br>`, so each table row stays
+  on one line and splitting a cell at `<br>` gives the section text back. It
+  refuses a section that starts or ends with whitespace, contains a `## `
+  heading line or a literal `<br>` in any letter case, or has an unescaped
+  `|` or a code fence line (```` ``` ```` or `~~~`) on any line. A table
+  cell cannot hold a fenced block, and on the page a fence would hide its
+  lines from the `--strict` checks.
 - The scan runs the assembler with `--strict --max-page-bytes 16384`, so it
   enforces the wiki `Home` page's link conventions: unpiped `[[Page-Name]]`
   links with no `|` alias and no `#heading` anchor, every link resolving to
   a wiki page, every ID mention linked unless it is in code formatting, and
   pages capped at 16 KiB (16,384 bytes). A violation fails the scan before
-  anything is staged.
+  anything is staged. One kind of line is exempt from the ID-mention rule:
+  a test-case item in a `TEST-###` page's `Required observation` section.
+  This is a list item that starts with a backtick-quoted path and ` › `,
+  such as `` - `tests/test_x.py` › test_rule[REQ-102] ``. The text after
+  ` › ` is the test runner's verbatim case name, which cannot be edited. The
+  lead-in sentence, every other line and every other section are still
+  checked, so the same prefix cannot hide a trace claim, for example in a
+  `TestID` cell.
 - Whenever assembly succeeds, even if a gate then fails, the scan run
   publishes the four files it staged as a generated, non-authoritative view
   for whole-table review: the job summary shows each file's SHA-256 and the
