@@ -64,6 +64,10 @@ command -v setfacl >/dev/null || apt-get install -y -qq acl
 # Data1 is drwxrws--- ollama:sergio; postgres needs traverse (x) only, not read or list.
 setfacl -m u:postgres:--x "$MOUNT"
 
+if pg_lsclusters -h | awk -v c="$CLUSTER" '$1==16 && $2==c {f=1} END{exit !f}' && [ ! -s "$DATADIR/PG_VERSION" ]; then
+  log "dropping the half-built cluster $VERSION/$CLUSTER from a failed earlier run"
+  pg_dropcluster "$VERSION" "$CLUSTER"
+fi
 if ! pg_lsclusters -h | awk -v c="$CLUSTER" '$1==16 && $2==c {f=1} END{exit !f}'; then
   log "creating cluster $VERSION/$CLUSTER at $DATADIR on port $STAGING_PORT"
   install -d -o postgres -g postgres -m 0700 "$MOUNT/postgresql" "$MOUNT/postgresql/16"
@@ -91,8 +95,9 @@ pg_isready -h 127.0.0.1 -p "$STAGING_PORT" >/dev/null || { echo "cluster did not
 
 # The password travels over stdin as a quoted literal; it is never in argv or the log.
 log "setting the postgres role password from the existing password file"
-{ printf "ALTER ROLE postgres PASSWORD '"; tr -d '\r\n' < "$PASSWORD_FILE" | sed "s/'/''/g"; printf "';\n"; } \
-  | runuser -u postgres -- psql -X -q -p "$STAGING_PORT" -v ON_ERROR_STOP=1 -d postgres >/dev/null
+{ printf "SET log_min_error_statement = panic; SET log_statement = 'none';\n"; printf "ALTER ROLE postgres PASSWORD '"; tr -d '\r\n' < "$PASSWORD_FILE" | sed "s/'/''/g"; printf "';\n"; } \
+  | runuser -u postgres -- psql -X -q -p "$STAGING_PORT" -v ON_ERROR_STOP=1 -d postgres >/dev/null 2>&1 \
+  || { echo "setting the postgres password failed (details suppressed so the secret is not shown)" >&2; exit 1; }
 
 log "done: PostgreSQL $(runuser -u postgres -- psql -X -Atq -p "$STAGING_PORT" -d postgres -c 'show server_version') on 127.0.0.1:$STAGING_PORT, data in $DATADIR"
 pg_lsclusters
