@@ -29,17 +29,26 @@ set_port() {
 # Refuse unless the source was not written to since the last verified restore, so no write is lost silently.
 guard_no_writes_since_restore() {
   [ -r "$STATE_FILE" ] || { echo "no restore state at $STATE_FILE: run restore-from-container.sh --wipe-target first" >&2; return 1; }
-  local epoch now age expected actual dbs
+  local epoch now age expected actual db
   epoch="$(sed -n 's/^epoch=//p' "$STATE_FILE")"
+  [[ "$epoch" =~ ^[1-9][0-9]*$ ]] || { echo "restore state has no valid epoch: re-run restore-from-container.sh --wipe-target" >&2; return 1; }
   now="$(date +%s)"
   age=$((now - epoch))
-  [ "$age" -le "$MAX_AGE_SECONDS" ] || { echo "restore state is ${age}s old (max $MAX_AGE_SECONDS): re-run restore-from-container.sh --wipe-target" >&2; return 1; }
-  expected="$(grep '|' "$STATE_FILE" | sort)"
-  dbs="$(printf '%s\n' "$expected" | cut -d'|' -f1 | paste -sd, -)"
+  { [ "$age" -ge 0 ] && [ "$age" -le "$MAX_AGE_SECONDS" ]; } || { echo "restore state is ${age}s old (allowed 0..$MAX_AGE_SECONDS): re-run restore-from-container.sh --wipe-target" >&2; return 1; }
+  expected="$(grep -v '^epoch=' "$STATE_FILE" | LC_ALL=C sort)" || true
+  if [ -z "$expected" ] || printf '%s\n' "$expected" | grep -qvE '^[a-z0-9_]+\|[0-9]+$'; then
+    echo "restore state has no (or malformed) database counters: re-run restore-from-container.sh --wipe-target" >&2; return 1
+  fi
+  for db in registry_local kpi_local farm_local; do
+    printf '%s\n' "$expected" | grep -q "^$db|" || { echo "restore state does not list $db: re-run restore-from-container.sh --wipe-target" >&2; return 1; }
+  done
+  # Every non-system database the container has now, with its counter, must equal the verified copy's list exactly.
   actual="$(PGPASSWORD="$(tr -d '\r\n' < "$PASSWORD_FILE")" "$PSQL" -X -Atq -h 127.0.0.1 -p "$LIVE" -U postgres -d postgres -v ON_ERROR_STOP=1 \
-    -c "select datname||'|'||(tup_inserted+tup_updated+tup_deleted) from pg_stat_database where datname = any(string_to_array('$dbs', ',')) order by datname" | sort)"
+    -c "select d.datname||'|'||coalesce(s.tup_inserted+s.tup_updated+s.tup_deleted, -1) from pg_database d left join pg_stat_database s using (datname) where not d.datistemplate and d.datname <> 'postgres'")" \
+    || { echo "could not read the container's write counters; nothing changed" >&2; return 1; }
+  actual="$(printf '%s\n' "$actual" | LC_ALL=C sort)"
   if [ "$expected" != "$actual" ]; then
-    echo "the container was written to after the verified restore; nothing changed. Re-run restore-from-container.sh --wipe-target, then cutover." >&2
+    echo "the container was written to (or its databases changed) after the verified restore; nothing changed. Re-run restore-from-container.sh --wipe-target, then cutover." >&2
     return 1
   fi
 }

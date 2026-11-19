@@ -41,6 +41,7 @@ counters() { src -d postgres -c "select datname||'|'||(tup_inserted+tup_updated+
 # Taken before the first dump: a write after this point (even during the verification) makes cutover.sh refuse.
 sleep 2   # let the statistics collector flush writes that just happened
 PRE_COUNTERS="$(counters)"
+[ "$(printf '%s\n' "$PRE_COUNTERS" | grep -c '|')" = "${#DBS[@]}" ] || { echo "could not read write counters for every database" >&2; exit 1; }
 
 if [ "$VERIFY_ONLY" = 0 ] && [ "$WIPE" = 1 ]; then
   for d in "${DBS[@]}"; do tgt -d postgres -c "drop database if exists \"$d\" with (force)"; done
