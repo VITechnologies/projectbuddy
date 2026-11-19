@@ -7,6 +7,8 @@ item=$2
 state="$HOME/.copilot/session-state"
 model=claude-opus-5.5
 expected=$(cat "$ws/task.sha256")
+actual=$(sha256sum "$ws/TASK.md" | cut -d" " -f1)
+[ "$actual" = "$expected" ] || { echo "TASK.md does not match task.sha256" >&2; exit 2; }
 mkdir -p "$ws/tmp"
 ls "$state" | sort > "$ws/sessions-before.txt"
 start=$(date -u +%FT%TZ)

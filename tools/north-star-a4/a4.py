@@ -174,7 +174,7 @@ def cmd_workspace(a):
     (out / "PAGES.md").write_text("\n".join(f"- {p}" for p in pages) + "\n")
     task = TASK.format(commit=MEMBER_COMMIT, first=pages[0])
     (out / "TASK.md").write_text(task)
-    (out / "task.sha256").write_text(hashlib.sha256(TASK.encode()).hexdigest() + "\n")
+    (out / "task.sha256").write_text(hashlib.sha256(task.encode()).hexdigest() + "\n")
     print(json.dumps({"workspace": str(out), "arm": arm, "kit": tag, "pages": pages}))
 
 
