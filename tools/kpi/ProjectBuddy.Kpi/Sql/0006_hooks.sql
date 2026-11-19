@@ -114,8 +114,13 @@ $$ SELECT work_ref FROM hooks.sessions WHERE session_id = sid $$;
 
 DO $$
 BEGIN
+    -- Roles are cluster-wide and advisory locks are per database, so two databases migrated at once can both try to create it.
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'hooks_writer') THEN
-        CREATE ROLE hooks_writer NOLOGIN;
+        BEGIN
+            CREATE ROLE hooks_writer NOLOGIN;
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN
+            NULL;
+        END;
     END IF;
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO hooks_writer', current_database());
 END $$;
