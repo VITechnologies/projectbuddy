@@ -4,7 +4,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="$HERE/../scripts"
-SQL="$HERE/../../kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql"
+SQL="$HERE/../../kpi/ProjectBuddy.Kpi/Sql"
 : "${PBK_TEST_PASSWORD_FILE:?set PBK_TEST_PASSWORD_FILE (and PBK_TEST_HOST/PORT/USER)}"
 export PGHOST="${PBK_TEST_HOST:-127.0.0.1}" PGPORT="${PBK_TEST_PORT:-5432}" PGUSER="${PBK_TEST_USER:-postgres}"
 PGPASSWORD="$(tr -d '\r\n' < "$PBK_TEST_PASSWORD_FILE")"; export PGPASSWORD
@@ -21,7 +21,7 @@ expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (expected
 q() { psql -X -At -d "$DB" -c "$1"; }
 
 psql -X -q -d postgres -c "create database \"$DB\"" || exit 1
-psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$SQL" || exit 1
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$SQL/0006_hooks.sql" -f "$SQL/0007_hooks_owner_role.sql" || exit 1
 printf '%s\n' "role-pw-$SUFFIX" > "$T/pw"
 psql -X -q -d postgres -c "create role \"$ROLE\" login password 'role-pw-$SUFFIX' in role hooks_writer" || exit 1
 
