@@ -17,16 +17,23 @@ wait_ready() { for _ in $(seq 1 30); do pg_isready -q -h 127.0.0.1 -p "$1" && re
 set_port() {
   pg_conftool "$VERSION" "$CLUSTER" set port "$1"
   systemctl restart "$UNIT"
-  wait_ready "$1" || { journalctl -u "$UNIT" -n 20 --no-pager >&2; exit 1; }
+  wait_ready "$1" || { journalctl -u "$UNIT" -n 20 --no-pager >&2; return 1; }
 }
 
 case "${1:-}" in
   cutover)
+    if pg_lsclusters -h | awk -v c="$CLUSTER" -v p="$LIVE" '$1==16 && $2==c && $3==p && $4=="online" {f=1} END{exit !f}'; then
+      log "already cut over: native PostgreSQL is online on $LIVE"; exit 0
+    fi
+    # Any failure from here on restores the container, so the outage never outlives the script.
+    undo() { log "cutover failed; restoring the previous state"; pg_conftool "$VERSION" "$CLUSTER" set port "$STAGING" || true; systemctl restart "$UNIT" || true; docker update --restart=unless-stopped "$CONTAINER" >/dev/null || true; docker start "$CONTAINER" >/dev/null || true; }
+    trap undo ERR
     docker update --restart=no "$CONTAINER" >/dev/null   # a reboot must not bring the container back onto 55432
-    docker stop "$CONTAINER" >/dev/null || true
+    docker stop "$CONTAINER" >/dev/null
     for _ in $(seq 1 15); do ss -ltn "sport = :$LIVE" | grep -q LISTEN || break; sleep 1; done
-    ss -ltn "sport = :$LIVE" | grep -q LISTEN && { echo "$LIVE is still in use" >&2; docker update --restart=unless-stopped "$CONTAINER" >/dev/null; docker start "$CONTAINER" >/dev/null; exit 1; }
+    if ss -ltn "sport = :$LIVE" | grep -q LISTEN; then echo "$LIVE is still in use" >&2; false; fi
     set_port "$LIVE"
+    trap - ERR
     log "native PostgreSQL now on 127.0.0.1:$LIVE; container stopped, kept with its volume"
     ;;
   rollback)
