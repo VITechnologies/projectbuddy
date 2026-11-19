@@ -53,6 +53,19 @@ out/projectbuddy-kpi report --port 55432 --password-file ...
   `farm-reference` from a paid run of the same workload that `kpi_v1`
   measured: its measured AIU divided by its jobs. A workload without a
   reference has no estimate and is listed in `workloadsWithoutReference`.
+  - **Reference costs in use** (paid runs `kpi_v1` measured in the PB#358 era;
+    each is a conservative floor, so the estimate understates what was avoided):
+    - `check` 1.27 AIU per claim: the strong reviewer's blind review cost
+      8.85 AIU per page (274.2 AIU for 31 pages, PB#354), and a page holds
+      about 6.95 claims (278 claims on 40 pages, PB#358). The one
+      claim-level paid run cost 3.29 AIU per judgement (272.7 AIU for 83),
+      but that was inflated by agentic chunked reading, so it is not used.
+    - `decompose` and `draft-rewrite` 0.16 AIU per job: no isolated paid run
+      exists. They are single-shot prompts of a few thousand tokens, so the
+      reference is the cheapest paid tier `kpi_v1` measured on such calls
+      (gpt-5.6-luna, 0.11 to 0.17 AIU per call at 6k to 21k tokens in).
+    - Replace a value with `farm-reference` when a paid single-shot run of
+      the workload is measured.
 
 The settings and tiers are rows in `kpi_v1.settings` and `kpi_v1.tiers`.
 
