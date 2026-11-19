@@ -1,0 +1,194 @@
+{
+ "P013": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "partial",
+   "reason": "uncertainty and sample count are reported, but a p95 bootstrap CI on final-token latency with multiple samples is not stated"
+  }
+ ],
+ "P014": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  }
+ ],
+ "P015": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  }
+ ],
+ "P016": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  }
+ ],
+ "P017": [
+  {
+   "ref": "R1",
+   "label": "partial",
+   "reason": "host-key enrollment and unit/runner scans are conveyed; boot ID read before and after and no session files left are not stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  }
+ ],
+ "P018": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "statement and named test convey the behaviour"
+  }
+ ]
+}

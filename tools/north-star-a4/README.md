@@ -17,3 +17,4 @@ Issue: [#379](https://github.com/VITechnologies/projectbuddy/issues/379).
 The workspace needs a clone of the member at commit `6a9ad5cc6bf9751ea3d80467840ab6dd7e48e3f2`,
 the projectbuddy wiki at `a1e6f4c`, the RSR checkout with tag `v0.9.0` (standard @5, the A4-r2 control) and a working tree at
 `v0.12.0` (the treatment), and the pytest-junit report of the 21 test files named by the eligible pages.
+- [`results/`](results/): blind packets and key, every reviewer label file, final labels and `analysis.json` of the registered run.

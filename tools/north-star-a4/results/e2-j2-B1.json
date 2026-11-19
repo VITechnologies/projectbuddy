@@ -1,0 +1,164 @@
+{
+ "P001": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "plan names only; canary absent"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "payload exact declared order; empty gives empty"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "missing/empty/NUL messages without value"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "stdin only, mode 0600 root file"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "empty file when none declared"
+  }
+ ],
+ "P002": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "allow-list stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "fail closed left in place"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "name target rejected"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "receipt without absence fails"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "receipt binds UUID, states, absence"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "serialized per UUID"
+  }
+ ],
+ "P003": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "deploy refused, no POST, action-class check"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "content rules listed"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "precondition rules listed"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "target check fails"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "digest-mismatch verdict not ok"
+  }
+ ],
+ "P004": [
+  {
+   "ref": "R1",
+   "label": "partial",
+   "reason": "test name says four decisions; only rejected/expired enumerated"
+  },
+  {
+   "ref": "R2",
+   "label": "partial",
+   "reason": "name says decided without verdict; cancel-after-expiry not stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "comment kept, round-trips"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "bot-only, filtered by run"
+  }
+ ],
+ "P005": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "domain separator, no raw id"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "ledger ignores HOME"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "lost response burns run ID without retry"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "refuses changed args and expired permit"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "recheck after marker without calling provisioner"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "ambiguous/mismatched inventory refused"
+  }
+ ],
+ "P006": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "noop run once, probe visibility, no write"
+  },
+  {
+   "ref": "R2",
+   "label": "absent",
+   "reason": "every_refusal test not listed"
+  },
+  {
+   "ref": "R3",
+   "label": "partial",
+   "reason": "fails closed named; KeyError/noop env not stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "missing env/unknown requester not ready"
+  }
+ ]
+}

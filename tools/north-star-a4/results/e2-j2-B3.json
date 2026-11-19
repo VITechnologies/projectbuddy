@@ -1,0 +1,194 @@
+{
+ "P013": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "partial",
+   "reason": "Only generic uncertainty named; single-sample test name covers None, not p95 CI with multiple samples"
+  }
+ ],
+ "P014": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  }
+ ],
+ "P015": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  }
+ ],
+ "P016": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  }
+ ],
+ "P017": [
+  {
+   "ref": "R1",
+   "label": "partial",
+   "reason": "Host-key test named; boot ID before/after, unit queries and no session files not stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  }
+ ],
+ "P018": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Stated or asserted by named test in the observation"
+  }
+ ]
+}

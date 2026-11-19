@@ -201,7 +201,7 @@ def cmd_packets(a):
         picked = items if len(items) <= ITEM_CAP else [items[i] for i in sorted(srng.sample(range(len(items)), ITEM_CAP))]
         (out / f"{pid}.sample.json").write_text(json.dumps({"items_total": len(items), "sampled_items": picked}, indent=1))
     (out / "KEY.json").write_text(json.dumps(key, indent=1, sort_keys=True))
-    print(f"{len(items)} packets in {out}")
+    print(f"{len(key)} packets in {out}")
 
 
 def signflip_p(d, delta=0.0):

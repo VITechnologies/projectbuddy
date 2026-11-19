@@ -1,0 +1,17 @@
+{
+ "items_total": 22,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_policy_canonicalizes_valid_uppercase_model_digest",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_provision_dispatch_refuses_changed_arguments_and_expired_permits",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_host_provisioning_lock_serializes_inventory_and_creation",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_uuid_binding_refuses_ambiguous_or_mismatched_host_inventory[after0-00000000-0000-4000-8000-000000000002]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_uuid_binding_refuses_ambiguous_or_mismatched_host_inventory[after1-00000000-0000-4000-8000-000000000002]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_uuid_binding_refuses_ambiguous_or_mismatched_host_inventory[after2-00000000-0000-4000-8000-000000000003]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_uuid_binding_refuses_ambiguous_or_mismatched_host_inventory[after3-00000000-0000-4000-8000-000000000002]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_enforces_exact_call_order_and_teardown_once",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_rejects_mcp_completion_after_grant_expiry",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_abort_with_inflight_call_blocks_teardown_until_call_settles",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_detects_host_identity_change_during_inflight_call",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_plan_only_tool_result_is_marked_inert_and_failure_does_not_retry"
+ ]
+}

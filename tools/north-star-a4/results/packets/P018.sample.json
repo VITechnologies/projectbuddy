@@ -1,0 +1,17 @@
+{
+ "items_total": 21,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_rejects_mcp_completion_after_grant_expiry",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_denies_changed_arguments_and_wrong_vm_then_only_tears_down_bound_vm",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_plan_only_tool_result_is_marked_inert_and_failure_does_not_retry",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_multiserver_grant_binds_exact_server_identity_through_dispatch",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_live_capture_choice_consumes_the_existing_sealed_grant_exactly_once[approve]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[stopped]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[frame]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[action]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_error_flag_cannot_be_overridden_by_success_shaped_acknowledgement",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_live_dispatcher_requires_canonical_capture_uuid",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_live_dispatcher_refuses_contract_mutation_after_sealing",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py`"
+ ]
+}

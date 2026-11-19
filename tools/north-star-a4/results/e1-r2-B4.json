@@ -1,0 +1,1439 @@
+{
+ "packet": [
+  {
+   "id": "P019-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P019-42",
+   "label": "unsupported",
+   "reason": "Record test asserts decided_at and reviewer comment, so some record fields are verified."
+  },
+  {
+   "id": "P019-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-24",
+   "label": "unsupported",
+   "reason": "Parametrized cases cover 8 distinct built-in patterns (10 cases), not ten patterns, and ids are not pattern names."
+  },
+  {
+   "id": "P020-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-35",
+   "label": "unsupported",
+   "reason": "Step 3 grep does not show the environment line; no test asserts it."
+  },
+  {
+   "id": "P020-36",
+   "label": "unsupported",
+   "reason": "Tests show exit 1 only for leak and registry failures, not any failed check."
+  },
+  {
+   "id": "P020-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P020-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-44",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-45",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-46",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-47",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-48",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-49",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-50",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-51",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-52",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-53",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-54",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-55",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-56",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-57",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-58",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-59",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-60",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P021-61",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-05",
+   "label": "unsupported",
+   "reason": "Test only compares visible_view equality; it does not assert which fields it covers."
+  },
+  {
+   "id": "P022-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-44",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P022-45",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-I12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-07",
+   "label": "unsupported",
+   "reason": "Exit codes tested are only 21 and 22 (and 0); none for missing environment or unknown requester."
+  },
+  {
+   "id": "P023-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-09",
+   "label": "unsupported",
+   "reason": "Test asserts only detail text and requester-not-reviewer failure; unprotected-environment preflight failure not asserted."
+  },
+  {
+   "id": "P023-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P023-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-12",
+   "label": "unsupported",
+   "reason": "No assertion on client calls after the lba-identity decision is refused."
+  },
+  {
+   "id": "P024-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-44",
+   "label": "unsupported",
+   "reason": "Only the first decision's executesMcpResultCommands is asserted in the call-order test."
+  },
+  {
+   "id": "P024-45",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-46",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-47",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-48",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-49",
+   "label": "unsupported",
+   "reason": "Repeated begin_call refusal is not asserted after client error, router expiry or wrong-server call."
+  },
+  {
+   "id": "P024-50",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-51",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-52",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-53",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-54",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-55",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-56",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-57",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-58",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-59",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-60",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-61",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-62",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-63",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-64",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-65",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-66",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-67",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P024-68",
+   "label": "supported",
+   "reason": ""
+  }
+ ]
+}

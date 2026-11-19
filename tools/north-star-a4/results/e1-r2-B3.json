@@ -1,0 +1,1004 @@
+{
+ "packet": [
+  {
+   "id": "P013-i01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-i10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P013-o09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P014-o44",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P015-o29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o44",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o45",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o46",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o47",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o48",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o49",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o50",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o51",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o52",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o53",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o54",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o55",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o56",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o57",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o58",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o59",
+   "label": "unsupported",
+   "reason": "The plan-only test re-dispatches the same call after a failure, so a repeated call is dispatched."
+  },
+  {
+   "id": "P016-o60",
+   "label": "unsupported",
+   "reason": "Choice-group cases on TEST-125 cover duplicates and unapproved tools but no out-of-order call."
+  },
+  {
+   "id": "P016-o61",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o62",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o63",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o64",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o65",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o66",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o67",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o68",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P016-o69",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-i12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-o03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P017-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-i12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o03",
+   "label": "unsupported",
+   "reason": "The listed candidate-rehash and changed-argument cases do assert arguments bound to trusted policy."
+  },
+  {
+   "id": "P018-o04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P018-o11",
+   "label": "supported",
+   "reason": ""
+  }
+ ]
+}

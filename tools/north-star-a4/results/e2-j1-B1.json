@@ -1,0 +1,164 @@
+{
+ "P001": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Obs 3: plan carries names only; canary absent; secrets lists limited to three steps"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Obs 4: payload exactly declared names in order, empty when none"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Obs 2: missing/empty/NUL raise messages without canary"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Obs 4: stdin only, 0600 root install command, canary in no argv"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Obs 4: no declared name gives empty payload and empty file"
+  }
+ ],
+ "P002": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "power off only from running/paused, destroy only poweroff/aborted"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "snapshotting/unknown states fail closed, left in place"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "target by name rejected"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "receipt claiming removal without absence fails verification"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "receipt binds UUID, states, absence"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "two requests for one UUID run one at a time"
+  }
+ ],
+ "P003": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "unknown class: exit 2, no POST, action-class check fails"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "content rules refuse missing/abbreviated/bad digest"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "precondition missing/malformed refused"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "target check fails for out-of-pattern target"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "digest-mismatch verdict not ok"
+  }
+ ],
+ "P004": [
+  {
+   "ref": "R1",
+   "label": "partial",
+   "reason": "test named 'verdicts map to the four decisions' but the four are not enumerated; rejected and expired cases noted"
+  },
+  {
+   "ref": "R2",
+   "label": "partial",
+   "reason": "test name says runs without a verdict are still decided; cancel-after-expiry -> expired not stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "rejection record keeps comment; round-trips through the comment"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "only record author's (Actions bot) comment read, filtered by run"
+  }
+ ],
+ "P005": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "domain separator and no raw machine-id stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "ledger location ignores HOME"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "lost response burns run ID without retry"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "changed args and expired permit refused before provisioner call"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "expiry after durable marker prevents provisioner call"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "ambiguous or mismatched inventory refused"
+  }
+ ],
+ "P006": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "noop executor runs once, no write, reports probe visibility"
+  },
+  {
+   "ref": "R2",
+   "label": "absent",
+   "reason": "no every-refusal test or refusal cases appear in observation"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "executor lookup fails closed named; KeyError/noop detail not given"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "missing environment and unknown requester not ready"
+  }
+ ]
+}

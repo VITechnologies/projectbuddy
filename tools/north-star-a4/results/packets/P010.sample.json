@@ -1,0 +1,17 @@
+{
+ "items_total": 23,
+ "sampled_items": [
+  "- `scripts/tests/test_lane_box.py` \u203a test_runner_and_labview_residue_fail_readiness[<lambda>-Actions runner configuration is present: /opt/runner]",
+  "- `scripts/tests/test_lane_box.py` \u203a test_unreadable_directory_fails_closed",
+  "- `scripts/tests/test_lane_box.py` \u203a test_readiness_command",
+  "- `scripts/tests/test_lane_box.py` \u203a test_readiness_problems_are_refused",
+  "- `scripts/tests/test_lane_box.py` \u203a test_readiness_receipt_checks_report_each_problem",
+  "- `scripts/tests/test_vagrant_clone.py` \u203a test_runner_units_fail_closed[results0-every runner unit query must have a result]",
+  "- `scripts/tests/test_vagrant_clone.py` \u203a test_runner_units_fail_closed[results2-systemctl list-unit-files failed with exit code 1]",
+  "- `scripts/tests/test_lane_channel.py` \u203a test_an_instance_with_a_runner_unit_stops_the_run",
+  "- `scripts/tests/test_lane_channel.py` \u203a test_a_runner_unit_query_that_fails_stops_the_run[results2]",
+  "- `scripts/tests/test_lane_plan.py` \u203a test_lane_commands_make_no_runner_registration_requests",
+  "- `scripts/tests/test_lane_plan.py` \u203a test_the_detector_catches_a_lane_that_requests_runner_tokens",
+  "- `scripts/tests/test_lane_plan.py` \u203a test_no_lane_source_names_a_runner_token_endpoint"
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "items_total": 21,
+ "sampled_items": [
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_offline_checks_pass_for_a_valid_request",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_offline_checks_report_each_policy_failure",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_offline_checks_refuse_expired_unknown_class_and_digest_only",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_online_checks_pass_and_list_staged_content",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_online_checks_are_skipped_when_offline_checks_failed",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_preflight_failures_are_annotated_and_leaks_withheld",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_invalid_request_is_scanned_before_its_problems_are_shown",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_leaks_in_any_published_field_block_the_request[rationale-see /home/alice/secret]",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_leaks_in_any_published_field_block_the_request[requester-internal-host7]",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_every_staged_file_is_leak_scanned_whatever_its_encoding_or_size[utf-16]",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_a_failed_blob_fetch_publishes_no_staged_path_or_preview",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_leaking_staged_content_withholds_the_whole_summary"
+ ]
+}

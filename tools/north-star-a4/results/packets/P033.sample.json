@@ -1,0 +1,17 @@
+{
+ "items_total": 38,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_invalid_lifecycle_never_contacts_the_daemon[totalSeconds-inf]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_invalid_lifecycle_never_contacts_the_daemon[requestSeconds-0]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_invalid_lifecycle_never_contacts_the_daemon[maxRequests-0]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_monotonic_deadline_stops_after_slow_preflight[10-1]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_cancelled_review_never_starts_a_request",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_http_request_cancellation_closes_the_active_operation",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_retry_is_bounded_and_uses_identical_approved_payload",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_transport_retries_never_exceed_approval[True]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_transport_retries_never_exceed_approval[False]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_unowned_unload_or_unbounded_residency_is_never_constructed[True]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_unsupported_execution_policy_prevents_inference[missing]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_unsupported_execution_policy_prevents_inference[negative]"
+ ]
+}

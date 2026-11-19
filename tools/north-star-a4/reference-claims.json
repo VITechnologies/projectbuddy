@@ -1,0 +1,584 @@
+{
+ "TEST-093": [
+  {
+   "claim": "The lane plan contains one probe step per declared tool, with the declared argument vector (e.g. node --version), running in the guest.",
+   "criterion": "a probe argument vector (for example `node --version`)",
+   "id": "R1",
+   "test": "scripts/tests/test_lane_plan.py \u203a test_the_steps_follow_the_run_sequence_and_carry_secret_names_only"
+  },
+  {
+   "claim": "The probe steps run before the candidate transfer and so before the workload.",
+   "criterion": "before the workload starts",
+   "id": "R2",
+   "test": "scripts/tests/test_lane_plan.py \u203a test_the_steps_follow_the_run_sequence_and_carry_secret_names_only"
+  },
+  {
+   "claim": "A probe runs the declared argument vector as the workload account and returns the observed version with the declared version.",
+   "criterion": "record the exact observed version",
+   "id": "R3",
+   "test": "scripts/tests/test_lane_placement.py \u203a test_a_probe_runs_as_the_workload_account_and_returns_its_result"
+  },
+  {
+   "claim": "A probe that prints a different version, output that does not match the extraction pattern, or exits non-zero stops the run.",
+   "criterion": "a mismatched or missing tool, probe output that does not match the extraction pattern, and a probe that exits non-zero each fail before the workload starts",
+   "id": "R4",
+   "test": "scripts/tests/test_lane_placement.py \u203a test_a_probe_that_does_not_print_the_declared_version_stops_the_run"
+  },
+  {
+   "claim": "A toolchain declaration that disagrees with the contract (a changed expected version, a missing tool, or an extra tool) is rejected when the plan is built.",
+   "criterion": "the contract lists, per tool, a name, a probe argument vector, an extraction pattern with one capture group, and the expected version string",
+   "id": "R5",
+   "test": "scripts/tests/test_lane_plan.py \u203a parametrized contract cases contract-version, contract-missing, contract-extra"
+  }
+ ],
+ "TEST-095": [
+  {
+   "claim": "The planned steps carry declared secret names only, never values, and the secret value does not appear in the plan or output.",
+   "criterion": "A plan or diagnostic contains names only, never values.",
+   "id": "R1",
+   "test": "test_lane_plan.py \u203a test_the_steps_follow_the_run_sequence_and_carry_secret_names_only"
+  },
+  {
+   "claim": "The secrets payload holds exactly the declared names and values in declaration order, and an empty declaration gives an empty payload.",
+   "criterion": "A lane guest shall receive only the secrets its declaration lists by name",
+   "id": "R2",
+   "test": "test_lane_placement.py \u203a test_the_secrets_payload_is_each_declared_name_and_value_in_order"
+  },
+  {
+   "claim": "A missing, empty or NUL-containing declared secret is rejected naming the secret, without its value, before anything is placed.",
+   "criterion": "A missing or empty declared value is rejected before VM mutation ... not represented as a successful empty forwarding. A plan or diagnostic contains names only, never values.",
+   "id": "R3",
+   "test": "test_lane_placement.py \u203a test_a_missing_empty_or_nul_secret_is_named_and_its_value_is_not"
+  },
+  {
+   "claim": "Secrets are placed on standard input only, as root's own mode-0600 file, never in a command word.",
+   "criterion": "A lane guest shall receive only the secrets its declaration lists by name ... A plan or diagnostic contains names only",
+   "id": "R4",
+   "test": "test_lane_placement.py \u203a test_place_secrets_sends_the_payload_on_standard_input_only"
+  },
+  {
+   "claim": "Placing secrets with none declared writes an empty file.",
+   "criterion": "including an empty list when no secret is declared",
+   "id": "R5",
+   "test": "test_lane_placement.py \u203a test_place_secrets_places_an_empty_file_when_no_secret_is_declared"
+  }
+ ],
+ "TEST-096": [
+  {
+   "claim": "A request naming an unknown action class is refused before anything is dispatched (no POST), and the offline check fails on the action class.",
+   "criterion": "Rejected before the gate, so no reviewer is asked: an unknown action class",
+   "id": "R1",
+   "test": "scripts/tests/test_approval_gate_cli.py \u203a test_submit_rejects_invalid_requests_before_anything_leaves; scripts/tests/test_approval_gate_checks.py \u203a test_offline_checks_refuse_expired_unknown_class_and_digest_only"
+  },
+  {
+   "claim": "A content binding that is not a valid full SHA-256 digest or commit, or that is missing, is rejected when the request is parsed.",
+   "criterion": "a branch, tag, or abbreviated SHA given as the content; a missing digest",
+   "id": "R2",
+   "test": "scripts/tests/test_approval_gate_model.py \u203a test_content_binding_rules"
+  },
+  {
+   "claim": "A missing or malformed precondition is rejected when the request is parsed.",
+   "criterion": "a missing digest, precondition, or rationale",
+   "id": "R3",
+   "test": "scripts/tests/test_approval_gate_model.py \u203a test_precondition_rules"
+  },
+  {
+   "claim": "A target outside the action class's declared target pattern fails the offline target check.",
+   "criterion": "a target outside the action class's declared target pattern",
+   "id": "R4",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_offline_checks_report_each_policy_failure"
+  },
+  {
+   "claim": "The executor stops on content digest mismatch, refusing with reason digest-mismatch before executing.",
+   "criterion": "The executor recomputes the content digest from the staged ref and stops on a mismatch.",
+   "id": "R5",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_every_refusal_stops_before_execution"
+  }
+ ],
+ "TEST-097": [
+  {
+   "claim": "A leak (secret, local path, or private identifier) in any published request field blocks the request.",
+   "criterion": "In a public repository the summary contains no secret, credential, or private consumer identifier, shown with leak-scan fixtures.",
+   "id": "R1",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_leaks_in_any_published_field_block_the_request"
+  },
+  {
+   "claim": "Leaking staged content withholds the whole summary, so no leaked path or request ID appears in it.",
+   "criterion": "the summary contains no secret, credential, or private consumer identifier",
+   "id": "R2",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_leaking_staged_content_withholds_the_whole_summary"
+  },
+  {
+   "claim": "The summary has rows and inspection links for each content and precondition shape (digest, compare, commit, blob).",
+   "criterion": "the content diff or its digest with an inspection link",
+   "id": "R3",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_summary_rows_cover_every_inspection_link"
+  },
+  {
+   "claim": "The offline preflight checks report each policy failure (target outside class, content kind, precondition kind, expiry, inputs mismatch) and refuse an unknown action class and an expired request.",
+   "criterion": "action-class policy checks run before the gate, and any failure ends the run before a reviewer is asked",
+   "id": "R4",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_offline_checks_report_each_policy_failure; test_offline_checks_refuse_expired_unknown_class_and_digest_only"
+  },
+  {
+   "claim": "Online preflight failures are each named, so a failed check ends the run before the gate.",
+   "criterion": "any failure ends the run before a reviewer is asked",
+   "id": "R5",
+   "test": "scripts/tests/test_approval_gate_checks.py \u203a test_online_failures_name_each_problem"
+  }
+ ],
+ "TEST-098": [
+  {
+   "claim": "Submission is withdrawn, and the run cancelled, when the requester could approve it.",
+   "criterion": "refuses to submit when its own authenticated identity is an eligible reviewer",
+   "id": "R1",
+   "test": "scripts/tests/test_approval_gate_cli.py \u203a test_submit_withdraws_when_the_requester_could_approve"
+  },
+  {
+   "claim": "Submission is refused when the environment lacks self-review prevention, or when the requester is an eligible reviewer.",
+   "criterion": "`required_reviewers` with `prevent_self_review: true` ... refuses to submit when ... an eligible reviewer",
+   "id": "R2",
+   "test": "scripts/tests/test_approval_gate_cli.py \u203a test_submit_refuses_unprotected_or_self_reviewable_classes"
+  },
+  {
+   "claim": "Readiness reports a fully protected class, with a read-only requester who is not a reviewer, as enforcing.",
+   "criterion": "reports the gate as enforcing only when the requester identity is not a reviewer and has no direct write permission",
+   "id": "R3",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_a_fully_protected_class_for_a_read_only_requester_is_enforcing"
+  },
+  {
+   "claim": "Readiness reports a class as advisory when the requester can push, unless a ruleset blocks it.",
+   "criterion": "has no direct write permission on any target ... and as advisory otherwise",
+   "id": "R4",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_a_requester_that_can_push_makes_the_class_advisory_unless_a_ruleset_blocks_it"
+  },
+  {
+   "claim": "Readiness reports a missing environment or an unknown requester as not ready, with a code for each.",
+   "criterion": "reports `required_reviewers` with `prevent_self_review: true` and `can_admins_bypass: false`",
+   "id": "R5",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_missing_environment_and_unknown_requester_are_not_ready"
+  },
+  {
+   "claim": "Readiness reports a class as not ready when administrator bypass is allowed or the requester is a reviewer.",
+   "criterion": "`can_admins_bypass: false` ... the requester identity is not a reviewer",
+   "id": "R6",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_missing_settings_make_the_class_not_ready"
+  }
+ ],
+ "TEST-100": [
+  {
+   "claim": "A valid approval is verified and the executor runs exactly once, with zero writes and the probe secret visible to it.",
+   "criterion": "stored only as a secret of the approval environment ... and used only by the executor",
+   "id": "R1",
+   "test": "test_approval_gate_checks.py \u203a test_a_valid_approval_verifies_and_the_noop_executor_runs_exactly_once"
+  },
+  {
+   "claim": "An unapproved, rejected, self-approved, expired, drifted, re-run or environment-mismatched request is refused before execution.",
+   "criterion": "An unapproved fixture run cannot read the environment secret.",
+   "id": "R2",
+   "test": "test_approval_gate_checks.py \u203a test_every_refusal_stops_before_execution"
+  },
+  {
+   "claim": "Executor lookup fails closed: an unregistered executor raises KeyError, and the default noop executor reports the approval-noop environment.",
+   "criterion": "one environment per action class, and used only by the executor",
+   "id": "R3",
+   "test": "test_approval_gate_checks.py \u203a test_executor_lookup_fails_closed"
+  },
+  {
+   "claim": "A missing environment or unknown requester makes the class not ready.",
+   "criterion": "stored only as a secret of the approval environment for that action class, with one environment per action class",
+   "id": "R4",
+   "test": "test_approval_gate_record.py \u203a test_missing_environment_and_unknown_requester_are_not_ready"
+  }
+ ],
+ "TEST-101": [
+  {
+   "claim": "Run outcomes map to the four decisions: approved/executed, rejected, expired, and failed.",
+   "criterion": "A rejected fixture returns `rejected`; An expired request is recorded as `expired`",
+   "id": "R1",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_verdicts_map_to_the_four_decisions"
+  },
+  {
+   "claim": "A run cancelled after the expiry time is recorded as expired, and a rejection is recorded as rejected even when the gated job did not run.",
+   "criterion": "An expired request is recorded as `expired`.",
+   "id": "R2",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_runs_without_a_verdict_are_still_decided"
+  },
+  {
+   "claim": "A rejection with a comment carries the reviewer's comment in the record, which round-trips through the tracking-issue comment.",
+   "criterion": "returns `rejected` and the comment to the requester",
+   "id": "R3",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_rejection_with_reason_round_trips_through_the_comment"
+  },
+  {
+   "claim": "The record is read only from comments by the Actions bot, filtered by run.",
+   "criterion": "Each record stays retrievable on the tracking issue",
+   "id": "R5",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_find_records_trusts_only_the_actions_bot_and_filters_by_run"
+  }
+ ],
+ "TEST-102": [
+  {
+   "claim": "Without configuration, the readiness check reports the class as not-ready and names each missing setting: admin bypass allowed, requester is a reviewer, reviewer membership unknown, requester is admin.",
+   "criterion": "the readiness check names each missing setting",
+   "id": "R1",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_missing_settings_make_the_class_not_ready"
+  },
+  {
+   "claim": "With no protected environment and an unknown requester, readiness is not-ready with findings environment-missing and requester-unknown.",
+   "criterion": "In a fresh public fork with no configuration, the readiness check names each missing setting",
+   "id": "R2",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_missing_environment_and_unknown_requester_are_not_ready"
+  },
+  {
+   "claim": "A private repository on a plan without required reviewers is reported as unsupported (plan-unsupported), and the readiness command exits 23.",
+   "criterion": "A repository whose plan lacks required reviewers is reported as unsupported.",
+   "id": "R3",
+   "test": "scripts/tests/test_approval_gate_record.py \u203a test_private_repositories_need_an_enterprise_plan; scripts/tests/test_approval_gate_cli.py \u203a test_readiness_unsupported_and_unknown_class"
+  },
+  {
+   "claim": "Every readiness finding code is documented with its fix in the procedure, so the setup procedure matches the code.",
+   "criterion": "After the documented setup",
+   "id": "R4",
+   "test": "scripts/tests/test_approval_gate_docs.py \u203a test_every_readiness_finding_is_documented_with_its_fix"
+  },
+  {
+   "claim": "The readiness command signals each unready state with a distinct exit code (0 enforcing, 21 writable requester, 22 unprotected environment).",
+   "criterion": "the readiness check names each missing setting",
+   "id": "R5",
+   "test": "scripts/tests/test_approval_gate_cli.py \u203a test_readiness_exit_codes"
+  }
+ ],
+ "TEST-104": [
+  {
+   "claim": "Power off is chosen only from running or paused, and destroy only from poweroff or aborted.",
+   "criterion": "power off only from `running` or `paused`, and destroy only from `poweroff` or `aborted`",
+   "id": "R1",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_decide_is_the_req_102_allow_list"
+  },
+  {
+   "claim": "Teardown of a VM in a snapshotting or other non-allow-listed state is refused, no mutation is made, and the VM is left in place.",
+   "criterion": "teardown of a VM reporting `livesnapshotting`, `onlinesnapshotting`, or any state outside the allow-list fails closed and leaves the VM in place",
+   "id": "R2",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_snapshotting_and_unknown_states_fail_closed"
+  },
+  {
+   "claim": "A teardown target given by name, or any non-UUID form, is rejected before any hypervisor query.",
+   "criterion": "a teardown target given by name is rejected",
+   "id": "R3",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_a_target_that_is_not_a_uuid_is_rejected_before_any_query"
+  },
+  {
+   "claim": "A receipt that claims removal without the absence observation fails verification.",
+   "criterion": "a receipt that claims removal without the absence observation fails verification",
+   "id": "R4",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_a_receipt_that_claims_removal_without_the_absence_observation_fails"
+  },
+  {
+   "claim": "An accepted removal receipt binds the UUID, the observed states, and a final absent observation.",
+   "criterion": "The teardown receipt binds the UUID, each observed state, and the absence observation",
+   "id": "R5",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_every_accepted_receipt_binds_the_uuid_states_and_absence"
+  },
+  {
+   "claim": "Two teardown requests for the same UUID run one after the other.",
+   "criterion": "Two teardown requests for one UUID run one at a time",
+   "id": "R6",
+   "test": "scripts/tests/test_lane_teardown.py \u203a test_two_requests_for_one_uuid_run_one_after_the_other"
+  }
+ ],
+ "TEST-105": [
+  {
+   "claim": "A guest with a .runner file or a .credentials file fails the readiness scan.",
+   "criterion": "found no runner configuration (a `.runner` or a `.credentials` file...) ... fails the readiness scan",
+   "id": "R1",
+   "test": "scripts/tests/test_lane_box.py \u203a test_runner_and_labview_residue_fail_readiness"
+  },
+  {
+   "claim": "A guest with an actions.runner.* service unit fails the readiness scan.",
+   "criterion": "no runner service unit (`actions.runner.*`)",
+   "id": "R2",
+   "test": "scripts/tests/test_lane_box.py \u203a test_runner_and_labview_residue_fail_readiness"
+  },
+  {
+   "claim": "The packager refuses a readiness receipt that reports a runner unit, so no box receipt is produced.",
+   "criterion": "The packager refuses a readiness receipt that reports a runner ... the packager refuses to package it, so it gets no box receipt",
+   "id": "R3",
+   "test": "scripts/tests/test_lane_box.py \u203a test_readiness_problems_are_refused"
+  },
+  {
+   "claim": "An instance showing a runner unit stops the run, and a failed runner-unit query also stops it.",
+   "criterion": "The lane clone check repeats the service-unit check before the workload starts",
+   "id": "R4",
+   "test": "scripts/tests/test_lane_channel.py \u203a test_an_instance_with_a_runner_unit_stops_the_run; test_a_runner_unit_query_that_fails_stops_the_run"
+  },
+  {
+   "claim": "Plan, teardown and verify-teardown run as real processes with no GitHub request.",
+   "criterion": "No lane code path requests a runner registration or removal token.",
+   "id": "R5",
+   "test": "scripts/tests/test_lane_plan.py \u203a test_lane_commands_make_no_runner_registration_requests"
+  },
+  {
+   "claim": "A mutant lane requesting registration-token or remove-token endpoints is caught by the offline detector.",
+   "criterion": "an offline test with a stubbed GitHub API layer fails if any lane command reaches a `registration-token` or `remove-token` endpoint",
+   "id": "R6",
+   "test": "scripts/tests/test_lane_plan.py \u203a test_the_detector_catches_a_lane_that_requests_runner_tokens"
+  }
+ ],
+ "TEST-107": [
+  {
+   "claim": "The packager enrolls the guest SSH host key recorded in the base receipt, then reads the boot ID before and after the scan, runs the unit queries and the runner-configuration scan, and leaves no session files behind.",
+   "criterion": "enrolls only the SSH host key that the verified base receipt records, and, within one guest boot (the boot ID is read before and after), lists `actions.runner.*` units ... and lists every `.runner` or `.credentials` entry ... with `sudo find`",
+   "id": "R1",
+   "test": "test_package_vagrant_box.py \u203a test_the_scan_reaches_the_guest_with_the_base_receipt_host_key"
+  },
+  {
+   "claim": "The packager refuses with exit code 2 and no output, in both plan and run modes, when a source VM's forwarding rule is not the single loopback SSH rule for the given port.",
+   "criterion": "requires the source VM to be `running` with exactly one loopback SSH forwarding rule for the given port ... refused with exit code 2 before any change",
+   "id": "R2",
+   "test": "test_package_vagrant_box.py \u203a test_the_packager_refuses"
+  },
+  {
+   "claim": "A source VM with an actions.runner unit, a .runner file or a .credentials file is refused with exit code 2, and so is a scan failure or a guest boot-ID change.",
+   "criterion": "Rejected: a source VM with an `actions.runner.*` unit, a `.runner` file, or a `.credentials` file, a scan step that fails, or a boot ID that changes is refused with exit code 2 before any change",
+   "id": "R3",
+   "test": "test_package_vagrant_box.py \u203a test_the_packager_refuses"
+  },
+  {
+   "claim": "The packager fails with exit code 1 and leaves no box unless the VM powers off at the scanned snapshot; a guest that ignores poweroff is stopped by the ACPI power button.",
+   "criterion": "It then shuts the guest down itself and packages only if VirtualBox reports the same VM `poweroff` at the scanned snapshot ... a guest that does not power off, or powers off at another snapshot, fails with exit code 1 and leaves no box",
+   "id": "R4",
+   "test": "test_package_vagrant_box.py \u203a test_the_packager_stops_unless_the_scanned_vm_powers_off_unchanged (and test_the_power_button_stops_a_guest_that_ignores_poweroff)"
+  },
+  {
+   "claim": "The box verifier refuses an @1 receipt, a missing or malformed runnerScan, a scan that found runner units or configurations, extra skipped roots, and an invalid boot ID or scannedAt.",
+   "criterion": "a box receipt whose scan found anything, skipped other roots, or is missing is refused; `verify-vagrant-box-receipt.py` ... refuse `@1` receipt",
+   "id": "R5",
+   "test": "test_package_vagrant_box.py \u203a test_the_box_verifier_refuses_a_receipt_without_a_clean_runner_scan"
+  },
+  {
+   "claim": "The verifier accepts a UTC scannedAt written with Z.",
+   "criterion": "a UTC `scannedAt`",
+   "id": "R6",
+   "test": "test_package_vagrant_box.py \u203a test_the_box_verifier_accepts_a_utc_scan_time_written_with_z"
+  }
+ ],
+ "TEST-115": [
+  {
+   "claim": "Review refuses to run when image disclosure approval is missing, and no image payload is sent.",
+   "criterion": "Missing image disclosure approval causes rejection before image submission",
+   "id": "R1",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_images_require_explicit_disclosure_beyond_field_approval"
+  },
+  {
+   "claim": "Invalid privacy policies (expired, text retention, unknown mode, bad crop box) refuse the review and no image is submitted.",
+   "criterion": "validated bounds ... Missing image disclosure approval causes rejection before image submission; policy expiry blocks reuse",
+   "id": "R2",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_invalid_privacy_never_submits_images"
+  },
+  {
+   "claim": "An approved region crop and redaction removes unapproved pixels, metadata and model prose, using a canary string.",
+   "criterion": "the model sees only the approved transformed pixels ... Known sensitive-canary cases fail closed",
+   "id": "R3",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_regions_strip_unapproved_pixels_metadata_and_model_prose"
+  }
+ ],
+ "TEST-116": [
+  {
+   "claim": "A review that is cancelled before it starts sends no request, and no tag or model call is made.",
+   "criterion": "Cancellation stops scheduling new work/retries",
+   "id": "R1",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_cancelled_review_never_starts_a_request"
+  },
+  {
+   "claim": "The overall monotonic deadline stops the review after a slow preflight.",
+   "criterion": "Deadlines use a monotonic clock and include preflight, inference, backoff, and postflight",
+   "id": "R2",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_monotonic_deadline_stops_after_slow_preflight"
+  },
+  {
+   "claim": "Retries are bounded and use an identical approved payload.",
+   "criterion": "A retry applies only to declared transient transport/server failures and the same approved request identity; finite request/retry limits",
+   "id": "R3",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_retry_is_bounded_and_uses_identical_approved_payload"
+  },
+  {
+   "claim": "A cancellation after the response prevents postflight and any success outcome.",
+   "criterion": "produces a distinct incomplete/cancelled outcome rather than pass or configuration validity",
+   "id": "R4",
+   "test": "scripts/tests/test_assisted_benchmark_review.py \u203a test_cancellation_after_response_prevents_postflight_and_success"
+  }
+ ],
+ "TEST-122": [
+  {
+   "claim": "The host identity digest uses the projectbuddy/host-identity@1 domain separator and does not return the raw machine-id.",
+   "criterion": "host identity digest computed with the `projectbuddy/host-identity@1` domain separator ... raw machine-id bytes are never retained",
+   "id": "R1",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_host_identity_digest_is_domain_separated_and_does_not_return_raw_id"
+  },
+  {
+   "claim": "The host ledger path comes from the account database and ignores a HOME environment override.",
+   "criterion": "one fixed persistent current-user ledger",
+   "id": "R2",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_persistent_host_ledger_ignores_home_environment"
+  },
+  {
+   "claim": "After a lost provisioner response, the run ID is burned and the second dispatch is refused, so the provisioner is called only once.",
+   "criterion": "a timeout/lost response burns that run ID so the create is never retried",
+   "id": "R3",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_lost_provisioner_response_burns_dispatch_without_retry"
+  },
+  {
+   "claim": "The dispatcher refuses changed create arguments and an expired permit, and does not call the provisioner.",
+   "criterion": "validates exact create arguments and expiry immediately before calling the provisioner adapter",
+   "id": "R4",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_provision_dispatch_refuses_changed_arguments_and_expired_permits"
+  },
+  {
+   "claim": "If the permit expires after the durable dispatch marker is written, the provisioner is not called.",
+   "criterion": "persists a dispatch marker first ... validates ... expiry immediately before calling the provisioner adapter",
+   "id": "R5",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_dispatch_expiry_after_durable_marker_prevents_provisioner_call"
+  },
+  {
+   "claim": "UUID binding is refused when the host inventory is ambiguous or does not match the provisioner result.",
+   "criterion": "proves exactly one new VM UUID matches the provisioner result",
+   "id": "R6",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_uuid_binding_refuses_ambiguous_or_mismatched_host_inventory"
+  }
+ ],
+ "TEST-123": [
+  {
+   "claim": "The broker admits calls only in exact grant order, ignores a caller's added approved call, and issues teardown for the bound VM only once.",
+   "criterion": "admit a model-proposed MCP call only when the exact canonical tool and argument pair equals the next entry in the sealed deterministic run grant ... The broker owns a canonical grant snapshot",
+   "id": "R1",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_broker_enforces_exact_call_order_and_teardown_once"
+  },
+  {
+   "claim": "A call that completes after the grant expired is refused.",
+   "criterion": "It rechecks host identity and expiry when an in-flight call completes; a late result is refused",
+   "id": "R2",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_broker_rejects_mcp_completion_after_grant_expiry"
+  },
+  {
+   "claim": "An abort with a call in flight blocks teardown until the call settles.",
+   "criterion": "On abort/cancellation it retains unresolved in-flight state and blocks teardown until settlement",
+   "id": "R3",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_abort_with_inflight_call_blocks_teardown_until_call_settles"
+  },
+  {
+   "claim": "A host identity change during an in-flight call refuses completion and teardown.",
+   "criterion": "Teardown is also denied if the current host identity differs from the grant",
+   "id": "R4",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_broker_detects_host_identity_change_during_inflight_call"
+  },
+  {
+   "claim": "Changed arguments and a wrong VM UUID are denied before the call is admitted, and teardown targets only the bound VM.",
+   "criterion": "Unknown, changed, repeated, skipped, replayed, expired, wrong-UUID, or out-of-order calls are denied",
+   "id": "R5",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_broker_denies_changed_arguments_and_wrong_vm_then_only_tears_down_bound_vm"
+  },
+  {
+   "claim": "A sealed run grant cannot be claimed by a second broker; a failed call is not retried.",
+   "criterion": "repeated, skipped, replayed ... calls are denied before client invocation",
+   "id": "R6",
+   "test": "test_assisted_benchmark_live_policy.py \u203a test_sealed_run_grant_cannot_be_replayed_in_a_second_broker (and test_plan_only_tool_result_is_marked_inert_and_failure_does_not_retry)"
+  }
+ ],
+ "TEST-124": [
+  {
+   "claim": "For a fixed workload version and seed, the synthetic UI gives the same visible view and the same action receipt and event ID.",
+   "criterion": "For a fixed workload version and seed, the UI produces the same finite state sequence, visible controls, and ordered event/frame identities.",
+   "id": "R1",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_seeded_ui_states_and_event_ids_are_repeatable"
+  },
+  {
+   "claim": "The independent oracle scores the seeded task as grounded, action-correct and successful only after the expected action is submitted, and it refuses to evaluate before any action.",
+   "criterion": "A task passes only when the oracle observes the expected terminal state after the authorized UI action",
+   "id": "R2",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_independent_oracle_scores_seeded_task"
+  },
+  {
+   "claim": "The oracle reports the model's state-grounding claim separately from action correctness and task success.",
+   "criterion": "The oracle separately reports current-state/action correctness and terminal task completion.",
+   "id": "R4",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_oracle_scores_model_state_claim_separately_from_task_success"
+  },
+  {
+   "claim": "The MCP server exposes only the click_target tool with a closed schema. It rejects an extra argument and a duplicate submission, and its results carry no oracle or expected data.",
+   "criterion": "The agent sees only the captured UI and approved action results. Oracle state is exposed only through a harness-only interface, never through ... MCP tools/results",
+   "id": "R5",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_stdio_mcp_server_exposes_only_exact_ui_action_and_returns_no_oracle_data"
+  },
+  {
+   "claim": "MCP handlers return error results that do not mention the oracle for an unknown tool, a malformed target, a wrong task ID or an extra argument, and the workload state stays awaiting_decision.",
+   "criterion": "never through ... MCP tools/results, or agent-visible errors",
+   "id": "R6",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_mcp_handlers_reject_wrong_task_malformed_action_and_duplicate_submission"
+  }
+ ],
+ "TEST-125": [
+  {
+   "claim": "The broker dispatches exactly one candidate from the choice group. A second selection of the same group, including the other candidate, is refused and the other candidate is never called.",
+   "criterion": "dispatches exactly one selected candidate ... it cannot be selected twice",
+   "id": "R2",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_multiserver_grant_binds_exact_server_identity_through_dispatch"
+  },
+  {
+   "claim": "A call whose server identity or contract digest differs from the granted server is rejected before dispatch.",
+   "criterion": "rejects an unknown or substituted server, contract drift",
+   "id": "R4",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_multiserver_grant_binds_exact_server_identity_through_dispatch"
+  },
+  {
+   "claim": "After the grant is re-hashed, altered candidate arguments are rejected because the candidates stay bound to the trusted policy.",
+   "criterion": "rejects ... altered arguments ... The model cannot add candidates, servers, or arguments",
+   "id": "R5",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_call_choice_candidates_remain_bound_to_trusted_policy_after_grant_rehash"
+  },
+  {
+   "claim": "A choice group is refused under the legacy single-server contract.",
+   "criterion": "This extends the single-contract offline P0 broker",
+   "id": "R6",
+   "test": "scripts/tests/test_assisted_benchmark_live_policy.py \u203a test_call_choice_groups_are_rejected_for_legacy_single_server_contract"
+  }
+ ],
+ "TEST-126": [
+  {
+   "claim": "Calibration summarizes each interaction mode separately with sample counts and p50 latencies, and marks the summary not-qualified and without any threshold.",
+   "criterion": "it reports per-mode p50/p95 from evidence availability to first and final response token and ... to oracle-confirmed action ... Calibration runs are labeled non-qualifying ... No numeric threshold is claimed",
+   "id": "R1",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_summarizes_each_mode_separately_and_never_qualifies"
+  },
+  {
+   "claim": "Calibration reports state-grounding rate separately per mode.",
+   "criterion": "it separately reports state/action grounding and oracle-confirmed task success",
+   "id": "R2",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_summarizes_each_mode_separately_and_never_qualifies"
+  },
+  {
+   "claim": "Calibration rejects records with a mixed scenario-seed set or an inconsistent model/environment configuration.",
+   "criterion": "Calibration records a fixed workload version and seed set ... approved model digest and execution settings",
+   "id": "R3",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_rejects_mixed_seeds_and_inconsistent_configuration"
+  },
+  {
+   "claim": "Calibration rejects malformed records: a missing field, an unknown mode, a bad digest, a non-monotonic timestamp or a non-boolean success.",
+   "criterion": "Using a monotonic clock, it reports per-mode p50/p95 ... Calibration records ... interaction mode, approved model digest ...",
+   "id": "R4",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_rejects_malformed_records"
+  },
+  {
+   "claim": "With one sample per mode, the bootstrap uncertainty interval is reported as unestimated (None).",
+   "criterion": "Calibration records ... sample count, and uncertainty",
+   "id": "R5",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_single_sample_reports_unestimated_uncertainty"
+  },
+  {
+   "claim": "Final-token latency carries a p95 bootstrap 95% confidence interval when there are multiple samples.",
+   "criterion": "Calibration records ... sample count, and uncertainty",
+   "id": "R6",
+   "test": "test_assisted_benchmark_synthetic_ui.py \u203a test_calibration_summarizes_each_mode_separately_and_never_qualifies"
+  }
+ ]
+}
