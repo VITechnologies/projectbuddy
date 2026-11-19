@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ProjectBuddy.Hooks/ProjectBuddy.Hooks.csproj" />
-    <EmbeddedResource Include="../../kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql" LogicalName="0006_hooks.sql" />
+    <EmbeddedResource Include="../../kpi/ProjectBuddy.Kpi/Sql/*.sql" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

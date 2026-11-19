@@ -134,6 +134,17 @@ internal sealed class Database(Options options)
         return snapshots;
     }
 
+    // The AIU, count and newest time of the model calls recorded after a quota snapshot, in any session.
+    public (decimal Units, long Calls, DateTimeOffset? LastAt) UnitsSince(DateTimeOffset at)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("SELECT coalesce(sum(aiu), 0), count(*), max(at) FROM kpi_v1.model_calls WHERE at > $1", connection)
+        { Parameters = { new() { Value = at } } };
+        using var reader = command.ExecuteReader();
+        reader.Read();
+        return (reader.GetDecimal(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2));
+    }
+
     // Stores one session's facts in one transaction. Facts keyed by event or tool-call ID are inserted once; a tool call
     // completed since the last ingest is updated; the active spans are derived again.
     public JsonObject Store(Ingest.Session session)
@@ -301,7 +312,13 @@ internal sealed class Database(Options options)
         var item = (object?)record.Get("--item") ?? DBNull.Value;
         var (sql, values) = record.Command switch
         {
-            "mark" => ("INSERT INTO kpi_v1.work_markers (session_id, item) VALUES ($1, $2) RETURNING id, at", new object[] { record.Get("--session")!, item }),
+            "mark" => ("""
+                WITH latest AS (
+                    SELECT id, at, item FROM kpi_v1.work_markers WHERE session_id = $1 ORDER BY at DESC, id DESC LIMIT 1),
+                added AS (
+                    INSERT INTO kpi_v1.work_markers (session_id, item) SELECT $1, $2 WHERE NOT EXISTS (SELECT FROM latest WHERE item = $2) RETURNING id, at)
+                SELECT id, at FROM added UNION ALL SELECT id, at FROM latest WHERE item = $2
+                """, new object[] { record.Get("--session")!, item }),
             "gap" => ("INSERT INTO kpi_v1.spec_gaps (session_id, item, kind, fact, belongs_in) VALUES ($1, $2, $3, $4, $5) RETURNING id, at",
                 [record.Get("--session")!, item, record.Get("--kind")!, record.Get("--fact")!, record.Get("--belongs-in")!]),
             "review" => ("INSERT INTO kpi_v1.reviews (session_id, item, round, findings) VALUES ($1, $2, $3, $4) RETURNING id, at",

@@ -14,6 +14,7 @@ schema `hooks`, migration `tools/kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql`) so th
 `preToolUse`, `postToolUse` and `postToolUseFailure` are deliberately not hooked: no cost on the tool path.
 Copilot flushes the transcript after `agentStop` fires, which is why the message is read in a second step. `mark` uses only the
 `work_ref` in the session's registry row, which the orchestrator writes with `sessions-set`; with none, nothing is marked.
+`sessions-set --work-ref` itself writes a marker when a session's ref is first set (backdated to the session's `started_at`) or changed (now); an unchanged ref writes none, and `mark` skips an item that is already the session's latest.
 `pb-kpi-sync` ingests and resolves at most once a minute and one run at a time.
 
 Fail-open rules: every hook exits 0 and prints nothing; the database password is read from a 0600 file (never argv, never logged);
@@ -22,7 +23,7 @@ Fail-open rules: every hook exits 0 and prints nothing; the database password is
 
 ## Install (two steps; the second affects every session)
 ```
-projectbuddy-kpi migrate ...                       # applies 0006_hooks.sql to kpi_local
+projectbuddy-kpi migrate ...                       # applies 0006_hooks.sql and 0007_hooks_owner_role.sql to kpi_local
 tools/hooks/install.sh install --admin-password-file ~/.config/rsr-registry-local/postgres-password \
     --kpi-bin <path to projectbuddy-kpi> --kpi-password-file ~/.config/rsr-registry-local/postgres-password
 tools/hooks/install.sh activate                    # writes ~/.copilot/hooks/projectbuddy.json
@@ -31,6 +32,21 @@ tools/hooks/install.sh deactivate                  # removes it (rollback); the 
 `install` creates the login role `pb_hooks` (member of `hooks_writer`, which can only call the hook functions) and the scripts, but no
 hook is live until `activate`. A hook fires only for sessions started after `activate`. Full rollback: `deactivate`, then
 `DROP SCHEMA hooks CASCADE; DROP ROLE pb_hooks;`.
+
+## Owner role (0007, #393)
+The hooks schema, tables and `SECURITY DEFINER` functions are owned by `hooks_owner` (NOLOGIN, not superuser, no CREATEDB, CREATEROLE,
+REPLICATION or BYPASSRLS), so a hook function can reach only the hooks schema, never the rest of `kpi_local`. Each function has the fixed
+`search_path = pg_catalog, hooks, pg_temp`. `pb_hooks` still connects to `kpi_local` only and is unchanged. The migration changes object owners, so it must run as a superuser
+(it refuses otherwise); `projectbuddy-hooks --user` should be a superuser or a role that is a member of `hooks_owner`.
+
+Roll back only the ownership change (as a superuser, data stays; then `DELETE FROM public.kpi_schema_migrations WHERE version = 7;`):
+```
+ALTER SCHEMA hooks OWNER TO postgres;
+ALTER TABLE hooks.sessions, hooks.decisions, hooks.handoffs OWNER TO postgres;  -- one statement per table
+-- every function: ALTER FUNCTION <sig> OWNER TO postgres; ALTER FUNCTION <sig> SET search_path = pg_catalog, hooks;
+DROP ROLE hooks_owner;
+```
+Use `\df+ hooks.*` to list the signatures. Back up first (`pg_dump -Fc`) as for any production migration.
 
 ## `projectbuddy-hooks` (orchestrator CLI)
 ```

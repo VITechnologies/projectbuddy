@@ -82,7 +82,7 @@ database that lacks the embedded migrations.
 | `ingest-farm --export <file>` | Reads the local AI farm's telemetry export, the file assurance-learning-workbench's `export-farm-telemetry` writes from `farm_v1` (`export_kind` `alw-farm-telemetry`, schema version `1.0.0`). Its `jobs` rows (one per farm run record, workload and instance) and `device_samples` rows (one per run record and local instance) hold counts and timings only; any other field refuses the file. Rows are keyed by the sha256 of the farm run record, so ingesting again changes nothing, and an export that changes an ingested row is refused as a whole. A device sample of a peer instance, or busy time outside its window, is a database error. |
 | `farm-reference --workload <id> --aiu-per-job <n>` | Sets a farm workload's reference cost, the AIU per job of a paid run of that workload, for the AIU-avoided estimate. Setting it again replaces it. |
 | `budget --usd <n> [--reserve-usd <n>]` | Sets the USD budget of the billing cycle and, when given, the reserve kept back from it (0 until set). Setting them again replaces them. A negative value is a usage error. |
-| `quota [--window-hours <n>] [--items <name=usd,...>]` | Reads the newest ingested quota snapshot against the budget; see Quota. Refused until a snapshot was ingested and `budget` was set. |
+| `quota [--window-hours <n>] [--stale-hours <n>] [--items <name=usd,...>]` | Reads the newest ingested quota snapshot against the budget; see Quota. Refused until a snapshot was ingested and `budget` was set. |
 | `track --repository <path> --forge <github\|gitlab>` | Adds a repository whose merged requests are accepted changes: `owner/repo` on GitHub, `group[/subgroup…]/project` on GitLab. |
 | `resolve [--gh <path>] [--glab <path>]` | Lists every request each tracked repository merged since the first session, with `gh api repos/<repo>/pulls?state=closed` or `glab api projects/<path>/merge_requests?state=merged`, newest update first, until updates are older than the first session. Listing again changes nothing. A repository whose listing fails is reported in `unresolved` with its reason, and what was already listed is kept. A tool that needs other credentials for some repositories can run as a wrapper in a second pass, for example `GITLAB_TOKEN=… glab`. |
 | `mark --session <id> --item <ref>` | Attributes the session's calls from now until its next marker to a work item. |
@@ -106,7 +106,11 @@ snapshot. `ingest` keeps, per session, the snapshots whose `overage` (the units
 used beyond the entitlement) differs from the one kept before, in
 `kpi_v1.quota_snapshots`. A snapshot that cannot be read is skipped.
 
-`quota` prices the newest snapshot's overage at `usd_per_unit` as `spendUsd`.
+`quota` prices the newest snapshot's overage plus the AIU of every `model_calls`
+row after the snapshot (`unitsSinceSnapshot`, `callsSinceSnapshot`) at
+`usd_per_unit` as `spendUsd`: agent-host sessions log no snapshots. It reports
+`snapshotAgeHours` and sets `snapshotStale` when that exceeds `--stale-hours`
+(default 6); the exit code is unaffected.
 `headroomUsd` is `budget_usd` less the spend, and `allocableUsd` is the
 headroom less `reserve_usd`, or 0. The burn is the spend's growth per hour over
 the snapshots in the last `--window-hours` (default the `burn_window_hours`
