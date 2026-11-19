@@ -16,7 +16,7 @@ CONTRACT_PATH = REPOSITORY / "tools" / "assisted-benchmark" / "lba-mcp-contract.
 CONTRACT_MODULE = REPOSITORY / "scripts" / "assisted_benchmark_contract.py"
 REVIEW_MODULE = REPOSITORY / "scripts" / "assisted_benchmark_review.py"
 MODEL = {
-    "tag": "projectbuddy:0.1-qwen2.5-7b",
+    "tag": "projectbuddy:0.3-qwen2.5-7b",
     "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
 }
 

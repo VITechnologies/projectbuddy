@@ -18,7 +18,7 @@ VM_UUID = "afc966a5-f120-4d3e-9760-69fd6344a03f"
 ACTOR_VERSION = "1.4.14"
 ACTOR_REVISION = "7f65a2215b952e1f31bc3677087f14c8b528d789"
 MODEL = {
-    "tag": "projectbuddy:0.1-qwen2.5-7b",
+    "tag": "projectbuddy:0.3-qwen2.5-7b",
     "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
 }
 

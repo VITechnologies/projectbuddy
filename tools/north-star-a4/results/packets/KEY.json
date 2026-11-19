@@ -1,0 +1,182 @@
+{
+ "P001": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-095"
+ },
+ "P002": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-104"
+ },
+ "P003": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-096"
+ },
+ "P004": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-101"
+ },
+ "P005": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-122"
+ },
+ "P006": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-100"
+ },
+ "P007": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-107"
+ },
+ "P008": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-105"
+ },
+ "P009": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-095"
+ },
+ "P010": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-105"
+ },
+ "P011": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-093"
+ },
+ "P012": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-101"
+ },
+ "P013": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-126"
+ },
+ "P014": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-104"
+ },
+ "P015": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-126"
+ },
+ "P016": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-122"
+ },
+ "P017": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-107"
+ },
+ "P018": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-123"
+ },
+ "P019": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-102"
+ },
+ "P020": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-097"
+ },
+ "P021": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-125"
+ },
+ "P022": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-124"
+ },
+ "P023": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-102"
+ },
+ "P024": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-123"
+ },
+ "P025": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-096"
+ },
+ "P026": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-116"
+ },
+ "P027": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-125"
+ },
+ "P028": {
+  "arm": "treatment",
+  "block": 1,
+  "page": "TEST-124"
+ },
+ "P029": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-098"
+ },
+ "P030": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-115"
+ },
+ "P031": {
+  "arm": "control",
+  "block": 3,
+  "page": "TEST-093"
+ },
+ "P032": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-115"
+ },
+ "P033": {
+  "arm": "treatment",
+  "block": 2,
+  "page": "TEST-116"
+ },
+ "P034": {
+  "arm": "treatment",
+  "block": 3,
+  "page": "TEST-097"
+ },
+ "P035": {
+  "arm": "control",
+  "block": 2,
+  "page": "TEST-098"
+ },
+ "P036": {
+  "arm": "control",
+  "block": 1,
+  "page": "TEST-100"
+ }
+}

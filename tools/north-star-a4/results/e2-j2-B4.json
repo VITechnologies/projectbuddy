@@ -1,0 +1,164 @@
+{
+ "P019": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "names each code, not-ready"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "environment-missing/requester-unknown stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "plan-unsupported and exit 23 stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "documented with fix stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "exit codes 0/21/22 stated"
+  }
+ ],
+ "P020": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "leak in rationale/requester/target blocks request"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "staged leak withholds summary; no path/req-001"
+  },
+  {
+   "ref": "R3",
+   "label": "absent",
+   "reason": "no inspection-link/summary-row coverage"
+  },
+  {
+   "ref": "R4",
+   "label": "partial",
+   "reason": "offline policy failures stated; expired/unknown class not conveyed"
+  },
+  {
+   "ref": "R5",
+   "label": "partial",
+   "reason": "online failures only via drift/precondition detail; test name listed without behaviour per problem"
+  }
+ ],
+ "P021": [
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "approve then hold refused, call logs show one call"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "server identity substituted refused; digest binding"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "rehashed altered taskId rejected"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "choice group on single-server raises"
+  }
+ ],
+ "P022": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "equal views and acks across seeds"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "evaluate raises before action; true after expected"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "state claim wrong gives grounded false, others true"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "click_target only, closed schema, no oracle"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "errors without oracle, state stays awaiting_decision"
+  }
+ ],
+ "P023": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "names with lead-in naming each missing setting"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "test name and lead-in state not-ready with findings"
+  },
+  {
+   "ref": "R3",
+   "label": "partial",
+   "reason": "unsupported reported; exit 23 not stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "documented with fix"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "exit-code cases 0/21/22 with non-zero lead-in"
+  }
+ ],
+ "P024": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "order, added call ignored, teardown once"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "expired completion refused"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "abort blocks teardown until settled"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "host drift refuses completion and teardown"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "extra arg and wrong UUID denied, teardown bound VM"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "second broker claimed; no retry after failure"
+  }
+ ]
+}

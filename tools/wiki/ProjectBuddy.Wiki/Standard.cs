@@ -6,11 +6,11 @@ namespace ProjectBuddy.Wiki;
 // catalogue and in order.
 public static class Standard
 {
-    public const string Id = "rsr/ecosystem-wiki-standard@5";
+    public const string Id = "rsr/ecosystem-wiki-standard@8";
 
-    public const string RsrRelease = "v0.9.0";
+    public const string RsrRelease = "v0.12.0";
 
-    public const string RsrCommit = "8306ebc717e9aac033cfaef2b8bbe2d5374cdf41";
+    public const string RsrCommit = "49dfa312040b338a61b95ad9022f1ddddd318ab1";
 
     // Each catalogue is ordered: the first finding that applies names a page or edge.
     public static readonly string[] PageFindings =

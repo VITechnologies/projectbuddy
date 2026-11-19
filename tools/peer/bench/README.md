@@ -105,4 +105,5 @@ They are kept in the operator's private state log, not committed here.
 
 Record the choice and both machines' results on #217 before generating the
 identity Modelfile for the chosen base. The first choice was `qwen2.5:7b`,
-giving the identity `projectbuddy:0.1-qwen2.5-7b`.
+giving the identity `projectbuddy:<identityVersion>-qwen2.5-7b`: first
+`projectbuddy:0.1-qwen2.5-7b`, now `projectbuddy:0.3-qwen2.5-7b` (#358).

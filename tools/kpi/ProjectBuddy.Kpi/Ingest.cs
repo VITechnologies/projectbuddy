@@ -26,7 +26,11 @@ internal static partial class Ingest
 
     public sealed record Session(
         string Id, DateTimeOffset First, DateTimeOffset Last, long Events, List<ModelCall> Calls, List<ToolCall> Tools,
-        List<(Guid Id, DateTimeOffset At)> Messages, List<(DateTimeOffset Start, DateTimeOffset End)> Spans, decimal? Aiu);
+        List<(Guid Id, DateTimeOffset At)> Messages, List<(DateTimeOffset Start, DateTimeOffset End)> Spans, decimal? Aiu, List<QuotaSnapshot> Quota);
+
+    public sealed record QuotaSnapshot(DateTimeOffset At, decimal UsedRequests, decimal EntitlementRequests, decimal Overage, DateTimeOffset ResetDate);
+
+    private const string QuotaEvent = "model.model_call_success";
 
     // Events of these types are parsed in full; for all others only the event time is read.
     private static readonly HashSet<string> Parsed = new(StringComparer.Ordinal)
@@ -73,6 +77,7 @@ internal static partial class Ingest
         var tools = new List<ToolCall>();
         var messages = new List<(Guid, DateTimeOffset)>();
         var times = new List<DateTimeOffset>();
+        var quota = new List<QuotaSnapshot>();
         DateTimeOffset? floor = null;
         string? line;
         var number = 0;
@@ -94,6 +99,16 @@ internal static partial class Ingest
             }
         }
 
+        // The snapshots are huge lines' only use here, so the small object is cut out of the line and parsed alone. A
+        // snapshot that cannot be read is skipped. A cycle's overage only grows, so a repeat of it adds nothing.
+        void Quota(string line, DateTimeOffset at)
+        {
+            if (Snapshot(line, at) is { } snapshot && (quota.Count == 0 || quota[^1].Overage != snapshot.Overage))
+            {
+                quota.Add(snapshot);
+            }
+        }
+
         void Line(string line)
         {
             // The logs write each event's type first. Agent sessions bill each call in a usage record, so once one is read
@@ -106,6 +121,10 @@ internal static partial class Ingest
                 if (!(fast < floor))
                 {
                     times.Add(fast);
+                    if (kind.Groups[1].Value == QuotaEvent)
+                    {
+                        Quota(line, fast);
+                    }
                 }
 
                 return;
@@ -140,6 +159,9 @@ internal static partial class Ingest
             times.Add(at);
             switch (type)
             {
+                case QuotaEvent:
+                    Quota(line, at);
+                    break;
                 case "session.usage_record":
                     calls.Add(Call(root.GetProperty("id").GetGuid(), at, data.GetProperty("usage")));
                     break;
@@ -191,7 +213,7 @@ internal static partial class Ingest
 
         spans.Add((first, last));
         var (measured, aiu) = Allocate(calls.Count > 0 ? calls : cliCalls, checkpoints, shutdowns, baseline);
-        return new Session(id, times[0], times[^1], times.Count, measured, tools, messages, spans, aiu);
+        return new Session(id, times[0], times[^1], times.Count, measured, tools, messages, spans, aiu, quota);
     }
 
     // Gives each measured interval's AIU to the calls in it: a call with an exact value keeps it, and the rest of the
@@ -239,6 +261,35 @@ internal static partial class Ingest
         var exact = calls.Any(call => call.Aiu is not null);
         return intervals.Count == 0 && !exact ? (shared, null) : (shared, intervals.Sum(interval => interval.Aiu) + tail.Sum(call => call.Aiu ?? 0));
     }
+
+    private static QuotaSnapshot? Snapshot(string line, DateTimeOffset at)
+    {
+        const string marker = "\"premium_interactions\":{";
+        var start = line.IndexOf(marker, StringComparison.Ordinal);
+        var end = start < 0 ? -1 : line.IndexOf('}', start);
+        if (end < 0)
+        {
+            return null;
+        }
+
+        start += marker.Length - 1;
+        try
+        {
+            using var document = JsonDocument.Parse(line[start..(end + 1)]);
+            var root = document.RootElement;
+            return Amount(root, "usedRequests") is { } used && Amount(root, "entitlementRequests") is { } entitlement && Amount(root, "overage") is { } overage
+                && root.TryGetProperty("resetDate", out var reset) && reset.ValueKind == JsonValueKind.String && reset.TryGetDateTimeOffset(out var resetDate)
+                ? new QuotaSnapshot(at, used, entitlement, overage, resetDate)
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static decimal? Amount(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number) ? number : null;
 
     // What a model call asked for, by the tools it requested.
     public static string Category(IReadOnlySet<string> tools) =>

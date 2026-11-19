@@ -1,0 +1,34 @@
+{
+ "e1": {
+  "C19": "unsupported",
+  "C04": "unsupported",
+  "I08": "unsupported",
+  "P010-15": "unsupported",
+  "P012-04": "unsupported",
+  "P013-o08": "unsupported",
+  "P018-o07": "unsupported",
+  "P019-04": "unsupported",
+  "P019-10": "unsupported",
+  "P020-04": "unsupported",
+  "P020-41": "unsupported",
+  "P020-43": "unsupported",
+  "P023-I07": "unsupported",
+  "P023-08": "unsupported",
+  "P032-10": "unsupported",
+  "P035-12": "unsupported",
+  "P036-03": "unsupported",
+  "P027-o03": "unsupported",
+  "P012-09": "supported",
+  "P019-42": "supported",
+  "P022-05": "supported",
+  "P026-o40": "supported",
+  "P028-o04": "supported",
+  "P029-o03": "supported"
+ },
+ "e2": {
+  "P006/R3": "partial",
+  "P009/R2": "retained",
+  "P028/R2": "partial",
+  "P036/R3": "partial"
+ }
+}

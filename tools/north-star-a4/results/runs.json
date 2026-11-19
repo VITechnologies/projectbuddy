@@ -1,0 +1,32 @@
+[
+ {
+  "workspace": "/tmp/a4run/b1-control",
+  "arm": "control",
+  "block": 1
+ },
+ {
+  "workspace": "/tmp/a4run/b1-treatment",
+  "arm": "treatment",
+  "block": 1
+ },
+ {
+  "workspace": "/tmp/a4run/b2-control",
+  "arm": "control",
+  "block": 2
+ },
+ {
+  "workspace": "/tmp/a4run/b2-treatment",
+  "arm": "treatment",
+  "block": 2
+ },
+ {
+  "workspace": "/tmp/a4run/b3-control",
+  "arm": "control",
+  "block": 3
+ },
+ {
+  "workspace": "/tmp/a4run/b3-treatment",
+  "arm": "treatment",
+  "block": 3
+ }
+]

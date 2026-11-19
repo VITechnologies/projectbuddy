@@ -1,0 +1,17 @@
+{
+ "items_total": 21,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_call_choice_group_is_narrow_and_server_bound[duplicate]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_call_choice_group_is_narrow_and_server_bound[server]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_call_choice_group_is_narrow_and_server_bound[different-tool]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_call_choice_groups_are_rejected_for_legacy_single_server_contract",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_call_choice_candidates_remain_bound_to_trusted_policy_after_grant_rehash",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_live_capture_choice_consumes_the_existing_sealed_grant_exactly_once[hold]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[stopped]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[vm]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_invalid_live_choice_aborts_without_action_or_retry[action]",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_uncertain_live_choice_acknowledgement_never_retries",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_live_dispatcher_refuses_contract_mutation_after_sealing",
+  "- `scripts/tests/test_assisted_benchmark_live_policy.py` \u203a test_broker_denies_changed_arguments_and_wrong_vm_then_only_tears_down_bound_vm"
+ ]
+}

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# User-level Copilot hook (#381): sessionStart, userPromptSubmitted and agentStop write to the workstation database with one
+# psql round trip. It fails open: it always exits 0, prints nothing and gives up after 1.5 s, so a down database never slows
+# or blocks a session. Secrets come from 0600 files, never from argv or the log. Kill switch: PB_HOOKS_DISABLE=1 or the file
+# ~/.config/projectbuddy-hooks/disabled.
+set +e
+umask 077
+HOME_DIR="${HOME:-/nonexistent}"
+CONFIG_DIR="$HOME_DIR/.config/projectbuddy-hooks"
+STATE_DIR="${XDG_STATE_HOME:-$HOME_DIR/.local/state}/projectbuddy-hooks"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+event="${1:-}"
+
+[ "${PB_HOOKS_DISABLE:-}" = 1 ] && exit 0
+[ -e "$CONFIG_DIR/disabled" ] && exit 0
+mkdir -p "$STATE_DIR" 2> /dev/null || exit 0
+LOG="$STATE_DIR/hooks.log"
+[ -f "$LOG" ] && [ "$(stat -c %s "$LOG" 2> /dev/null || echo 0)" -gt 1048576 ] && : > "$LOG"
+log() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "$event" "$*" >> "$LOG"; }
+exec > /dev/null 2>> "$LOG"
+
+# shellcheck source=/dev/null
+[ -r "${PB_HOOKS_ENV:-$CONFIG_DIR/env}" ] && . "${PB_HOOKS_ENV:-$CONFIG_DIR/env}"
+[ -r "${PB_HOOKS_PASSWORD_FILE:-}" ] || { log "no readable PB_HOOKS_PASSWORD_FILE"; exit 0; }
+
+tmp="$(mktemp -d "$STATE_DIR/run.XXXXXX")" || exit 0
+trap 'rm -rf "$tmp"' EXIT
+head -c 1048576 > "$tmp/payload"
+: > "$tmp/line"
+
+json_field() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$tmp/payload" | head -n 1; }
+sid="$(json_field sessionId)"; [ -n "$sid" ] || sid="$(json_field session_id)"
+[[ "$sid" =~ ^[A-Za-z0-9._-]{8,80}$ ]] || { log "no valid session id in payload"; exit 0; }
+
+case "$event" in
+  sessionStart) fn='hooks.on_start(:'"'p'"'::jsonb)' ;;
+  userPromptSubmitted) fn='hooks.on_prompt(:'"'p'"'::jsonb)' ;;
+  agentStop)
+    # Inline this only records "waiting": the transcript is flushed after the hook fires, so the turn's final message is not in
+    # it yet. pb-stop-settle reads it a moment later, detached, and classifies DONE and DECISION NEEDED.
+    fn='hooks.on_stop(:'"'p'"'::jsonb, :'"'l'"')'
+    transcript="$(json_field transcriptPath)"; [ -n "$transcript" ] || transcript="$(json_field transcript_path)"
+    stamp="$(sed -n 's/.*"timestamp"[[:space:]]*:[[:space:]]*\([0-9]\{10,16\}\).*/\1/p' "$tmp/payload" | head -n 1)" ;;
+  *) exit 0 ;;
+esac
+
+export PGCONNECT_TIMEOUT=1 PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-55432}" PGDATABASE="${PGDATABASE:-kpi_local}" PGUSER="${PGUSER:-pb_hooks}"
+PGPASSWORD="$(tr -d '\r\n' < "$PB_HOOKS_PASSWORD_FILE")"; export PGPASSWORD
+# The payload goes in through psql's backtick \set (a file, so there is no argv size limit) and is quoted by :'p'.
+# shellcheck disable=SC2016
+printf '\\set p `cat "%s/payload"`\n\\set l `cat "%s/line"`\nSELECT %s;\n' "$tmp" "$tmp" "$fn" \
+  | timeout 1.5 psql -X -q -At -w -v ON_ERROR_STOP=1 -f - > /dev/null || log "database write failed (exit $?)"
+
+# KPI ingest, mark and resolve take seconds, so they run detached, outside the hook's budget.
+case "$event" in
+  sessionStart)
+    [ -n "${PB_KPI_BIN:-}" ] && (setsid "$HERE/pb-kpi-sync" "$sid" < /dev/null > /dev/null 2>> "$LOG" &) ;;
+  agentStop)
+    [ -n "$transcript" ] && [ -n "$stamp" ] && (setsid "$HERE/pb-stop-settle" "$sid" "$transcript" "$stamp" < /dev/null > /dev/null 2>> "$LOG" &)
+    [ -n "${PB_KPI_BIN:-}" ] && (setsid "$HERE/pb-kpi-sync" "$sid" < /dev/null > /dev/null 2>> "$LOG" &) ;;
+esac
+exit 0

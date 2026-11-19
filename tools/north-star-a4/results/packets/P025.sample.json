@@ -1,0 +1,15 @@
+{
+ "items_total": 10,
+ "sampled_items": [
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_offline_checks_refuse_expired_unknown_class_and_digest_only",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_submit_rejects_invalid_requests_before_anything_leaves[argv1-unknown action class]",
+  "- `scripts/tests/test_approval_gate_model.py` \u203a test_every_problem_is_listed_at_once",
+  "- `scripts/tests/test_approval_gate_model.py` \u203a test_content_binding_rules[None-content is required]",
+  "- `scripts/tests/test_approval_gate_model.py` \u203a test_content_binding_rules[content2-64-character lowercase SHA-256]",
+  "- `scripts/tests/test_approval_gate_model.py` \u203a test_precondition_rules[None-precondition is required]",
+  "- `scripts/tests/test_approval_gate_model.py` \u203a test_target_patterns_and_tokens",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_offline_checks_report_each_policy_failure",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_content_binding_for_every_content_shape",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_every_refusal_stops_before_execution[setup12-digest-mismatch]"
+ ]
+}

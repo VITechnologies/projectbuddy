@@ -1,0 +1,17 @@
+{
+ "items_total": 17,
+ "sampled_items": [
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_submit_withdraws_when_the_requester_could_approve",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_submit_refuses_unprotected_or_self_reviewable_classes[change0-not protected]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_submit_refuses_unprotected_or_self_reviewable_classes[change1-is an eligible reviewer]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_submit_refuses_unprotected_or_self_reviewable_classes[change2-cannot confirm]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_missing_settings_make_the_class_not_ready[setup0-admin-bypass-allowed]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_missing_settings_make_the_class_not_ready[setup1-requester-is-reviewer]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_missing_settings_make_the_class_not_ready[setup2-reviewer-membership-unknown]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_a_fully_protected_class_for_a_read_only_requester_is_enforcing",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_wildcard_and_writable_targets_are_advisory_findings",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_can_write_treats_unknown_access_as_writable",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_readiness_exit_codes[permissions1-None-21]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_readiness_exit_codes[permissions2-env2-22]"
+ ]
+}

@@ -4,6 +4,155 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## v0.6.0
+
+Everything on `develop` since v0.5.0. The ecosystem is pinned to RSR `v0.12.0`, whose wiki standard is
+`rsr/ecosystem-wiki-standard@8`; `projectbuddy-wiki` and this repository's wiki follow it.
+
+- Wiki observation standard `@6` to `@8` (#354-#356, #363-#366, #369, #387, #389, #390). The entries below record each
+  pin and what it changed in the assembler. Under `@8`, a requirement's `TestID` link asserts no coverage: a test page
+  declares its linked requirements `not verified here`, and a `Together they cover` sentence must be backed by a coverage
+  map. `@8` is opt-in: the north-star A4 test below did not show it lowers the unsupported-claim rate.
+- North-star A4 harness, `tools/north-star-a4` (#379, #397, #398). It holds the frozen sample, the blind packets and key,
+  the reviewer rubrics, one automated authoring session script, the power simulation and the analysis, with the labels
+  and results of the registered run. The registered A4-r2 test compared the `@5` standard (control) with `@8`
+  (treatment) on 18 runnable pages, with two blind reviewers. **Its primary endpoint (E1, a lower unsupported-claim
+  rate under `@8`) failed**: unsupported claims were about 3% in both arms, and the page-mean difference was not
+  distinguishable from zero. The secondary endpoint (E2, retention of reference claims) passed as non-inferior. The
+  decision was to reopen the wording, so `@8` stays opt-in. The 26% unsupported rate of #362 did not reproduce on
+  runnable pages (#399 follows up).
+- Workstation database and hooks (#381, #382, #385, #386, #393). The workstation database is native PostgreSQL 16, with
+  `install-postgres16.sh`, `restore-from-container.sh` and `cutover.sh` in `tools/workstation-db`; the container it
+  replaced is kept only for a time-limited rollback. `projectbuddy-hooks` and the user-level Copilot hooks
+  (`tools/hooks`) register sessions, a decision queue and a handoff compare-and-set in the `hooks` schema, with
+  no AI calls for bookkeeping; migration `0007` gives that schema a dedicated non-superuser `NOLOGIN` owner role
+  (#393). The backup recipe pins `pg_dump` and `pg_restore` and checks each dump with a list check (#396, #401).
+- KPI tooling (#371-#373, #375, #377, ALW#10): AI credits are priced at the billed rate, `projectbuddy-kpi quota` and
+  quota snapshots with a budget, the per-workload reference costs for AIU avoided, and the local AI farm's telemetry.
+- Compliance re-certification (#390, #400). `docs/architecture/standards-compliance.md` is re-stamped at
+  `repo-standards-review` `v0.12.0`: the 5 required gates `PASS` and DoD stays the optional `FAIL`, with no regression.
+- Moved to the next release: #357 and #367 (judgement-authored stimuli for 63 prose pages and a compiled Actor
+  candidate, which depends on LBA's next release, #406). #358 stays the open epic: its local-judge layer stopped at
+  iteration 5, and execution and mutation evidence remain.
+
+- KPI meter fixes (#391, #392). `projectbuddy-hooks sessions-set --work-ref` writes a work marker when a session's ref
+  is first set (backdated to the session's start) or changed, `kpi mark` skips an unchanged item, and the sync marks
+  before it ingests, so a one-turn worker's calls attribute to its item. `projectbuddy-kpi quota` adds the AIU of
+  calls after the newest snapshot to `spendUsd` and reports `snapshotAgeHours`, `unitsSinceSnapshot` and `snapshotStale`.
+
+- Pins RSR `v0.12.0` and `rsr/ecosystem-wiki-standard@8` (#387): the consumer kit, `projectbuddy-wiki`'s
+  standard pin, the standards scan checkout and the compliance stamp. The checker's logic is unchanged. The
+  wiki's 30 test pages declare their linked requirements `not verified here` instead of claiming coverage.
+
+- `projectbuddy-ask` 0.4.0 adds the `infer` verb (#358), so the workstation
+  can run batches of prompts on the peer's GPU over the existing forced
+  command.
+  - The request travels as ssh's stdin: `projectbuddy/peer-infer-request@1`,
+    at most 1 MiB of UTF-8 JSON, with 1 to 64 items. Each item has a unique
+    id (`[A-Za-z0-9._:-]{1,64}`), a prompt of at most 64 KiB, and an optional
+    `"json"` format. `temperature` (0 to 2), `seed` and `num_ctx` (512 to
+    32768) are optional, and so is `think` (a boolean, sent as Ollama's
+    top-level `think`). Any other key, including `num_predict`, or an
+    out-of-range value is refused (exit 64).
+  - The model must be in the peer's deployment-written allowlist at
+    `%ProgramData%\ProjectBuddy\peer-ask\infer\allowlist.json`. The
+    format is `projectbuddy/peer-infer-allowlist@3`, in which each model has
+    a name, a pinned digest, and optional `ports` and `itemTimeoutSeconds`.
+    `@2` files (without `itemTimeoutSeconds`) and `@1` files (without
+    `ports` either) are still accepted, with the defaults.
+  - `ports` is a non-empty, distinct subset of the fixed set 11434 (NVIDIA
+    GPU) and 11435 (Intel Arc iGPU, Vulkan), and defaults to `[11434]`. The
+    model must be installed with exactly its pinned digest on every listed
+    port's server. The peer never pulls models.
+  - Each item is one `/api/chat` call to a loopback Ollama through the
+    shared `ProjectBuddy.PeerOllama` client. Workers on each listed port
+    take items from one shared queue, so one batch keeps both accelerators
+    busy.
+  - Host facts give 11434 four workers and 11435 two. Each must equal its
+    server's `OLLAMA_NUM_PARALLEL` (deployment sets 4 and 2), so items never
+    queue inside Ollama and the item timeout covers generation, not
+    queueing.
+  - Each model's `itemTimeoutSeconds` (30 to 900, default 120) bounds its
+    digest check and each of its items, so a slow accelerator or a
+    reasoning model can have longer than 120 s. The whole call, from reading
+    the request to the last answer, has a fixed 1800 s; a batch must fit in
+    it. Any failure fails the whole call (exit 66), with no partial answer.
+  - The peer always caps generation at `num_predict` 4096 tokens per item,
+    thinking included. Only the final message content is returned, never
+    the thinking text. One answer over 16 KiB of UTF-8 fails the call with
+    the output-limit exit code (65) and its fixed message.
+  - The answer holds only the model's output, its counters and the `port`
+    that answered, per id, and is at most 1 MiB. Every other verb keeps its
+    16 KiB limit and its behaviour.
+  - `ask infer --request <file>` sends the file's bytes with the same fixed
+    ssh invocation. It waits the peer's fixed 1800 s plus 20 s and the
+    connect timeout, and checks that every requested id is answered exactly
+    once, from an allowed port.
+- The `projectbuddy` identity moves to 0.3, because its pinned
+  `tools/peer/README.md` now documents `diagnose` and `infer`: 0.2 with the
+  verb, and 0.3 with per-model item timeouts. The generator now names the
+  model `projectbuddy:0.3-<base>`.
+  - `projectbuddy-probes` follows: its default `--identity`
+    (`ProbeOptions.IdentityModel`) is now `projectbuddy:0.3-qwen2.5-7b`. A
+    test ties it to `identity.json`'s version, so a later bump cannot drift.
+  - `projectbuddy-diagnose` uses that default, so its `ollama-empty`
+    question reports `identity-present` only when the 0.3 identity is
+    installed. Rebuild the identity on the peer before deploying probes or
+    diagnose from this release.
+- The RSR pins move to v0.10.0 (#364): the consumer kit, the standards scan,
+  and projectbuddy-wiki's standard pin, which is now
+  `rsr/ecosystem-wiki-standard@6`. In `@6`, when a stimulus step runs a test
+  file, each Required observation item names one test case verbatim, as
+  `` `file` › describe chain › title ``. A new observation check judges those
+  items, with the consumer kit's newly vendored
+  `.repo-standards-review/observations.py`. Conformance is unchanged.
+  Re-certification at v0.10.0 found no regression: the 5 required gates
+  `PASS`.
+- `scripts/Assemble-WikiSpec.py` accepts multi-line ID-page sections (#366),
+  so test pages can hold the numbered stimulus steps and observation lists
+  of `rsr/ecosystem-wiki-standard@7`.
+  - The hub table cell joins the section's lines with `<br>`, so each row
+    stays on one line. Splitting the cell at `<br>` gives the section text
+    back.
+  - A section is still one blank line, its text, then a blank line. The text
+    may not start or end with whitespace or contain a `## ` heading line.
+    The assembler also refuses, in a section or a title, a literal `<br>` in
+    any letter case, and an unescaped `|` or a code fence line
+    (```` ``` ```` or `~~~`) on any line. A table cell cannot hold a fenced
+    block, and on the page a fence would hide its lines from `--strict`.
+    `--strict` link, budget and ID-mention checks cover every line.
+  - `--strict` does not require ID mentions to be linked in test-case items.
+    These are list items starting with `` `<path>` › `` in a `TEST-###`
+    page's `Required observation` section, because the text after ` › ` is
+    the test runner's verbatim case name. The lead-in sentence, every other
+    line and every other section, such as a requirement's `TestID`, are
+    still checked.
+  - One-line pages assemble to the same bytes as before.
+- The RSR pins move to v0.11.0 (#369): the consumer kit, the standards scan,
+  and projectbuddy-wiki's standard pin, which is now
+  `rsr/ecosystem-wiki-standard@7`. In `@7`, a test-case item may instead be
+  a file item, `` `file` ``, which requires every test case of that file to
+  pass. The vendored `.repo-standards-review/observations.py` adds
+  `evidence --format pytest-junit` and `stimulus`. Conformance is unchanged.
+  This repository's wiki passes the observation check for 30 test pages
+  (#366). Re-certification at v0.11.0 found no regression: the 5 required
+  gates `PASS`.
+- `projectbuddy-kpi` ingests the local AI farm's telemetry (ALW#10).
+  - Migration `0004_farm_telemetry.sql` adds `kpi_v1.farm_jobs` and
+    `kpi_v1.farm_device_samples`, and the views `farm_device_utilization` and
+    `farm_workloads`. The jobs per second and the cache hit rate are computed
+    in `farm_report()`.
+  - `ingest-farm --export <file>` reads the counts-and-timings export that
+    assurance-learning-workbench's `export-farm-telemetry` writes. Rows are
+    keyed by the farm run record's sha256, so ingesting again changes
+    nothing, and an export that changes an ingested row is refused.
+  - The AIU avoided is an estimate from each workload's reference cost,
+    `farm_reference_aiu_per_job:<workload>` in `kpi_v1.settings`, set with
+    `farm-reference` from measured paid runs. It is reported apart from the
+    measured AIU.
+  - `report` adds these figures under `farm` and leaves every other figure
+    unchanged. A peer instance has jobs but no device utilization.
+
 ## v0.5.0
 
 - `projectbuddy-wiki` lets one profile scope declare several ID prefixes

@@ -1,0 +1,17 @@
+{
+ "items_total": 21,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_images_require_explicit_disclosure_beyond_field_approval",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_regions_strip_unapproved_pixels_metadata_and_model_prose",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_invalid_privacy_never_submits_images[unknown-mode]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_invalid_privacy_never_submits_images[outside-box]",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_refusal_observation_retains_no_unvalidated_private_input",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_checkpoint_preserves_budget_and_minimized_output_without_raw_canaries",
+  "- `scripts/tests/test_assisted_benchmark_review.py` \u203a test_expired_checkpoint_privacy_is_not_reused_or_deleted",
+  "- `scripts/tests/test_assisted_benchmark_run.py` \u203a test_entrypoint_does_not_echo_private_paths_in_errors",
+  "- `scripts/tests/test_assisted_benchmark_run.py` \u203a test_receipt_writer_is_private_atomic_and_does_not_overwrite",
+  "- `scripts/tests/test_assisted_benchmark_run.py` \u203a test_cli_refusal_observation_preserves_original_outcome_without_canaries[deadline-2-inference]",
+  "- `scripts/tests/test_assisted_benchmark_run.py` \u203a test_cli_refusal_observation_preserves_original_outcome_without_canaries[cancelled-130-inference]",
+  "- `scripts/tests/test_assisted_benchmark_run.py` \u203a test_cli_refusal_observation_preserves_original_outcome_without_canaries[finalization-2-finalization]"
+ ]
+}

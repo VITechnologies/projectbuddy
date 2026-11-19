@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Detached second half of agentStop (#381). The session's transcript is flushed after the hook fires, so this waits (up to 30 s) until
+# the latest prompt's last turn has ended in it, takes that turn's last assistant message, and hands it to hooks.on_stop, which marks
+# the session DONE or opens a DECISION NEEDED row. Only the session store's own event logs are read.
+set +e
+umask 077
+sid="${1:-}" transcript="${2:-}" stamp="${3:-}"
+HOME_DIR="${HOME:-/nonexistent}"
+CONFIG_DIR="$HOME_DIR/.config/projectbuddy-hooks"
+STATE_DIR="${XDG_STATE_HOME:-$HOME_DIR/.local/state}/projectbuddy-hooks"
+LOG="$STATE_DIR/hooks.log"
+log() { printf '%s settle %s %s\n' "$(date -u +%FT%TZ)" "$sid" "$*" >> "$LOG"; }
+# shellcheck source=/dev/null
+[ -r "${PB_HOOKS_ENV:-$CONFIG_DIR/env}" ] && . "${PB_HOOKS_ENV:-$CONFIG_DIR/env}"
+[[ "$sid" =~ ^[A-Za-z0-9._-]{8,80}$ && "$stamp" =~ ^[0-9]{10,16}$ ]] || { log "bad arguments"; exit 0; }
+case "$transcript" in "$HOME_DIR"/.copilot/session-state/*/events.jsonl) ;; *) log "transcript outside the session store"; exit 0 ;; esac
+[[ "$transcript" != *..* && -r "${PB_HOOKS_PASSWORD_FILE:-}" ]] || { log "bad transcript path or no password file"; exit 0; }
+
+tmp="$(mktemp -d "$STATE_DIR/settle.XXXXXX")" || exit 0
+trap 'rm -rf "$tmp"' EXIT
+# The last turn after the latest prompt, if it has ended: its final assistant.message line, then its turn_end line. The turn must
+# have ended no earlier than the stop that started this step (minus 0.5 s of clock slack), so a previous turn that is still the
+# newest thing in a not yet flushed transcript is never taken for this one.
+find_message() {
+  tail -c 524288 "$transcript" 2> /dev/null | awk '
+    /^\{"type":"user.message"/ { started = 0; ended = 0; msg = "" }
+    /^\{"type":"assistant.turn_start"/ { started = 1; ended = 0; msg = "" }
+    /^\{"type":"assistant.message"/ { if (started) msg = $0 }
+    /^\{"type":"assistant.turn_end"/ { if (started) { ended = 1; end_line = $0 } }
+    END { if (ended) { print msg; print end_line; exit 0 } exit 1 }' > "$tmp/found" || return 1
+  local end_ts end_ms
+  end_ts="$(sed -n '2s/.*"timestamp":"\([^"]*\)".*/\1/p' "$tmp/found")"
+  end_ms="$(date -u -d "$end_ts" +%s%3N 2> /dev/null)" || return 1
+  [ "$end_ms" -ge $((stamp - 500)) ] || return 1
+  sed -n '1p' "$tmp/found" > "$tmp/line"
+}
+found=0
+for _ in $(seq 1 "${PB_SETTLE_TRIES:-60}"); do
+  if find_message; then found=1; break; fi
+  sleep 0.5
+done
+[ "$found" = 1 ] || { log "the turn did not end in the transcript within 30 s"; exit 0; }
+[ -s "$tmp/line" ] || { log "the last turn has no assistant message"; exit 0; }
+
+printf '{"sessionId":"%s","timestamp":%s}' "$sid" "$stamp" > "$tmp/payload"
+export PGCONNECT_TIMEOUT=2 PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-55432}" PGDATABASE="${PGDATABASE:-kpi_local}" PGUSER="${PGUSER:-pb_hooks}"
+PGPASSWORD="$(tr -d '\r\n' < "$PB_HOOKS_PASSWORD_FILE")"; export PGPASSWORD
+# shellcheck disable=SC2016
+printf '\\set p `cat "%s/payload"`\n\\set l `cat "%s/line"`\nSELECT hooks.on_stop(:'"'p'"'::jsonb, :'"'l'"');\n' "$tmp" "$tmp" \
+  | timeout 5 psql -X -q -At -w -v ON_ERROR_STOP=1 -f - > /dev/null || log "database write failed (exit $?)"
+exit 0

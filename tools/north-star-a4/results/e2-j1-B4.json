@@ -1,0 +1,164 @@
+{
+ "P019": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Names each of the four codes as making the class not-ready"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "environment-missing and requester-unknown stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "plan-unsupported, status unsupported, exit 23 stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "every finding code documented with fix"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "exit 0/21/22 stated"
+  }
+ ],
+ "P020": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "leak in rationale/requester/target blocks request"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "summary withheld, heading withheld, no internal-host9/req-001"
+  },
+  {
+   "ref": "R3",
+   "label": "absent",
+   "reason": "no summary rows/inspection links observation"
+  },
+  {
+   "ref": "R4",
+   "label": "partial",
+   "reason": "policy failures listed; unknown class and expired refusal not covered"
+  },
+  {
+   "ref": "R5",
+   "label": "partial",
+   "reason": "only precondition failure details; online-failures test not named or described"
+  }
+ ],
+ "P021": [
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "second hold refused, call logs show single approve call"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "lba identity substituted refused; identity or contract digest changed"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "re-hashed altered taskId raises differs from trusted policy"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "choice group on single-server contract raises"
+  }
+ ],
+ "P022": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "equal views and acknowledgements for same seed"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "oracle true after expected target; raises before action"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "wrong state claim gives state_grounded false, others true"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "one click_target, closed schema, errors, no oracle text"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "unknown tool/malformed/wrong task/extra arg error, awaiting_decision"
+  }
+ ],
+ "P023": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "test names list each of the four codes as not-ready"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "test name states missing environment and unknown requester not ready"
+  },
+  {
+   "ref": "R3",
+   "label": "partial",
+   "reason": "plan-unsupported cases named but exit 23 not stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "docs test name states findings documented with fix"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "exit code test ids 0/21/22"
+  }
+ ],
+ "P024": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "callIndex 0 then 1, caller append ignored, teardown once"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "121s completion raises expired in flight"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "abort blocks teardown until complete_call"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "host change refuses completion and teardown"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "extra arg and wrong VM UUID denied; teardown bound VM"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "second broker already claimed; failed call no retry"
+  }
+ ]
+}

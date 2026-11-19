@@ -7,7 +7,7 @@ namespace ProjectBuddy.PeerProbes.Tests;
 
 public sealed class RegistryTests
 {
-    private const string Identity = "projectbuddy:0.1-qwen2.5-7b";
+    private const string Identity = "projectbuddy:0.3-qwen2.5-7b";
 
     internal static Redaction Same(string text) => new(text, new Dictionary<string, int>());
 
@@ -35,6 +35,14 @@ public sealed class RegistryTests
         Assert.Equal(new IntArgument("hours", 1, 72, 24, "How many hours back to count."), Assert.Single(Registry.Tools[^1].Arguments));
         Assert.Equal(Identity, new ProbeOptions().IdentityModel);
         Assert.Equal(16 * 1024, new ProbeOptions().MaxResultBytes);
+    }
+
+    [Fact]
+    public void TheDefaultIdentityFollowsTheManifest()
+    {
+        // New-PeerModelfile.py names the model projectbuddy:<identityVersion>-<base with ':' as '-'>.
+        var manifest = JsonNode.Parse(File.ReadAllText(FakeSources.RepositoryFile("tools/peer/identity/identity.json")))!;
+        Assert.Equal($"projectbuddy:{(string?)manifest["identityVersion"]}-qwen2.5-7b", new ProbeOptions().IdentityModel);
     }
 
     [Theory]

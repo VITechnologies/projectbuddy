@@ -11,6 +11,7 @@ public static class ExitCodes
     public const int Ok = 0;
     public const int Usage = 2;
     public const int Refused = 3;
+    public const int Alarm = 4;
     public const int Database = 5;
 }
 
@@ -29,7 +30,8 @@ public sealed record Options(string Command, string Host, int Port, string User,
 public static partial class Program
 {
     public const string Usage =
-        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | track --repository <owner/repo|group/project> --forge <github|gitlab>"
+        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | ingest-farm --export <file>"
+        + " | farm-reference --workload <id> --aiu-per-job <n> | track --repository <owner/repo|group/project> --forge <github|gitlab>"
         + " | resolve [--gh <path>] [--glab <path>] | report"
         + " | mark --session <id> --item <ref> | gap --session <id> --item <ref> --kind <code-read|operator-question|failed-run> --fact <text> --belongs-in <document>"
         + " | review --session <id> --item <ref> --round <n> --findings <n> | requirements --item <ref> --count <n>"
@@ -40,6 +42,10 @@ public static partial class Program
     {
         ["migrate"] = ([], ["--create-database"]),
         ["ingest"] = ([], ["--sessions"]),
+        ["ingest-farm"] = (["--export"], []),
+        ["farm-reference"] = (["--workload", "--aiu-per-job"], []),
+        ["budget"] = (["--usd"], ["--reserve-usd"]),
+        ["quota"] = ([], ["--window-hours", "--items", "--stale-hours"]),
         ["track"] = (["--repository", "--forge"], []),
         ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
@@ -66,16 +72,19 @@ public static partial class Program
                 database.EnsureMigrated();
             }
 
+            var exit = ExitCodes.Ok;
             JsonNode result = options.Command switch
             {
                 "migrate" => database.Migrate(options.Values.ContainsKey("--create-database")),
                 "ingest" => Ingest.Run(database, options.Get("--sessions")!),
+                "ingest-farm" => FarmIngest.Run(database, options.Get("--export")!),
                 "resolve" => Forge.Resolve(database, options.Get("--gh") ?? "gh", options.Get("--glab") ?? "glab"),
                 "report" => database.Report(),
+                "quota" => Quota.Run(database, options, out exit),
                 _ => database.Record(options),
             };
             stdout.WriteLine(result.ToJsonString());
-            return ExitCodes.Ok;
+            return exit;
         }
         catch (KpiException error)
         {
@@ -147,13 +156,29 @@ public static partial class Program
             throw UsageError("--password-file needs a fully qualified path");
         }
 
+        if (args[0] == "ingest-farm")
+        {
+            values["--export"] = Path.GetFullPath(values["--export"]);
+        }
+
         if (args[0] == "ingest")
         {
             values["--sessions"] = Path.GetFullPath(values.GetValueOrDefault("--sessions")
                 ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot", "session-state"));
         }
 
-        return new Options(args[0], values.GetValueOrDefault("--host", "127.0.0.1"), number, user, password, database, values);
+        var parsed = new Options(args[0], values.GetValueOrDefault("--host", "127.0.0.1"), number, user, password, database, values);
+        foreach (var name in new[] { "--usd", "--reserve-usd", "--window-hours", "--stale-hours" }.Where(values.ContainsKey))
+        {
+            Number(parsed, name);
+        }
+
+        if (parsed.Get("--items") is { } items)
+        {
+            Quota.Items(items);
+        }
+
+        return parsed;
     }
 
     internal static int Integer(Options options, string name) =>

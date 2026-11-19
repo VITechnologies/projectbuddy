@@ -107,11 +107,42 @@ internal sealed class Database(Options options)
         }
     }
 
-    public decimal Setting(string key)
+    public decimal Setting(string key) => OptionalSetting(key)!.Value;
+
+    public decimal? OptionalSetting(string key)
     {
         using var connection = Open(options.Database);
         using var command = new NpgsqlCommand("SELECT kpi_v1.setting($1)", connection) { Parameters = { new() { Value = key } } };
-        return (decimal)command.ExecuteScalar()!;
+        return command.ExecuteScalar() is decimal value ? value : null;
+    }
+
+    // The snapshots from `window` hours before the newest one on, oldest first; empty when none was ingested.
+    public List<Ingest.QuotaSnapshot> QuotaSnapshots(double window)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("""
+            SELECT at, used_requests, entitlement_requests, overage, reset_date FROM kpi_v1.quota_snapshots
+            WHERE at >= (SELECT max(at) FROM kpi_v1.quota_snapshots) - $1 * interval '1 hour' ORDER BY at, overage
+            """, connection) { Parameters = { new() { Value = window } } };
+        using var reader = command.ExecuteReader();
+        var snapshots = new List<Ingest.QuotaSnapshot>();
+        while (reader.Read())
+        {
+            snapshots.Add(new(reader.GetFieldValue<DateTimeOffset>(0), reader.GetDecimal(1), reader.GetDecimal(2), reader.GetDecimal(3), reader.GetFieldValue<DateTimeOffset>(4)));
+        }
+
+        return snapshots;
+    }
+
+    // The AIU, count and newest time of the model calls recorded after a quota snapshot, in any session.
+    public (decimal Units, long Calls, DateTimeOffset? LastAt) UnitsSince(DateTimeOffset at)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("SELECT coalesce(sum(aiu), 0), count(*), max(at) FROM kpi_v1.model_calls WHERE at > $1", connection)
+        { Parameters = { new() { Value = at } } };
+        using var reader = command.ExecuteReader();
+        reader.Read();
+        return (reader.GetDecimal(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2));
     }
 
     // Stores one session's facts in one transaction. Facts keyed by event or tool-call ID are inserted once; a tool call
@@ -164,6 +195,13 @@ internal sealed class Database(Options options)
             INSERT INTO kpi_v1.operator_messages (event_id, session_id, at)
             SELECT m.id, $1, m.at FROM unnest($2::uuid[], $3::timestamptz[]) AS m(id, at) ON CONFLICT DO NOTHING
             """, session.Id, session.Messages.Select(m => m.Id).ToArray(), session.Messages.Select(m => m.At).ToArray());
+        Run("""
+            INSERT INTO kpi_v1.quota_snapshots (session_id, at, used_requests, entitlement_requests, overage, reset_date)
+            SELECT $1, q.at, q.used, q.entitlement, q.overage, q.reset
+            FROM unnest($2::timestamptz[], $3::numeric[], $4::numeric[], $5::numeric[], $6::timestamptz[]) AS q(at, used, entitlement, overage, reset)
+            ON CONFLICT (session_id, at) DO NOTHING
+            """, session.Id, session.Quota.Select(q => q.At).ToArray(), session.Quota.Select(q => q.UsedRequests).ToArray(),
+            session.Quota.Select(q => q.EntitlementRequests).ToArray(), session.Quota.Select(q => q.Overage).ToArray(), session.Quota.Select(q => q.ResetDate).ToArray());
         Run("DELETE FROM kpi_v1.active_spans WHERE session_id = $1", session.Id);
         Run("""
             INSERT INTO kpi_v1.active_spans (session_id, span)
@@ -215,12 +253,72 @@ internal sealed class Database(Options options)
         command.ExecuteNonQuery();
     }
 
+    // Stores a farm export in one transaction. A row already ingested is counted as present; a row whose key was ingested
+    // with other values refuses the whole export, since its key is the content hash of the farm run record.
+    public JsonObject StoreFarm(IReadOnlyList<FarmIngest.Job> jobs, IReadOnlyList<FarmIngest.Sample> samples)
+    {
+        using var connection = Open(options.Database);
+        using var transaction = connection.BeginTransaction();
+        (long Added, long Present) Run(string table, int rows, string sql, params object[] values)
+        {
+            using var command = new NpgsqlCommand(sql, connection, transaction);
+            foreach (var value in values)
+            {
+                command.Parameters.Add(new() { Value = value });
+            }
+
+            var added = 0L;
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    added += reader.GetBoolean(0) ? 1 : throw new KpiException(ExitCodes.Refused, $"the export changes a {table} row already ingested");
+                }
+            }
+
+            return (added, rows - added);
+        }
+
+        var job = Run("farm_jobs", jobs.Count, """
+            INSERT INTO kpi_v1.farm_jobs AS t
+            SELECT * FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::text[], $5::text[], $6::bigint[], $7::bigint[], $8::bigint[], $9::bigint[], $10::bigint[], $11::numeric[])
+            ON CONFLICT (source_sha256, workload, instance_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at
+            WHERE (t.recorded_at, t.backend, t.jobs, t.cache_hits, t.answered, t.failed, t.eval_tokens, t.window_seconds)
+                IS DISTINCT FROM (EXCLUDED.recorded_at, EXCLUDED.backend, EXCLUDED.jobs, EXCLUDED.cache_hits, EXCLUDED.answered, EXCLUDED.failed, EXCLUDED.eval_tokens, EXCLUDED.window_seconds)
+            RETURNING t.xmax = 0
+            """, jobs.Select(j => j.Source).ToArray(), jobs.Select(j => j.RecordedAt).ToArray(), jobs.Select(j => j.Workload).ToArray(),
+            jobs.Select(j => j.Instance).ToArray(), jobs.Select(j => j.Backend).ToArray(), jobs.Select(j => j.Jobs).ToArray(),
+            jobs.Select(j => j.CacheHits).ToArray(), jobs.Select(j => j.Answered).ToArray(), jobs.Select(j => j.Failed).ToArray(),
+            jobs.Select(j => j.EvalTokens).ToArray(), jobs.Select(j => j.Window).ToArray());
+        var sample = Run("farm_device_samples", samples.Count, """
+            INSERT INTO kpi_v1.farm_device_samples AS t
+            SELECT * FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::text[], $5::numeric[], $6::numeric[])
+            ON CONFLICT (source_sha256, instance_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at
+            WHERE (t.recorded_at, t.backend, t.window_seconds, t.busy_seconds)
+                IS DISTINCT FROM (EXCLUDED.recorded_at, EXCLUDED.backend, EXCLUDED.window_seconds, EXCLUDED.busy_seconds)
+            RETURNING t.xmax = 0
+            """, samples.Select(s => s.Source).ToArray(), samples.Select(s => s.RecordedAt).ToArray(), samples.Select(s => s.Instance).ToArray(),
+            samples.Select(s => s.Backend).ToArray(), samples.Select(s => s.Window).ToArray(), samples.Select(s => s.Busy).ToArray());
+        transaction.Commit();
+        return new JsonObject
+        {
+            ["jobs"] = new JsonObject { ["new"] = job.Added, ["present"] = job.Present },
+            ["deviceSamples"] = new JsonObject { ["new"] = sample.Added, ["present"] = sample.Present },
+        };
+    }
+
     public JsonObject Record(Options record)
     {
         var item = (object?)record.Get("--item") ?? DBNull.Value;
         var (sql, values) = record.Command switch
         {
-            "mark" => ("INSERT INTO kpi_v1.work_markers (session_id, item) VALUES ($1, $2) RETURNING id, at", new object[] { record.Get("--session")!, item }),
+            "mark" => ("""
+                WITH latest AS (
+                    SELECT id, at, item FROM kpi_v1.work_markers WHERE session_id = $1 ORDER BY at DESC, id DESC LIMIT 1),
+                added AS (
+                    INSERT INTO kpi_v1.work_markers (session_id, item) SELECT $1, $2 WHERE NOT EXISTS (SELECT FROM latest WHERE item = $2) RETURNING id, at)
+                SELECT id, at FROM added UNION ALL SELECT id, at FROM latest WHERE item = $2
+                """, new object[] { record.Get("--session")!, item }),
             "gap" => ("INSERT INTO kpi_v1.spec_gaps (session_id, item, kind, fact, belongs_in) VALUES ($1, $2, $3, $4, $5) RETURNING id, at",
                 [record.Get("--session")!, item, record.Get("--kind")!, record.Get("--fact")!, record.Get("--belongs-in")!]),
             "review" => ("INSERT INTO kpi_v1.reviews (session_id, item, round, findings) VALUES ($1, $2, $3, $4) RETURNING id, at",
@@ -229,6 +327,18 @@ internal sealed class Database(Options options)
                 INSERT INTO kpi_v1.repositories (repository, forge) VALUES ($1, $2)
                 ON CONFLICT (repository) DO UPDATE SET forge = EXCLUDED.forge RETURNING 0::bigint AS id, clock_timestamp() AS at
                 """, [record.Get("--repository")!, record.Get("--forge")!]),
+            "farm-reference" => ("""
+                INSERT INTO kpi_v1.settings (key, value) VALUES ('farm_reference_aiu_per_job:' || $1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value RETURNING 0::bigint AS id, clock_timestamp() AS at
+                """, [record.Get("--workload")!, Program.Number(record, "--aiu-per-job")]),
+            "budget" => ("""
+                WITH budget AS (
+                    INSERT INTO kpi_v1.settings (key, value) VALUES ('budget_usd', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value),
+                reserve AS (
+                    INSERT INTO kpi_v1.settings (key, value) VALUES ('reserve_usd', coalesce($2::numeric, 0))
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value WHERE $2::numeric IS NOT NULL)
+                SELECT 0::bigint AS id, clock_timestamp() AS at
+                """, [Program.Number(record, "--usd"), record.Get("--reserve-usd") is null ? DBNull.Value : Program.Number(record, "--reserve-usd")]),
             "requirements" => ("""
                 INSERT INTO kpi_v1.requirement_counts (item, requirements) VALUES ($1, $2)
                 ON CONFLICT (item) DO UPDATE SET requirements = EXCLUDED.requirements RETURNING 0::bigint AS id, clock_timestamp() AS at

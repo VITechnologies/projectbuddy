@@ -836,7 +836,7 @@ def live_choice_dispatcher():
     value, contract_value = choice_policy()
     template = value["authorizationTemplate"]
     template["evidenceFields"] = ["captureMetadata", "frameHashes", "frameImages", "resourceSamples"]
-    template["ollamaModel"]["tag"] = "projectbuddy:0.1-qwen2.5-7b"
+    template["ollamaModel"]["tag"] = "projectbuddy:0.3-qwen2.5-7b"
     template["reviewPrivacy"]["imageMode"] = "full-frame"
     template["reviewLifecycle"]["maxImageCount"] = 1
     template["reviewBudget"].update(contextTokens=16384, imageTokensPerImage=2048,

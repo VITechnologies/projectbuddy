@@ -1,0 +1,174 @@
+{
+ "P007": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Obs 3,4 state host key enrollment, boot ID before/after, queries, find"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Obs 2 exit 2, no stdout, both modes, forwarding rule cases"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Obs 5 runner/scan failure/boot ID change exit 2"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Obs 6 exit 1, no box, ACPI power button"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Obs 8 verifier refusals"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Obs 7 accepts Z scannedAt"
+  }
+ ],
+ "P008": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "runner/credentials files fail scan"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "unit fails scan"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "packager exit 2, no output file"
+  },
+  {
+   "ref": "R4",
+   "label": "partial",
+   "reason": "unit-stops-run stated via check_runner_units LaneBoxError; failed query stopping run not stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "real processes, no HTTP request"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "mutant endpoints recorded by detector"
+  }
+ ],
+ "P009": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "names-only plan, test name states it"
+  },
+  {
+   "ref": "R2",
+   "label": "partial",
+   "reason": "payload names/values in order via test name; empty declaration giving empty payload not in that item"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "missing/empty/NUL named, before VM mutation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "stdin only stated; argv test and 0600 root file tests listed"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "test name states empty file when none declared"
+  }
+ ],
+ "P010": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "unit or failed query stops the run"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "stated"
+  }
+ ],
+ "P011": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "stated"
+  }
+ ],
+ "P012": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "stated"
+  }
+ ]
+}

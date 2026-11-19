@@ -11,7 +11,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Deterministic>true</Deterministic>
     <IsTrimmable>true</IsTrimmable>
-    <Version>0.2.0</Version>
+    <Version>0.4.0</Version>
     <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
@@ -24,6 +24,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ProjectBuddy.PeerAsk.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- infer (#358) talks to the local Ollama only through the shared guard library: loopback, no proxy, no redirects, pinned digests. -->
+    <ProjectReference Include="../../ollama/ProjectBuddy.PeerOllama/ProjectBuddy.PeerOllama.csproj" />
   </ItemGroup>
 
 </Project>

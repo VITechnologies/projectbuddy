@@ -1,0 +1,1575 @@
+{
+ "P007": [
+  {
+   "id": "P007-01",
+   "stratum": "other",
+   "claim": "Step 4 exits 0 and reports 205 passed.",
+   "label": "supported",
+   "reason": "205 tests collected in the file; all pass at the commit."
+  },
+  {
+   "id": "P007-02",
+   "stratum": "other",
+   "claim": "Step 5 exits 0 and reports 29 passed.",
+   "label": "supported",
+   "reason": "29 cases collected for test_the_clone_adapter_refuses."
+  },
+  {
+   "id": "P007-03",
+   "stratum": "other",
+   "claim": "Step 5 output includes the line for test_the_clone_adapter_refuses[apply-changes15-box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it].",
+   "label": "supported",
+   "reason": "That id is collected."
+  },
+  {
+   "id": "P007-04",
+   "stratum": "other",
+   "claim": "A VMState of poweroff or saved is refused with 'source VM must be running for the runner scan'.",
+   "label": "supported",
+   "reason": "Two REFUSALS cases with that message."
+  },
+  {
+   "id": "P007-05",
+   "stratum": "other",
+   "claim": "No forwarding rule, a rule bound to 0.0.0.0, a rule for port 2223, and a second rule are each refused with the exactly-one-loopback-rule message.",
+   "label": "supported",
+   "reason": "Four REFUSALS cases with FORWARD."
+  },
+  {
+   "id": "P007-06",
+   "stratum": "other",
+   "claim": "For every refusal in test_the_packager_refuses, in both plan and --run modes, the packager exits 2.",
+   "label": "supported",
+   "reason": "assert run(*mode) == 2 over both modes."
+  },
+  {
+   "id": "P007-07",
+   "stratum": "other",
+   "claim": "For every such refusal the packager prints nothing on standard output.",
+   "label": "supported",
+   "reason": "assert captured.out == ''."
+  },
+  {
+   "id": "P007-08",
+   "stratum": "other",
+   "claim": "For every such refusal standard error starts 'Vagrant box packaging: FAIL: ' and contains the case's message.",
+   "label": "supported",
+   "reason": "startswith and message-in assertions."
+  },
+  {
+   "id": "P007-09",
+   "stratum": "other",
+   "claim": "For every such refusal the fake host records no mutation (no poweroff, acpipowerbutton, take or vagrant package).",
+   "label": "supported",
+   "reason": "mutations() == [] covers ssh poweroff, controlvm, take, vagrant."
+  },
+  {
+   "id": "P007-10",
+   "stratum": "other",
+   "claim": "For every such refusal the box, receipt and receipt hash outputs are unchanged.",
+   "label": "supported",
+   "reason": "outputs(state) == before."
+  },
+  {
+   "id": "P007-11",
+   "stratum": "other",
+   "claim": "The only enrollment is enroll-ssh-host-key.py --host 127.0.0.1 --port 2222 --expected-fingerprint <base receipt fingerprint> --out <file>.",
+   "label": "supported",
+   "reason": "host.enrolled == [[...]] with those args."
+  },
+  {
+   "id": "P007-12",
+   "stratum": "other",
+   "claim": "A base receipt whose fingerprint differs from the guest's is refused with 'runner scan failed: guest SSH identity did not become ready'.",
+   "label": "supported",
+   "reason": "Case with 'm'*43 fingerprint; fake enroll fails on mismatch."
+  },
+  {
+   "id": "P007-13",
+   "stratum": "other",
+   "claim": "Four malformed base receipt fingerprints are refused with 'base receipt SSH fingerprint is invalid'.",
+   "label": "supported",
+   "reason": "Four BASE_KEY cases."
+  },
+  {
+   "id": "P007-14",
+   "stratum": "other",
+   "claim": "On a clean guest the guest commands are exactly, in order, the boot ID read, list-unit-files, list-units, the sudo find, and the boot ID read.",
+   "label": "supported",
+   "reason": "commands == [BOOT_ID, UNIT_FILES, UNITS, SCAN, BOOT_ID] with the stated strings."
+  },
+  {
+   "id": "P007-15",
+   "stratum": "other",
+   "claim": "The plan output ends 'runner_scan=clean boot_id=6f5e7081-92a3-4b4c-9e6f-708192a3b4c5'.",
+   "label": "supported",
+   "reason": "Exact stdout line list asserted."
+  },
+  {
+   "id": "P007-16",
+   "stratum": "other",
+   "claim": "The clean plan run records no host mutation.",
+   "label": "supported",
+   "reason": "mutations() == [] in plan test."
+  },
+  {
+   "id": "P007-17",
+   "stratum": "other",
+   "claim": "A unit actions.runner.org-repo.lane.service in list-units or in list-unit-files is refused with the REQ-105 'carries an Actions runner' message.",
+   "label": "supported",
+   "reason": "Two REFUSALS cases."
+  },
+  {
+   "id": "P007-18",
+   "stratum": "other",
+   "claim": "The two configuration files are refused with the message naming /home/actor/actions-runner/.credentials and .runner.",
+   "label": "supported",
+   "reason": "REFUSALS case with that message."
+  },
+  {
+   "id": "P007-19",
+   "stratum": "other",
+   "claim": "An unreadable boot ID, a non-UUID boot ID, list-unit-files exit 1, an empty list-units, and find exit 1 and exit 124 are each refused with a message starting 'runner scan failed:'.",
+   "label": "supported",
+   "reason": "Each REFUSALS case has that prefix."
+  },
+  {
+   "id": "P007-20",
+   "stratum": "other",
+   "claim": "A different boot ID after the scan is refused with 'runner scan failed: the guest restarted during the runner scan'.",
+   "label": "supported",
+   "reason": "guest_replies(BOOT_ID, two ids) case."
+  },
+  {
+   "id": "P007-21",
+   "stratum": "other",
+   "claim": "Each of these runner-found or scan-failed refusals exits 2 with no mutation.",
+   "label": "supported",
+   "reason": "Same test_the_packager_refuses assertions."
+  },
+  {
+   "id": "P007-22",
+   "stratum": "other",
+   "claim": "In these refusals the VM is left running.",
+   "label": "supported",
+   "reason": "No poweroff/acpipowerbutton mutation is possible per mutations() == []; info stays running."
+  },
+  {
+   "id": "P007-23",
+   "stratum": "other",
+   "claim": "A clean --run exits 0.",
+   "label": "supported",
+   "reason": "assert run('--run') == 0."
+  },
+  {
+   "id": "P007-24",
+   "stratum": "other",
+   "claim": "A clean --run sends 'sudo -S -p \"\" systemctl poweroff' as the sixth guest command.",
+   "label": "supported",
+   "reason": "commands list index 5 is POWEROFF."
+  },
+  {
+   "id": "P007-25",
+   "stratum": "other",
+   "claim": "A clean --run's mutations are poweroff, take, package in that order.",
+   "label": "supported",
+   "reason": "mutation_names() == ['poweroff','take','package']."
+  },
+  {
+   "id": "P007-26",
+   "stratum": "other",
+   "claim": "A guest that ignores systemctl poweroff gets acpipowerbutton and is then packaged.",
+   "label": "supported",
+   "reason": "Power-button test mutation names."
+  },
+  {
+   "id": "P007-27",
+   "stratum": "other",
+   "claim": "A guest that ignores both poweroff and the power button fails with exactly 'Vagrant box packaging: FAIL: source VM did not power off after the runner scan'.",
+   "label": "supported",
+   "reason": "ignores_power case, exact stderr equality."
+  },
+  {
+   "id": "P007-28",
+   "stratum": "other",
+   "claim": "A guest whose password file disappears during the scan fails with exactly the same did-not-power-off message.",
+   "label": "supported",
+   "reason": "loses_password case, exact stderr."
+  },
+  {
+   "id": "P007-29",
+   "stratum": "other",
+   "claim": "A stopped VM reporting another snapshot name or UUID, no snapshot name, another VM UUID, or an unreadable state fails with exactly 'source VM is not powered off at the scanned snapshot'.",
+   "label": "supported",
+   "reason": "Five STRAY cases, exact stderr."
+  },
+  {
+   "id": "P007-30",
+   "stratum": "other",
+   "claim": "Each power-off failure exits 1.",
+   "label": "supported",
+   "reason": "assert run('--run') == 1."
+  },
+  {
+   "id": "P007-31",
+   "stratum": "other",
+   "claim": "Each power-off failure performs no take or package.",
+   "label": "supported",
+   "reason": "mutation lists contain only poweroff/acpipowerbutton."
+  },
+  {
+   "id": "P007-32",
+   "stratum": "other",
+   "claim": "Each power-off failure leaves no box, receipt or receipt hash.",
+   "label": "supported",
+   "reason": "outputs(state) == {}."
+  },
+  {
+   "id": "P007-33",
+   "stratum": "other",
+   "claim": "The clean --run writes a receipt whose schema is projectbuddy/ubuntu-vagrant-box@2.",
+   "label": "supported",
+   "reason": "Full receipt equality."
+  },
+  {
+   "id": "P007-34",
+   "stratum": "other",
+   "claim": "That receipt's runnerScan is exactly bootId 6f5e..., runnerUnits [], runnerConfigurations [], and skippedRoots [/dev,/proc,/run,/sys] plus scannedAt.",
+   "label": "supported",
+   "reason": "receipt == {...} after popping scannedAt."
+  },
+  {
+   "id": "P007-35",
+   "stratum": "other",
+   "claim": "scannedAt has UTC offset zero and is within one minute of the test's clock.",
+   "label": "supported",
+   "reason": "utcoffset and < 1 minute assertions."
+  },
+  {
+   "id": "P007-36",
+   "stratum": "other",
+   "claim": "The real box verifier accepts the written receipt and box with exit 0 and no error output.",
+   "label": "supported",
+   "reason": "real_run(...) == (0, '')."
+  },
+  {
+   "id": "P007-37",
+   "stratum": "other",
+   "claim": "The real box verifier also accepts scannedAt written with Z.",
+   "label": "supported",
+   "reason": "Z test asserts (0, '')."
+  },
+  {
+   "id": "P007-38",
+   "stratum": "other",
+   "claim": "The real box verifier exits 2 with 'Vagrant box receipt: FAIL: <message>' for schema @1 ('box was packaged without a runner scan (ubuntu-vagrant-box@1); repackage it').",
+   "label": "supported",
+   "reason": "RECEIPT_REFUSALS first case; code == 2."
+  },
+  {
+   "id": "P007-39",
+   "stratum": "other",
+   "claim": "It refuses a removed, list-valued, scannedAt-less or extra-field runnerScan with 'runner scan is missing or malformed'.",
+   "label": "supported",
+   "reason": "Four RECEIPT_REFUSALS cases."
+  },
+  {
+   "id": "P007-40",
+   "stratum": "other",
+   "claim": "It refuses a non-empty runnerUnits, a non-empty runnerConfigurations or a null runnerUnits with 'runner scan found an Actions runner'.",
+   "label": "supported",
+   "reason": "Three cases."
+  },
+  {
+   "id": "P007-41",
+   "stratum": "other",
+   "claim": "It refuses skippedRoots with /home added with 'runner scan skipped other roots'.",
+   "label": "supported",
+   "reason": "One case."
+  },
+  {
+   "id": "P007-42",
+   "stratum": "other",
+   "claim": "It refuses invalid boot IDs and scan times.",
+   "label": "supported",
+   "reason": "Boot ID and scannedAt cases."
+  },
+  {
+   "id": "P007-43",
+   "stratum": "other",
+   "claim": "In step 5, verify-vagrant-clone.py given an @1 box receipt exits 2 with stderr starting 'Vagrant clone verification: FAIL: ' and containing the @1 repackage message.",
+   "label": "supported",
+   "reason": "adapter.run == 2 and startswith/in assertions."
+  },
+  {
+   "id": "P007-44",
+   "stratum": "other",
+   "claim": "In step 5 the @1 refusal runs no clone check.",
+   "label": "supported",
+   "reason": "adapter.checks == []."
+  },
+  {
+   "id": "P007-45",
+   "stratum": "other",
+   "claim": "The tests fix the exact systemctl command strings but do not compare them with scripts/vagrant_clone/core.py.",
+   "label": "supported",
+   "reason": "Strings are constants; no comparison in tests."
+  },
+  {
+   "id": "P007-46",
+   "stratum": "other",
+   "claim": "A source VM carrying only a .runner file, or only a .credentials file, is not exercised.",
+   "label": "supported",
+   "reason": "Only the guest listing both files is tested."
+  },
+  {
+   "id": "P007-47",
+   "stratum": "other",
+   "claim": "The stimulus drives the packager against a fake VirtualBox, Vagrant and guest and does not show what a real host reports.",
+   "label": "supported",
+   "reason": "Stimulus describes fakes."
+  },
+  {
+   "id": "P007-48",
+   "stratum": "other",
+   "claim": "Live verification is planned and not performed at the member commit.",
+   "label": "supported",
+   "reason": "REQ-105 verification text says so."
+  }
+ ],
+ "P008": [
+  {
+   "id": "P008-01",
+   "stratum": "other",
+   "claim": "Step 2 exits with code 0.",
+   "label": "supported",
+   "reason": "All 15 selectors pass at the commit."
+  },
+  {
+   "id": "P008-02",
+   "stratum": "other",
+   "claim": "Step 2's last line reports 18 passed with no failed, skipped, or error count.",
+   "label": "supported",
+   "reason": "18 collected; non-root so unreadable test not skipped."
+  },
+  {
+   "id": "P008-03",
+   "stratum": "other",
+   "claim": "Step 2 reports PASSED for each of the listed test cases.",
+   "label": "supported",
+   "reason": "Collected ids match the listed names."
+  },
+  {
+   "id": "P008-04",
+   "stratum": "other",
+   "claim": "Each case passes only when the assertions below hold.",
+   "label": "supported",
+   "reason": "The named tests contain the assertions listed."
+  },
+  {
+   "id": "P008-05",
+   "stratum": "other",
+   "claim": "The LabVIEW/VIPM/NI residue case is part of the same test function and covers no criterion of this page.",
+   "label": "supported",
+   "reason": "Parametrized case of test_runner_and_labview_residue_fail_readiness."
+  },
+  {
+   "id": "P008-06",
+   "stratum": "other",
+   "claim": "The clean fixture guest gives outcome PASS, bootId bbbbbbbb-cccc-4ddd-8eee-ffffffffffff, and runnerAbsence.skippedRoots [/dev,/proc,/run,/sys].",
+   "label": "supported",
+   "reason": "test_clean_guest_passes_readiness asserts all three."
+  },
+  {
+   "id": "P008-07",
+   "stratum": "other",
+   "claim": "The guest with .runner gives FAIL with 'Actions runner configuration is present: /home/actor/actions-runner'.",
+   "label": "supported",
+   "reason": "Parametrized case."
+  },
+  {
+   "id": "P008-08",
+   "stratum": "other",
+   "claim": "The guest with .credentials gives FAIL with 'Actions runner configuration is present: /opt/runner'.",
+   "label": "supported",
+   "reason": "Parametrized case."
+  },
+  {
+   "id": "P008-09",
+   "stratum": "other",
+   "claim": "The guest with the unit gives FAIL with 'Actions runner unit is present: /etc/systemd/system/actions.runner.org-repo.lane.service'.",
+   "label": "supported",
+   "reason": "Parametrized case."
+  },
+  {
+   "id": "P008-10",
+   "stratum": "other",
+   "claim": "With var/lib/dpkg/status removed, the failures include 'the filesystem scan was incomplete'.",
+   "label": "supported",
+   "reason": "test_incomplete_scans_fail_closed."
+  },
+  {
+   "id": "P008-11",
+   "stratum": "other",
+   "claim": "With a directory under home made unreadable, runnerAbsence.scanErrors is not empty and outcome is FAIL.",
+   "label": "supported",
+   "reason": "test_unreadable_directory_fails_closed."
+  },
+  {
+   "id": "P008-12",
+   "stratum": "other",
+   "claim": "After a readiness receipt is written from a guest with the runner unit, package --run exits with code 2.",
+   "label": "supported",
+   "reason": "test_readiness_problems_are_refused."
+  },
+  {
+   "id": "P008-13",
+   "stratum": "other",
+   "claim": "In that case standard error contains 'an Actions runner unit is present'.",
+   "label": "supported",
+   "reason": "Asserted in err."
+  },
+  {
+   "id": "P008-14",
+   "stratum": "other",
+   "claim": "In that case package --run writes no output file.",
+   "label": "supported",
+   "reason": "host.outputs() == [] at the end."
+  },
+  {
+   "id": "P008-15",
+   "stratum": "other",
+   "claim": "check_readiness_receipt on a receipt without a runner list returns errors including 'readiness receipt: an Actions runner configuration is present'.",
+   "label": "supported",
+   "reason": "runnerAbsence [] case asserted."
+  },
+  {
+   "id": "P008-16",
+   "stratum": "other",
+   "claim": "From a clean readiness receipt, package --run writes a box receipt with schema projectbuddy/ubuntu-lane-box@2 and outcome PASS.",
+   "label": "supported",
+   "reason": "test_run_packages asserts both."
+  },
+  {
+   "id": "P008-17",
+   "stratum": "other",
+   "claim": "That box receipt's runnerAbsence.checkedBootId is bbbbbbbb-cccc-4ddd-8eee-ffffffffffff.",
+   "label": "supported",
+   "reason": "Asserted equals BOOT_ID."
+  },
+  {
+   "id": "P008-18",
+   "stratum": "other",
+   "claim": "The Vagrant clone check under the refuse profile raises CloneError with exactly 'REQ-103: the clone has an Actions runner unit: actions.runner.org-repo.runner-1.service'.",
+   "label": "supported",
+   "reason": "match with ^...$ anchors."
+  },
+  {
+   "id": "P008-19",
+   "stratum": "other",
+   "claim": "In that refusal the guest calls are exactly enroll, list-unit-files, list-units, acpipowerbutton, showvminfo.",
+   "label": "supported",
+   "reason": "guest.calls equality."
+  },
+  {
+   "id": "P008-20",
+   "stratum": "other",
+   "claim": "In that refusal the evidence and runtime directories stay empty.",
+   "label": "supported",
+   "reason": "Both iterdir() == []."
+  },
+  {
+   "id": "P008-21",
+   "stratum": "other",
+   "claim": "A clone without runner units passes with runnerUnits {'policy': 'refuse', 'observed': []}.",
+   "label": "supported",
+   "reason": "Receipt equality asserted."
+  },
+  {
+   "id": "P008-22",
+   "stratum": "other",
+   "claim": "After connect, check_runner_units sends exactly the list-unit-files and list-units systemctl queries over the lane's SSH session.",
+   "label": "supported",
+   "reason": "instance.commands equals id -u x2 then the two shlex-joined queries."
+  },
+  {
+   "id": "P008-23",
+   "stratum": "other",
+   "claim": "check_runner_units raises LaneBoxError naming actions.runner.org-repo.lane.service when list-units lists that unit.",
+   "label": "supported",
+   "reason": "pytest.raises match."
+  },
+  {
+   "id": "P008-24",
+   "stratum": "other",
+   "claim": "The ready lane plan orders check-runner-units before create-account, every probe-<tool> step, transfer-candidate, and fetch-1.",
+   "label": "supported",
+   "reason": "Step name list order."
+  },
+  {
+   "id": "P008-25",
+   "stratum": "other",
+   "claim": "Step 3 prints exactly three lines, defining the subcommands plan, teardown, and verify-teardown.",
+   "label": "supported",
+   "reason": "grep shows three add_parser lines."
+  },
+  {
+   "id": "P008-26",
+   "stratum": "other",
+   "claim": "Run as real processes, plan, teardown (without and with --run), and verify-teardown record no stub invocation and no HTTP request.",
+   "label": "supported",
+   "reason": "detector() == [] after subprocess runs."
+  },
+  {
+   "id": "P008-27",
+   "stratum": "other",
+   "claim": "The teardown and verify-teardown runs exit with code 0 without printing the planted token value.",
+   "label": "supported",
+   "reason": "returncode == 0 and CANARY not in output."
+  },
+  {
+   "id": "P008-28",
+   "stratum": "other",
+   "claim": "A mutant plan requesting actions/runners/registration-token through gh and actions/runners/remove-token over HTTP has both endpoints recorded.",
+   "label": "supported",
+   "reason": "Mutant test asserts both in seen."
+  },
+  {
+   "id": "P008-29",
+   "stratum": "other",
+   "claim": "No file scripts/lane/*.py contains registration-token, remove-token, actions/runners, or api.github.com.",
+   "label": "supported",
+   "reason": "Source-scan test."
+  },
+  {
+   "id": "P008-30",
+   "stratum": "other",
+   "claim": "Not verified: REQ-103 sentence 1's scan running in a real guest before the snapshot and covering a real image's whole file system, since the stimulus scans a fixture directory.",
+   "label": "supported",
+   "reason": "Stimulus uses fixture roots."
+  },
+  {
+   "id": "P008-31",
+   "stratum": "other",
+   "claim": "Not verified: REQ-103 sentence 3's reason for running the check before the snapshot, since it states a reason, not an observable condition.",
+   "label": "supported",
+   "reason": "REQ-103 sentence 3 states a reason."
+  },
+  {
+   "id": "P008-32",
+   "stratum": "other",
+   "claim": "Not verified: the packager refusing a readiness receipt that reports a .runner or .credentials file or an incomplete scan.",
+   "label": "supported",
+   "reason": "Packager is given only a unit receipt among scan-content cases."
+  },
+  {
+   "id": "P008-33",
+   "stratum": "other",
+   "claim": "The packager is offered only a receipt with a runner unit and a receipt without a runner list.",
+   "label": "unsupported",
+   "reason": "Packager is also offered a hash-tampered receipt and other-profile clean receipt; the no-runner-list receipt goes to check_readiness_receipt directly."
+  },
+  {
+   "id": "P008-34",
+   "stratum": "other",
+   "claim": "Not verified: that a refused lane clone is torn down, since teardown waits for the lane executor, absent at the member commit, and the clone check only powers the clone off.",
+   "label": "supported",
+   "reason": "REQ-103 verification text; clone test shows acpipowerbutton only."
+  },
+  {
+   "id": "P008-35",
+   "stratum": "other",
+   "claim": "Not verified: that a live lane run requests no token, since only offline lane commands are run.",
+   "label": "supported",
+   "reason": "Only offline commands in stimulus."
+  },
+  {
+   "id": "P008-36",
+   "stratum": "other",
+   "claim": "Not verified: all SYS-REQ-027 Fit Criterion conditions, since the stimulus produces no lane record, runs no consumer gate, and places no secret in a guest.",
+   "label": "supported",
+   "reason": "Stimulus runs plan/fixtures only."
+  }
+ ],
+ "P009": [
+  {
+   "id": "P009-01",
+   "stratum": "other",
+   "claim": "The first five items exercise, offline and in part, REQ-093's condition that a declared name the dispatching context does not provide fails before any VM mutation, never as a silently empty value.",
+   "label": "supported",
+   "reason": "secret-unset/-empty plan refusals with read-only calls; placement raises on missing/empty."
+  },
+  {
+   "id": "P009-02",
+   "stratum": "other",
+   "claim": "The first five items exercise, offline and in part, REQ-116's condition that a missing or empty declared value is rejected before VM mutation.",
+   "label": "supported",
+   "reason": "Same tests."
+  },
+  {
+   "id": "P009-03",
+   "stratum": "other",
+   "claim": "The next items exercise, offline and in part, REQ-116's condition that a plan or diagnostic contains names only, never values.",
+   "label": "supported",
+   "reason": "Plan test asserts CANARY absent; error tests assert value absent."
+  },
+  {
+   "id": "P009-04",
+   "stratum": "other",
+   "claim": "Only declared names are in the secrets payload.",
+   "label": "supported",
+   "reason": "Payload test excludes OTHER."
+  },
+  {
+   "id": "P009-05",
+   "stratum": "other",
+   "claim": "The secret values go on standard input.",
+   "label": "supported",
+   "reason": "place_secrets sends payload as stdin, not argv."
+  },
+  {
+   "id": "P009-06",
+   "stratum": "other",
+   "claim": "The secret values go to the build phase only, not to the fetch phase.",
+   "label": "supported",
+   "reason": "Supervisor fetch gets no secret and refuses a payload; plan secrets only in build steps."
+  },
+  {
+   "id": "P009-07",
+   "stratum": "other",
+   "claim": "The stimulus runs only offline fixtures and no lane guest.",
+   "label": "supported",
+   "reason": "Stimulus step 3 runs pytest files."
+  },
+  {
+   "id": "P009-08",
+   "stratum": "other",
+   "claim": "The lane evidence-record writer is not implemented at the member commit.",
+   "label": "supported",
+   "reason": "Only a write-evidence plan step exists; no writer in scripts/lane."
+  },
+  {
+   "id": "P009-09",
+   "stratum": "other",
+   "claim": "Not verified: the evidence record's forwarded-name list equals the declared list, including empty when none declared.",
+   "label": "supported",
+   "reason": "No test touches an evidence record."
+  },
+  {
+   "id": "P009-10",
+   "stratum": "other",
+   "claim": "Not verified: no forwarded raw value occurs in any retained evidence byte, and the record states encoded forms are not detected.",
+   "label": "supported",
+   "reason": "No evidence tested."
+  },
+  {
+   "id": "P009-11",
+   "stratum": "other",
+   "claim": "Not verified: a declared secret the workload writes into a declared output fails the run.",
+   "label": "supported",
+   "reason": "No test of this."
+  },
+  {
+   "id": "P009-12",
+   "stratum": "other",
+   "claim": "Not verified: the dispatching job's own token reaches the guest only if declared.",
+   "label": "supported",
+   "reason": "No guest or token test."
+  },
+  {
+   "id": "P009-13",
+   "stratum": "other",
+   "claim": "Not verified: a secret in the dispatching context but absent from the declaration is not observable in the guest or evidence.",
+   "label": "supported",
+   "reason": "No guest/evidence inspected."
+  },
+  {
+   "id": "P009-14",
+   "stratum": "other",
+   "claim": "Not verified: REQ-116's condition that no additional secret is requested merely to generate the record.",
+   "label": "supported",
+   "reason": "No record generated."
+  },
+  {
+   "id": "P009-15",
+   "stratum": "other",
+   "claim": "Not verified: SYS-REQ-027's lane record verified offline by the consumer's gate.",
+   "label": "supported",
+   "reason": "No lane record exists."
+  },
+  {
+   "id": "P009-16",
+   "stratum": "other",
+   "claim": "Not verified: SYS-REQ-027's condition that no undeclared secret reaches the guest.",
+   "label": "supported",
+   "reason": "No lane runs."
+  },
+  {
+   "id": "P009-17",
+   "stratum": "other",
+   "claim": "The planned live check of the brief is not performed.",
+   "label": "supported",
+   "reason": "Stimulus is offline only."
+  },
+  {
+   "id": "P009-18",
+   "stratum": "other",
+   "claim": "The list quotes from docs/vm-provisioning/ubuntu-lane.md the design text these conditions concern.",
+   "label": "supported",
+   "reason": "All four quotes appear in the doc."
+  },
+  {
+   "id": "P009-19",
+   "stratum": "item",
+   "claim": "test_a_missing_empty_or_nul_secret_is_named_and_its_value_is_not[environ0]: a missing VSCE_PAT is refused naming 'VSCE_PAT is missing or empty' without exposing the value.",
+   "label": "supported",
+   "reason": "Raises with that match; CANARY not in message."
+  },
+  {
+   "id": "P009-20",
+   "stratum": "item",
+   "claim": "test_a_missing_empty_or_nul_secret_is_named_and_its_value_is_not[environ1]: an empty VSCE_PAT is refused with 'VSCE_PAT is missing or empty'.",
+   "label": "supported",
+   "reason": "Case {'VSCE_PAT': ''} raises with match."
+  },
+  {
+   "id": "P009-21",
+   "stratum": "item",
+   "claim": "test_the_secrets_payload_is_each_declared_name_and_value_in_order: the payload is each declared name and value in declared order.",
+   "label": "supported",
+   "reason": "Asserts b'VSCE_PAT=...\\0OVSX_PAT=...\\0', excluding OTHER."
+  },
+  {
+   "id": "P009-22",
+   "stratum": "item",
+   "claim": "test_place_secrets_sends_the_payload_on_standard_input_only: the payload goes on standard input only.",
+   "label": "supported",
+   "reason": "stdin equals payload; no word contains CANARY."
+  },
+  {
+   "id": "P009-23",
+   "stratum": "item",
+   "claim": "test_place_secrets_places_an_empty_file_when_no_secret_is_declared: an empty secrets file is placed when none is declared.",
+   "label": "supported",
+   "reason": "calls[0][2] == b''."
+  },
+  {
+   "id": "P009-24",
+   "stratum": "item",
+   "claim": "test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes0]: a failed placing is refused with 'placing the secrets failed'.",
+   "label": "supported",
+   "reason": "sh exit 1 raises with match."
+  },
+  {
+   "id": "P009-25",
+   "stratum": "item",
+   "claim": "test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes1]: a placed file with mode 0644 is refused as not root's own file with mode 0600.",
+   "label": "supported",
+   "reason": "stat 81a4 raises with match."
+  },
+  {
+   "id": "P009-26",
+   "stratum": "item",
+   "claim": "test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes2]: a placed file of a different size is refused ('the sent size').",
+   "label": "supported",
+   "reason": "stat size 3 raises with match."
+  },
+  {
+   "id": "P009-27",
+   "stratum": "item",
+   "claim": "test_the_fetch_steps_get_no_secret: fetch steps get no secret.",
+   "label": "supported",
+   "reason": "Fetch env has no secret; non-empty payload raises Refused."
+  },
+  {
+   "id": "P009-28",
+   "stratum": "item",
+   "claim": "The design text 'it has the network and no secrets' appears in ubuntu-lane.md for the fetch phase.",
+   "label": "supported",
+   "reason": "Doc line 62."
+  },
+  {
+   "id": "P009-29",
+   "stratum": "item",
+   "claim": "The design text 'a declared secret is unset or empty in the plan's environment' appears in ubuntu-lane.md for secret-missing.",
+   "label": "supported",
+   "reason": "Doc line 160."
+  },
+  {
+   "id": "P009-30",
+   "stratum": "item",
+   "claim": "The design text 'writes the run's evidence record' appears in ubuntu-lane.md for write-evidence.",
+   "label": "supported",
+   "reason": "Doc line 258."
+  }
+ ],
+ "P010": [
+  {
+   "id": "P010-01",
+   "stratum": "other",
+   "claim": "Each listed test case passes at the member commit.",
+   "label": "supported",
+   "reason": "All pass at the commit."
+  },
+  {
+   "id": "P010-02",
+   "stratum": "other",
+   "claim": "Not verified: these steps scan fixture guest trees and drive fake VirtualBox, Vagrant and guest sessions, and no step builds an image, boots a guest or packages a real box.",
+   "label": "supported",
+   "reason": "Stimulus is pytest on fixtures and fakes."
+  },
+  {
+   "id": "P010-03",
+   "stratum": "other",
+   "claim": "Not verified: the scan running in a real guest before the snapshot and covering the whole image's file system.",
+   "label": "supported",
+   "reason": "Fixture roots only."
+  },
+  {
+   "id": "P010-04",
+   "stratum": "other",
+   "claim": "Not verified: the packager refusing an incomplete-scan readiness receipt, because no listed case offers the packager such a receipt.",
+   "label": "supported",
+   "reason": "Packager receives only unit/natinst, tampered, other-profile and clean receipts."
+  },
+  {
+   "id": "P010-05",
+   "stratum": "other",
+   "claim": "Not verified: the teardown of a refused clone, because the listed clone case shows only that the clone is powered off and leaves no evidence or runtime files.",
+   "label": "supported",
+   "reason": "Clone test calls and empty dirs only."
+  },
+  {
+   "id": "P010-06",
+   "stratum": "other",
+   "claim": "Not verified: SYS-REQ-027's lane-record condition, because no step produces or verifies a lane record.",
+   "label": "supported",
+   "reason": "No lane record."
+  },
+  {
+   "id": "P010-07",
+   "stratum": "other",
+   "claim": "A clean fixture guest passes with its boot ID recorded.",
+   "label": "supported",
+   "reason": "test_clean_guest_passes_readiness."
+  },
+  {
+   "id": "P010-08",
+   "stratum": "other",
+   "claim": "Each planted runner file or unit fails the scan.",
+   "label": "supported",
+   "reason": "Three parametrized cases."
+  },
+  {
+   "id": "P010-09",
+   "stratum": "other",
+   "claim": "An unreadable directory fails the scan closed.",
+   "label": "supported",
+   "reason": "test_unreadable_directory_fails_closed."
+  },
+  {
+   "id": "P010-10",
+   "stratum": "other",
+   "claim": "The clone check under the refuse profile fails on a runner unit before anything runs in the guest.",
+   "label": "supported",
+   "reason": "calls stop after list-units; capture never runs."
+  },
+  {
+   "id": "P010-11",
+   "stratum": "other",
+   "claim": "The lane plan runs check-runner-units before any workload step.",
+   "label": "supported",
+   "reason": "Ordered before create-account, probes, transfer, fetch, build."
+  },
+  {
+   "id": "P010-12",
+   "stratum": "other",
+   "claim": "The same unit check over the lane's SSH session stops the run on a runner unit.",
+   "label": "supported",
+   "reason": "test_an_instance_with_a_runner_unit_stops_the_run."
+  },
+  {
+   "id": "P010-13",
+   "stratum": "other",
+   "claim": "The same unit check over the lane's SSH session stops the run on a failed query.",
+   "label": "supported",
+   "reason": "test_a_runner_unit_query_that_fails_stops_the_run."
+  },
+  {
+   "id": "P010-14",
+   "stratum": "other",
+   "claim": "The lane plan, teardown and teardown verifier run as real processes.",
+   "label": "supported",
+   "reason": "subprocess.run of Invoke-Lane.py."
+  },
+  {
+   "id": "P010-15",
+   "stratum": "other",
+   "claim": "Every route to GitHub is recorded in those runs.",
+   "label": "unsupported",
+   "reason": "Only gh/curl/wget stubs, proxy variables and GITHUB_API_URL are recorded; other routes are not guaranteed."
+  },
+  {
+   "id": "P010-16",
+   "stratum": "other",
+   "claim": "Those real-process runs make no request.",
+   "label": "supported",
+   "reason": "detector() == []."
+  },
+  {
+   "id": "P010-17",
+   "stratum": "other",
+   "claim": "A mutant lane that requests both tokens is caught.",
+   "label": "supported",
+   "reason": "Both endpoints seen."
+  },
+  {
+   "id": "P010-18",
+   "stratum": "other",
+   "claim": "No lane source names a runner token endpoint.",
+   "label": "supported",
+   "reason": "Source scan test."
+  },
+  {
+   "id": "P010-19",
+   "stratum": "item",
+   "claim": "test_runner_and_labview_residue_fail_readiness[/opt/runner]: a .credentials file under /opt/runner fails readiness with 'Actions runner configuration is present: /opt/runner'.",
+   "label": "supported",
+   "reason": "Asserts FAIL and message in failures."
+  },
+  {
+   "id": "P010-20",
+   "stratum": "item",
+   "claim": "test_unreadable_directory_fails_closed: an unreadable directory under home gives scan errors and a FAIL outcome.",
+   "label": "supported",
+   "reason": "Asserts scanErrors and outcome FAIL."
+  },
+  {
+   "id": "P010-21",
+   "stratum": "item",
+   "claim": "test_readiness_command: the readiness command writes a 0600 receipt with a verified hash, fails (exit 1) on residue, and refuses relative paths (exit 2).",
+   "label": "supported",
+   "reason": "All asserted."
+  },
+  {
+   "id": "P010-22",
+   "stratum": "item",
+   "claim": "test_readiness_problems_are_refused: the packager refuses a tampered, runner-unit, or other-profile readiness receipt and writes no output.",
+   "label": "supported",
+   "reason": "Exit 2 and messages asserted; outputs empty."
+  },
+  {
+   "id": "P010-23",
+   "stratum": "item",
+   "claim": "test_readiness_receipt_checks_report_each_problem: check_readiness_receipt reports each listed problem in its errors.",
+   "label": "supported",
+   "reason": "Five expected errors asserted."
+  },
+  {
+   "id": "P010-24",
+   "stratum": "item",
+   "claim": "test_runner_units_fail_closed[results0]: runner_units with one query result raises 'every runner unit query must have a result'.",
+   "label": "supported",
+   "reason": "pytest.raises match."
+  },
+  {
+   "id": "P010-25",
+   "stratum": "item",
+   "claim": "test_runner_units_fail_closed[results2]: a list-unit-files exit 1 raises 'systemctl list-unit-files failed with exit code 1'.",
+   "label": "supported",
+   "reason": "pytest.raises match."
+  },
+  {
+   "id": "P010-26",
+   "stratum": "item",
+   "claim": "test_an_instance_with_a_runner_unit_stops_the_run: a runner unit in list-units stops the run with LaneBoxError naming it.",
+   "label": "supported",
+   "reason": "pytest.raises match."
+  },
+  {
+   "id": "P010-27",
+   "stratum": "item",
+   "claim": "test_a_runner_unit_query_that_fails_stops_the_run[results2]: a list-units query exiting 255 stops the run.",
+   "label": "supported",
+   "reason": "raises LaneBoxError for (0,UNITS),(255,'')."
+  },
+  {
+   "id": "P010-28",
+   "stratum": "item",
+   "claim": "test_lane_commands_make_no_runner_registration_requests: plan, teardown and verify-teardown make no GitHub request.",
+   "label": "supported",
+   "reason": "detector() == []."
+  },
+  {
+   "id": "P010-29",
+   "stratum": "item",
+   "claim": "test_the_detector_catches_a_lane_that_requests_runner_tokens: a mutant requesting registration and removal tokens is detected.",
+   "label": "supported",
+   "reason": "Both endpoints asserted in seen."
+  },
+  {
+   "id": "P010-30",
+   "stratum": "item",
+   "claim": "test_no_lane_source_names_a_runner_token_endpoint: no scripts/lane file names a token endpoint.",
+   "label": "supported",
+   "reason": "Four strings asserted absent."
+  }
+ ],
+ "P011": [
+  {
+   "id": "P011-01",
+   "stratum": "other",
+   "claim": "Each listed test case passes at the member commit.",
+   "label": "supported",
+   "reason": "All pass at the commit."
+  },
+  {
+   "id": "P011-02",
+   "stratum": "other",
+   "claim": "Not verified: these steps run the lane plan and the probe against fixtures and fakes, and no step boots a guest or writes an evidence record.",
+   "label": "supported",
+   "reason": "Stimulus is pytest on two files."
+  },
+  {
+   "id": "P011-03",
+   "stratum": "other",
+   "claim": "Not verified: REQ-091's 'the engine has no built-in knowledge of any tool', which no test case decides.",
+   "label": "supported",
+   "reason": "No listed case checks it."
+  },
+  {
+   "id": "P011-04",
+   "stratum": "other",
+   "claim": "Not verified: 'its log lists exactly those' and 'no probe installs, updates, or downloads anything', because no step reads a probe log or observes the guest's packages.",
+   "label": "supported",
+   "reason": "No log or package check."
+  },
+  {
+   "id": "P011-05",
+   "stratum": "other",
+   "claim": "Not verified: the evidence record listing each tool's declared and observed version, because the evidence record is not implemented at the member commit.",
+   "label": "supported",
+   "reason": "No evidence writer in scripts/lane."
+  },
+  {
+   "id": "P011-06",
+   "stratum": "other",
+   "claim": "Not verified: the 'missing tool' case, because no listed case probes a tool absent from the guest.",
+   "label": "supported",
+   "reason": "Probe tests use exit 1/124/mismatch, not absence."
+  },
+  {
+   "id": "P011-07",
+   "stratum": "other",
+   "claim": "Not verified: SYS-REQ-027's lane-record condition, because no step produces or verifies a lane record.",
+   "label": "supported",
+   "reason": "No lane record."
+  },
+  {
+   "id": "P011-08",
+   "stratum": "other",
+   "claim": "The plan refuses an empty toolchain.",
+   "label": "supported",
+   "reason": "toolchain-empty case."
+  },
+  {
+   "id": "P011-09",
+   "stratum": "other",
+   "claim": "The plan refuses a toolchain that is not a list.",
+   "label": "supported",
+   "reason": "toolchain-string case."
+  },
+  {
+   "id": "P011-10",
+   "stratum": "other",
+   "claim": "The plan refuses a toolchain entry that is not an object.",
+   "label": "supported",
+   "reason": "toolchain-entry case."
+  },
+  {
+   "id": "P011-11",
+   "stratum": "other",
+   "claim": "The plan refuses a toolchain entry with a wrong field.",
+   "label": "supported",
+   "reason": "toolchain-field case."
+  },
+  {
+   "id": "P011-12",
+   "stratum": "other",
+   "claim": "The plan refuses a toolchain entry with a bad name.",
+   "label": "supported",
+   "reason": "toolchain-name case."
+  },
+  {
+   "id": "P011-13",
+   "stratum": "other",
+   "claim": "The plan refuses a pattern with two capture groups.",
+   "label": "supported",
+   "reason": "toolchain-groups case."
+  },
+  {
+   "id": "P011-14",
+   "stratum": "other",
+   "claim": "The plan refuses a tool declared twice.",
+   "label": "supported",
+   "reason": "toolchain-twice case."
+  },
+  {
+   "id": "P011-15",
+   "stratum": "other",
+   "claim": "The plan refuses a contract that differs from the box receipt's.",
+   "label": "supported",
+   "reason": "contract-version/-missing/-extra cases."
+  },
+  {
+   "id": "P011-16",
+   "stratum": "other",
+   "claim": "The plan has one probe-<tool> step per declared tool.",
+   "label": "supported",
+   "reason": "Step list has probe-node, -npm, -git, -ca-certificates."
+  },
+  {
+   "id": "P011-17",
+   "stratum": "other",
+   "claim": "Each probe step carries the declared argument vector.",
+   "label": "unsupported",
+   "reason": "Only probe-node's argv is asserted."
+  },
+  {
+   "id": "P011-18",
+   "stratum": "other",
+   "claim": "The probe steps come before the candidate's transfer.",
+   "label": "supported",
+   "reason": "Order list asserted."
+  },
+  {
+   "id": "P011-19",
+   "stratum": "other",
+   "claim": "The probe runs exactly the declared argument vector as the workload account.",
+   "label": "supported",
+   "reason": "calls == [runuser -u pb-workload -- node --version]."
+  },
+  {
+   "id": "P011-20",
+   "stratum": "other",
+   "claim": "The probe passes only when the captured version equals the declared one.",
+   "label": "supported",
+   "reason": "Equal gives ok True; mismatch raises."
+  },
+  {
+   "id": "P011-21",
+   "stratum": "other",
+   "claim": "A probe that prints another version raises an error that stops the run.",
+   "label": "supported",
+   "reason": "result0 raises LaneBoxError."
+  },
+  {
+   "id": "P011-22",
+   "stratum": "other",
+   "claim": "A probe that exits 1 raises an error that stops the run.",
+   "label": "supported",
+   "reason": "result1 raises."
+  },
+  {
+   "id": "P011-23",
+   "stratum": "other",
+   "claim": "A probe whose output does not match the pattern raises an error that stops the run.",
+   "label": "supported",
+   "reason": "result2 raises."
+  },
+  {
+   "id": "P011-24",
+   "stratum": "other",
+   "claim": "A probe that exits 124 with no output raises an error that stops the run.",
+   "label": "supported",
+   "reason": "result3 raises."
+  },
+  {
+   "id": "P011-25",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[toolchain-empty]: an empty toolchain is refused under the toolchain rule.",
+   "label": "supported",
+   "reason": "declared(toolchain=[]) with rules('toolchain')."
+  },
+  {
+   "id": "P011-26",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[toolchain-string]: a string toolchain is refused.",
+   "label": "supported",
+   "reason": "Case asserted."
+  },
+  {
+   "id": "P011-27",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[toolchain-entry]: a toolchain entry that is not an object is refused.",
+   "label": "supported",
+   "reason": "toolchain=[1]."
+  },
+  {
+   "id": "P011-28",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[toolchain-field]: a toolchain entry with an unexpected field is refused.",
+   "label": "supported",
+   "reason": "Extra 'version' field case."
+  },
+  {
+   "id": "P011-29",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[toolchain-name]: a toolchain entry with a bad name is refused.",
+   "label": "supported",
+   "reason": "name='Node' case."
+  },
+  {
+   "id": "P011-30",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[contract-version]: a declared version differing from the box receipt contract is refused.",
+   "label": "supported",
+   "reason": "expected=22.0.0 under toolchain-contract."
+  },
+  {
+   "id": "P011-31",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[contract-missing]: a toolchain missing a tool of the box receipt contract is refused.",
+   "label": "supported",
+   "reason": "entries[1:] case."
+  },
+  {
+   "id": "P011-32",
+   "stratum": "item",
+   "claim": "test_each_failed_check_is_a_named_refusal[contract-extra]: a toolchain with an extra tool beyond the contract is refused.",
+   "label": "supported",
+   "reason": "extra_tool case."
+  },
+  {
+   "id": "P011-33",
+   "stratum": "item",
+   "claim": "test_a_probe_runs_as_the_workload_account_and_returns_its_result: the probe runs as pb-workload and returns its result.",
+   "label": "supported",
+   "reason": "runuser call and result dict asserted."
+  },
+  {
+   "id": "P011-34",
+   "stratum": "item",
+   "claim": "test_a_probe_that_does_not_print_the_declared_version_stops_the_run[result0]: a probe printing 20.0.0 stops the run.",
+   "label": "supported",
+   "reason": "raises 'found '20.0.0''."
+  },
+  {
+   "id": "P011-35",
+   "stratum": "item",
+   "claim": "test_a_probe_that_does_not_print_the_declared_version_stops_the_run[result1]: a probe exiting 1 stops the run.",
+   "label": "supported",
+   "reason": "raises with exit code 1."
+  },
+  {
+   "id": "P011-36",
+   "stratum": "item",
+   "claim": "test_a_probe_that_does_not_print_the_declared_version_stops_the_run[result3]: a probe exiting 124 with no output stops the run.",
+   "label": "supported",
+   "reason": "raises with exit code 124."
+  }
+ ],
+ "P012": [
+  {
+   "id": "P012-01",
+   "stratum": "other",
+   "claim": "Step 2 exits with code 0.",
+   "label": "supported",
+   "reason": "All 11 selectors pass."
+  },
+  {
+   "id": "P012-02",
+   "stratum": "other",
+   "claim": "Step 2's last line reports 24 passed with no failed, skipped, or error count.",
+   "label": "supported",
+   "reason": "24 cases collected."
+  },
+  {
+   "id": "P012-03",
+   "stratum": "other",
+   "claim": "Step 2 reports PASSED for each of the listed test cases.",
+   "label": "supported",
+   "reason": "Listed ids match the 24 collected."
+  },
+  {
+   "id": "P012-04",
+   "stratum": "other",
+   "claim": "Each case passes only when the assertions below hold.",
+   "label": "unsupported",
+   "reason": "Some stated assertions (comment inside the four-backtick fence, cannot close it) are not asserted by the tests."
+  },
+  {
+   "id": "P012-05",
+   "stratum": "other",
+   "claim": "A rejected verdict maps to decision rejected with outcome refused:rejected.",
+   "label": "supported",
+   "reason": "Parametrized verdict case."
+  },
+  {
+   "id": "P012-06",
+   "stratum": "other",
+   "claim": "A failed execute job after a rejecting review maps to rejected with outcome not-run.",
+   "label": "supported",
+   "reason": "decide(execute_result='failure', reviews=rejection)."
+  },
+  {
+   "id": "P012-07",
+   "stratum": "other",
+   "claim": "The record comment for alice's rejection starts with '<!-- approval-gate-record: req-001 run 99 attempt 1 -->'.",
+   "label": "supported",
+   "reason": "startswith(marker) with that format."
+  },
+  {
+   "id": "P012-08",
+   "stratum": "other",
+   "claim": "The comment contains '**rejected**' and 'Rollback plan is missing'.",
+   "label": "supported",
+   "reason": "Both asserted."
+  },
+  {
+   "id": "P012-09",
+   "stratum": "other",
+   "claim": "The comment text appears inside a four-backtick text fence.",
+   "label": "unsupported",
+   "reason": "Test asserts the fence and the text separately, not that one contains the other."
+  },
+  {
+   "id": "P012-10",
+   "stratum": "other",
+   "claim": "The comment's three backticks cannot close the four-backtick fence.",
+   "label": "unsupported",
+   "reason": "A markdown property not asserted by the test."
+  },
+  {
+   "id": "P012-11",
+   "stratum": "other",
+   "claim": "Parsing the comment back returns the same record.",
+   "label": "supported",
+   "reason": "parsed == json round-trip of rec."
+  },
+  {
+   "id": "P012-12",
+   "stratum": "other",
+   "claim": "The parsed reviewer entry has comment_missing false.",
+   "label": "supported",
+   "reason": "Asserted."
+  },
+  {
+   "id": "P012-13",
+   "stratum": "other",
+   "claim": "status on a completed run whose record is rejected returns exit code 10 and outcome refused:rejected.",
+   "label": "supported",
+   "reason": "Status case."
+  },
+  {
+   "id": "P012-14",
+   "stratum": "other",
+   "claim": "A blank-comment rejection renders '**No reason given.**'.",
+   "label": "supported",
+   "reason": "Asserted in body."
+  },
+  {
+   "id": "P012-15",
+   "stratum": "other",
+   "claim": "Its reviewer entry has comment_missing true.",
+   "label": "supported",
+   "reason": "Asserted."
+  },
+  {
+   "id": "P012-16",
+   "stratum": "other",
+   "claim": "The decision stays rejected for a rejection with a blank comment.",
+   "label": "supported",
+   "reason": "decide() with Review(..., 'rejected', '') gives rejected."
+  },
+  {
+   "id": "P012-17",
+   "stratum": "other",
+   "claim": "An expired verdict maps to decision expired with outcome refused:expired.",
+   "label": "supported",
+   "reason": "Verdict case."
+  },
+  {
+   "id": "P012-18",
+   "stratum": "other",
+   "claim": "A gated job cancelled after the request's expiry maps to expired with outcome not-run:expired.",
+   "label": "supported",
+   "reason": "decide(cancelled, now+2 days)."
+  },
+  {
+   "id": "P012-19",
+   "stratum": "other",
+   "claim": "status on a completed run whose record is expired returns exit code 11 and outcome not-run:expired.",
+   "label": "supported",
+   "reason": "Status case."
+  },
+  {
+   "id": "P012-20",
+   "stratum": "other",
+   "claim": "The seven verdicts map to approved/executed, failed/failed:executor-error, rejected/refused:rejected, expired/refused:expired, approved/refused:drift, approved/refused:digest-mismatch, failed/refused:self-approved.",
+   "label": "supported",
+   "reason": "Seven parametrized cases match."
+  },
+  {
+   "id": "P012-21",
+   "stratum": "other",
+   "claim": "Each such decision is one of the four decisions.",
+   "label": "supported",
+   "reason": "decision in record.DECISIONS."
+  },
+  {
+   "id": "P012-22",
+   "stratum": "other",
+   "claim": "Runs without a verdict are still decided as failed with not-run:preflight, not-run:withdrawn, not-run:failure, or not-run:unknown.",
+   "label": "supported",
+   "reason": "decide() cases cover all four."
+  },
+  {
+   "id": "P012-23",
+   "stratum": "other",
+   "claim": "The rejection record contains '| Request digest |' with the request's digest.",
+   "label": "supported",
+   "reason": "Asserted."
+  },
+  {
+   "id": "P012-24",
+   "stratum": "other",
+   "claim": "The rejection record contains 'environment `approval-noop`'.",
+   "label": "supported",
+   "reason": "Asserted."
+  },
+  {
+   "id": "P012-25",
+   "stratum": "other",
+   "claim": "An executed record contains '| Writes | 0 |' and '`alice` **approved**'.",
+   "label": "supported",
+   "reason": "Asserted."
+  },
+  {
+   "id": "P012-26",
+   "stratum": "other",
+   "claim": "The record command with an approved verdict exits 0 and prints 'recorded approved (executed) for req-001 on #7'.",
+   "label": "supported",
+   "reason": "code == 0 and message in stderr output."
+  },
+  {
+   "id": "P012-27",
+   "stratum": "other",
+   "claim": "It writes outputs decision approved, outcome executed, and record-url https://github.com/octo-org/gate/issues/7#issuecomment-9.",
+   "label": "supported",
+   "reason": "outputs() equality."
+  },
+  {
+   "id": "P012-28",
+   "stratum": "other",
+   "claim": "It posts to issue 7 a record whose decided_at is 2026-11-10T12:10:00Z and whose reviewer comment is 'Fine.'.",
+   "label": "supported",
+   "reason": "Asserted on the POST body."
+  },
+  {
+   "id": "P012-29",
+   "stratum": "other",
+   "claim": "The record command without a usable verdict exits 0 with outcome not-run:preflight, not-run:withdrawn, or not-run:failure.",
+   "label": "supported",
+   "reason": "Four parametrized cases."
+  },
+  {
+   "id": "P012-30",
+   "stratum": "other",
+   "claim": "decided_at is the gated job's start (2026-11-10T12:30:00Z) for an approval.",
+   "label": "supported",
+   "reason": "decided_at(jobs,'approved')."
+  },
+  {
+   "id": "P012-31",
+   "stratum": "other",
+   "claim": "decided_at is the gated job's completion (2026-11-10T12:31:00Z) for a rejection.",
+   "label": "supported",
+   "reason": "decided_at(jobs,'rejected')."
+  },
+  {
+   "id": "P012-32",
+   "stratum": "other",
+   "claim": "Among six comments, the lookup for req-001, run 99, attempt 1 returns only comment 3.",
+   "label": "supported",
+   "reason": "found ids == [3]."
+  },
+  {
+   "id": "P012-33",
+   "stratum": "other",
+   "claim": "That lookup ignores the same body posted by mallory, an unrelated bot comment, and the records of the re-run, of req-002, and of run 100.",
+   "label": "supported",
+   "reason": "Comments 1,2,4,5,6 excluded."
+  },
+  {
+   "id": "P012-34",
+   "stratum": "other",
+   "claim": "Writing the record again edits the same attempt's comment 3 with PATCH.",
+   "label": "supported",
+   "reason": "upsert returns {'id': 3} via the PATCH route."
+  },
+  {
+   "id": "P012-35",
+   "stratum": "other",
+   "claim": "When there is no record, writing posts a new comment starting with '<!-- approval-gate-record:'.",
+   "label": "supported",
+   "reason": "POST body startswith asserted."
+  },
+  {
+   "id": "P012-36",
+   "stratum": "other",
+   "claim": "status returns exit code 0 with executed.",
+   "label": "supported",
+   "reason": "Status case."
+  },
+  {
+   "id": "P012-37",
+   "stratum": "other",
+   "claim": "status returns exit code 12 with refused:drift.",
+   "label": "supported",
+   "reason": "Status case."
+  },
+  {
+   "id": "P012-38",
+   "stratum": "other",
+   "claim": "status returns exit code 12 with record-missing when the only record belongs to run 100.",
+   "label": "supported",
+   "reason": "Status case."
+  },
+  {
+   "id": "P012-39",
+   "stratum": "other",
+   "claim": "Not verified: that each record stays retrievable after the run's logs are deleted, since that needs a real repository and waits for Phase 3 of #179.",
+   "label": "supported",
+   "reason": "REQ-099 verification text."
+  },
+  {
+   "id": "P012-40",
+   "stratum": "other",
+   "claim": "Not verified: that the reviewer's comment text appears in status output, since the status fixtures carry records without reviews and assert only exit code and outcome.",
+   "label": "supported",
+   "reason": "record_comment uses reviews=[]; asserts exit/outcome only."
+  },
+  {
+   "id": "P012-41",
+   "stratum": "other",
+   "claim": "Not verified: live approve, reject and expire runs, because no live workflow is run.",
+   "label": "supported",
+   "reason": "Offline fixtures only."
+  },
+  {
+   "id": "P012-42",
+   "stratum": "other",
+   "claim": "Not verified: SYS-REQ-028 sentence 3's durability of the record, for the same log-deletion reason.",
+   "label": "supported",
+   "reason": "No real repo or log deletion."
+  },
+  {
+   "id": "P012-43",
+   "stratum": "other",
+   "claim": "Not verified: that an approved request acts exactly once, and that rejected/expired/re-run/drifted/ungated requests perform no write, since the stimulus runs no executor.",
+   "label": "supported",
+   "reason": "Listed cases map verdicts to records only."
+  }
+ ]
+}

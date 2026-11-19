@@ -1,0 +1,17 @@
+{
+ "items_total": 23,
+ "sampled_items": [
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_decide_is_the_req_102_allow_list[paused-poweroff]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_decide_is_the_req_102_allow_list[poweroff-delete]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_decide_is_the_req_102_allow_list[a-state-teardown-does-not-know-None]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_teardown_from_each_allowed_state[paused-commands1]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_teardown_from_each_allowed_state[poweroff-commands2]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_snapshotting_and_unknown_states_fail_closed[snapshotting]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_snapshotting_and_unknown_states_fail_closed[saved]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_snapshotting_and_unknown_states_fail_closed[teleporting]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_snapshotting_and_unknown_states_fail_closed[a-state-teardown-does-not-know]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_a_target_that_is_not_a_uuid_is_rejected_before_any_query[golden-appliance]",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_every_accepted_receipt_binds_the_uuid_states_and_absence",
+  "- `scripts/tests/test_lane_teardown.py` \u203a test_a_receipt_that_claims_removal_without_the_absence_observation_fails"
+ ]
+}

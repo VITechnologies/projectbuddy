@@ -7,6 +7,9 @@
         "requested": "[10.0.14, )",
         "resolved": "10.0.14",
         "contentHash": "YlTamXppEQls6DYWt7RdUuwWDb0lyw/vXCaGeQpLCpsLmfwGuCkOz/vIGgMTV7ECsJcavkCOkxZXv9s8rdAHkQ=="
+      },
+      "projectbuddy.peerollama": {
+        "type": "Project"
       }
     },
     "net10.0/linux-x64": {},
