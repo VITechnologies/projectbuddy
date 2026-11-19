@@ -107,11 +107,31 @@ internal sealed class Database(Options options)
         }
     }
 
-    public decimal Setting(string key)
+    public decimal Setting(string key) => OptionalSetting(key)!.Value;
+
+    public decimal? OptionalSetting(string key)
     {
         using var connection = Open(options.Database);
         using var command = new NpgsqlCommand("SELECT kpi_v1.setting($1)", connection) { Parameters = { new() { Value = key } } };
-        return (decimal)command.ExecuteScalar()!;
+        return command.ExecuteScalar() is decimal value ? value : null;
+    }
+
+    // The snapshots from `window` hours before the newest one on, oldest first; empty when none was ingested.
+    public List<Ingest.QuotaSnapshot> QuotaSnapshots(double window)
+    {
+        using var connection = Open(options.Database);
+        using var command = new NpgsqlCommand("""
+            SELECT at, used_requests, entitlement_requests, overage, reset_date FROM kpi_v1.quota_snapshots
+            WHERE at >= (SELECT max(at) FROM kpi_v1.quota_snapshots) - $1 * interval '1 hour' ORDER BY at, overage
+            """, connection) { Parameters = { new() { Value = window } } };
+        using var reader = command.ExecuteReader();
+        var snapshots = new List<Ingest.QuotaSnapshot>();
+        while (reader.Read())
+        {
+            snapshots.Add(new(reader.GetFieldValue<DateTimeOffset>(0), reader.GetDecimal(1), reader.GetDecimal(2), reader.GetDecimal(3), reader.GetFieldValue<DateTimeOffset>(4)));
+        }
+
+        return snapshots;
     }
 
     // Stores one session's facts in one transaction. Facts keyed by event or tool-call ID are inserted once; a tool call
@@ -164,6 +184,13 @@ internal sealed class Database(Options options)
             INSERT INTO kpi_v1.operator_messages (event_id, session_id, at)
             SELECT m.id, $1, m.at FROM unnest($2::uuid[], $3::timestamptz[]) AS m(id, at) ON CONFLICT DO NOTHING
             """, session.Id, session.Messages.Select(m => m.Id).ToArray(), session.Messages.Select(m => m.At).ToArray());
+        Run("""
+            INSERT INTO kpi_v1.quota_snapshots (session_id, at, used_requests, entitlement_requests, overage, reset_date)
+            SELECT $1, q.at, q.used, q.entitlement, q.overage, q.reset
+            FROM unnest($2::timestamptz[], $3::numeric[], $4::numeric[], $5::numeric[], $6::timestamptz[]) AS q(at, used, entitlement, overage, reset)
+            ON CONFLICT (session_id, at) DO NOTHING
+            """, session.Id, session.Quota.Select(q => q.At).ToArray(), session.Quota.Select(q => q.UsedRequests).ToArray(),
+            session.Quota.Select(q => q.EntitlementRequests).ToArray(), session.Quota.Select(q => q.Overage).ToArray(), session.Quota.Select(q => q.ResetDate).ToArray());
         Run("DELETE FROM kpi_v1.active_spans WHERE session_id = $1", session.Id);
         Run("""
             INSERT INTO kpi_v1.active_spans (session_id, span)
@@ -287,6 +314,14 @@ internal sealed class Database(Options options)
                 INSERT INTO kpi_v1.settings (key, value) VALUES ('farm_reference_aiu_per_job:' || $1, $2)
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value RETURNING 0::bigint AS id, clock_timestamp() AS at
                 """, [record.Get("--workload")!, Program.Number(record, "--aiu-per-job")]),
+            "budget" => ("""
+                WITH budget AS (
+                    INSERT INTO kpi_v1.settings (key, value) VALUES ('budget_usd', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value),
+                reserve AS (
+                    INSERT INTO kpi_v1.settings (key, value) VALUES ('reserve_usd', coalesce($2::numeric, 0))
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value WHERE $2::numeric IS NOT NULL)
+                SELECT 0::bigint AS id, clock_timestamp() AS at
+                """, [Program.Number(record, "--usd"), record.Get("--reserve-usd") is null ? DBNull.Value : Program.Number(record, "--reserve-usd")]),
             "requirements" => ("""
                 INSERT INTO kpi_v1.requirement_counts (item, requirements) VALUES ($1, $2)
                 ON CONFLICT (item) DO UPDATE SET requirements = EXCLUDED.requirements RETURNING 0::bigint AS id, clock_timestamp() AS at

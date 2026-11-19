@@ -25,6 +25,21 @@ public sealed class ParseTests
     [InlineData("report", "--session", "s", "--password-file", Password)]
     [InlineData("ingest-farm", "--password-file", Password)]
     [InlineData("farm-reference", "--workload", "decompose", "--password-file", Password)]
+    [InlineData("budget", "--password-file", Password)]
+    [InlineData("budget", "--usd", "-1", "--password-file", Password)]
+    [InlineData("budget", "--usd", "1", "--reserve-usd", "-1", "--password-file", Password)]
+    [InlineData("budget", "--usd", "x", "--password-file", Password)]
+    [InlineData("quota", "--window-hours", "-1", "--password-file", Password)]
+    [InlineData("quota", "--window-hours", "x", "--password-file", Password)]
+    [InlineData("quota", "--items", "", "--password-file", Password)]
+    [InlineData("quota", "--items", "a", "--password-file", Password)]
+    [InlineData("quota", "--items", "=1", "--password-file", Password)]
+    [InlineData("quota", "--items", "a=", "--password-file", Password)]
+    [InlineData("quota", "--items", "a=-1", "--password-file", Password)]
+    [InlineData("quota", "--items", "a=1=2", "--password-file", Password)]
+    [InlineData("quota", "--items", "a=1,a=2", "--password-file", Password)]
+    [InlineData("quota", "--items", "a=1,,b=2", "--password-file", Password)]
+    [InlineData("quota", "--usd", "1", "--password-file", Password)]
     public void RejectsMalformedCommandLines(params string[] args)
     {
         var (exit, output, error) = Cli.Run(args);
@@ -79,9 +94,9 @@ public sealed class DatabaseTests : IDisposable
         var connection = server.NewDatabase();
         Assert.Contains("does not exist", Cli.Run(["migrate", .. connection]).Error);
         var first = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
+        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
         var again = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
+        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
         server.Execute(connection, "UPDATE public.kpi_schema_migrations SET sha256 = repeat('0', 64)");
         Assert.Contains("migration 0001_kpi_v1.sql changed after it was applied", Cli.Run(["migrate", .. connection]).Error);
     }
@@ -91,10 +106,10 @@ public sealed class DatabaseTests : IDisposable
     {
         var connection = server.NewDatabase();
         server.Execute([.. connection[..^1], "postgres"], $"CREATE DATABASE \"{connection[^1]}\"");
-        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 4 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
+        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 5 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
         var behind = server.Migrated();
         server.Execute(behind, "DELETE FROM public.kpi_schema_migrations");
-        Assert.Contains("has 0 of 4 migrations", Cli.Run(["report", .. behind]).Error);
+        Assert.Contains("has 0 of 5 migrations", Cli.Run(["report", .. behind]).Error);
     }
 
     [Fact]

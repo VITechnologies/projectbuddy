@@ -15,6 +15,7 @@ stay on the workstation. Only relative figures are ever published.
 dotnet build ProjectBuddy.Kpi -c Release -o out
 out/projectbuddy-kpi migrate --create-database --port 55432 --password-file "$HOME/.config/<instance>/postgres-password"
 out/projectbuddy-kpi ingest --port 55432 --password-file ...
+out/projectbuddy-kpi quota --port 55432 --password-file ...   # every session, after ingest; needs budget once
 out/projectbuddy-kpi track --repository owner/repo --forge github --port 55432 --password-file ...
 out/projectbuddy-kpi resolve --port 55432 --password-file ...   # needs gh, and glab for GitLab
 out/projectbuddy-kpi ingest-farm --export /path/to/farm-telemetry.json --port 55432 --password-file ...
@@ -67,6 +68,8 @@ database that lacks the embedded migrations.
 | `ingest [--sessions <dir>]` | Reads every `<uuid>/events.jsonl` under the sessions directory (default `~/.copilot/session-state`). Facts are keyed by event or tool-call ID, so ingesting again changes nothing. A tool call that has completed since the last ingest is updated, and active spans are derived again. A line that is not a readable event refuses the ingest. |
 | `ingest-farm --export <file>` | Reads the local AI farm's telemetry export, the file assurance-learning-workbench's `export-farm-telemetry` writes from `farm_v1` (`export_kind` `alw-farm-telemetry`, schema version `1.0.0`). Its `jobs` rows (one per farm run record, workload and instance) and `device_samples` rows (one per run record and local instance) hold counts and timings only; any other field refuses the file. Rows are keyed by the sha256 of the farm run record, so ingesting again changes nothing, and an export that changes an ingested row is refused as a whole. A device sample of a peer instance, or busy time outside its window, is a database error. |
 | `farm-reference --workload <id> --aiu-per-job <n>` | Sets a farm workload's reference cost, the AIU per job of a paid run of that workload, for the AIU-avoided estimate. Setting it again replaces it. |
+| `budget --usd <n> [--reserve-usd <n>]` | Sets the USD budget of the billing cycle and, when given, the reserve kept back from it (0 until set). Setting them again replaces them. A negative value is a usage error. |
+| `quota [--window-hours <n>] [--items <name=usd,...>]` | Reads the newest ingested quota snapshot against the budget; see Quota. Refused until a snapshot was ingested and `budget` was set. |
 | `track --repository <path> --forge <github\|gitlab>` | Adds a repository whose merged requests are accepted changes: `owner/repo` on GitHub, `group[/subgroup…]/project` on GitLab. |
 | `resolve [--gh <path>] [--glab <path>]` | Lists every request each tracked repository merged since the first session, with `gh api repos/<repo>/pulls?state=closed` or `glab api projects/<path>/merge_requests?state=merged`, newest update first, until updates are older than the first session. Listing again changes nothing. A repository whose listing fails is reported in `unresolved` with its reason, and what was already listed is kept. A tool that needs other credentials for some repositories can run as a wrapper in a second pass, for example `GITLAB_TOKEN=… glab`. |
 | `mark --session <id> --item <ref>` | Attributes the session's calls from now until its next marker to a work item. |
@@ -79,8 +82,32 @@ database that lacks the embedded migrations.
 A work item is `owner/repo#N` (an issue or pull request) or
 `group[/subgroup…]/project!N` (a merge request).
 
-Exit codes: 0 done, 2 usage, 3 refused, 5 database error. A check constraint,
+Exit codes: 0 done, 2 usage, 3 refused, 4 quota alarm (`quota` only; its JSON
+is still printed), 5 database error. A check constraint,
 such as a malformed item, is a database error.
+
+## Quota
+
+Each model call's event carries the account's premium-interactions quota
+snapshot. `ingest` keeps, per session, the snapshots whose `overage` (the units
+used beyond the entitlement) differs from the one kept before, in
+`kpi_v1.quota_snapshots`. A snapshot that cannot be read is skipped.
+
+`quota` prices the newest snapshot's overage at `usd_per_unit` as `spendUsd`.
+`headroomUsd` is `budget_usd` less the spend, and `allocableUsd` is the
+headroom less `reserve_usd`, or 0. The burn is the spend's growth per hour over
+the snapshots in the last `--window-hours` (default the `burn_window_hours`
+setting, 24) since the last decrease of the overage, which is a new billing
+cycle. `projectedExhaustionAt` is when that burn uses up the headroom, and
+`exhaustsBeforeReset` says whether that is before `resetDate`. Both are null
+without a burn.
+
+`--items` lists work items as `name=usd` in priority order. Under `scope`, an
+item is covered when the running total including it fits in `allocableUsd`;
+after the first that does not, none is.
+
+Exit code 4 means the headroom is below the reserve or the quota is projected
+to run out before the reset.
 
 ## What is read from a log
 
@@ -118,6 +145,8 @@ such as a malformed item, is a database error.
   - `memory`;
   - `explore` (any other tool, all read-only);
   - `respond` (no tool).
+- **Quota snapshots:** the `premium_interactions` object of each
+  `model.model_call_success` event, cut out of the line and parsed alone.
 - **Tool calls:** start and completion, paired by tool-call ID.
 - **Operator messages:** `user.message` events.
 - **Forked sessions:** a fork's log starts with its own `session.start` and
@@ -191,6 +220,9 @@ They write synthetic event logs and cover:
   files (including a non-UTC `recorded_at`), the database's range checks, the
   farm KPIs with exact values, and a fully cached run's effect on jobs per
   second;
+- quota snapshots (malformed, repeated, re-ingested), and the `budget` and
+  `quota` commands: headroom, burn over a window and across a cycle reset,
+  projection, the alarm, and scope coverage;
 - overlapping sessions;
 - every KPI, with exact values.
 
