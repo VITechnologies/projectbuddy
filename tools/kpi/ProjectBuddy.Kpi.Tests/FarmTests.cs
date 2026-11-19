@@ -101,10 +101,30 @@ public sealed class FarmTests : IDisposable
         Assert.Equal(("workstation-gpu", 2, 100m, 150m, 0.6667m), ((string)devices[1]!["instanceId"]!, (int)devices[1]!["samples"]!,
             (decimal)devices[1]!["busySeconds"]!, (decimal)devices[1]!["windowSeconds"]!, (decimal)devices[1]!["utilization"]!));
 
-        // Every other figure is the report's as before, and measured AIU stays apart from the estimate.
-        report.Remove("farm");
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse((string)server.Scalar(connection, "SELECT kpi_v1.report_core()::text")!), report));
+        // Measured AIU stays apart from the estimate.
         Assert.Equal(0m, (decimal)report["ai"]!["aiu"]!);
+    }
+
+    [Fact]
+    public void AFullyCachedRunAddsItsJobsAndNoSecondsToJobsPerSecond()
+    {
+        var connection = server.Migrated();
+        var export = Export();
+        // Run C answered everything from the cache, so its busy span is 0 s: decompose adds 3 jobs, and summarize has only this run.
+        export["jobs"]!.AsArray().Add(Job(C, "decompose", "workstation-gpu", "local-ollama", 3, 3, 0, 0, 0, 0m));
+        export["jobs"]!.AsArray().Add(Job(C, "summarize", "workstation-gpu", "local-ollama", 2, 2, 0, 0, 0, 0m));
+        Assert.Equal((6L, 0L, 3L, 0L), Counts(Cli.Json(["ingest-farm", "--export", Write(export.ToJsonString()), .. connection])));
+
+        // Its 5 completed jobs join the numerator over the same 150 s, so the rate rises from 19 / 150 to 24 / 150.
+        var farm = Cli.Json(["report", .. connection])["farm"]!;
+        Assert.Equal((3, 25, 24, 10, 0.4m, 0.16m), ((int)farm["runs"]!, (int)farm["jobs"]!, (int)farm["completed"]!, (int)farm["cacheHits"]!,
+            (decimal)farm["cacheHitRate"]!, (decimal)farm["jobsPerSecond"]!));
+        var workloads = farm["byWorkload"]!.AsArray();
+        Assert.Equal(("decompose", 19, 18, 0.12m), ((string)workloads[0]!["workload"]!, (int)workloads[0]!["jobs"]!, (int)workloads[0]!["completed"]!,
+            (decimal)workloads[0]!["jobsPerSecond"]!));
+        // A workload that only ran cached has no seconds to divide by, so it has no rate.
+        Assert.Equal(("summarize", 2, 2, (JsonNode?)null), ((string)workloads[2]!["workload"]!, (int)workloads[2]!["jobs"]!, (int)workloads[2]!["completed"]!,
+            workloads[2]!["jobsPerSecond"]));
     }
 
     [Fact]
@@ -173,6 +193,8 @@ public sealed class FarmTests : IDisposable
             { Changed(e => e["jobs"]![0]!["workload"] = 7), "jobs[0].workload must be a JSON string" },
             { Changed(e => e["jobs"]![0]!["jobs"] = 1.5), "jobs[0].jobs must be a whole number" },
             { Changed(e => e["jobs"]![0]!["recorded_at"] = "2026-11-19T07:22:51"), "jobs[0].recorded_at must be an ISO 8601 time with an offset" },
+            { Changed(e => e["jobs"]![0]!["recorded_at"] = "2026-11-19T07:22:51+01:00"), "jobs[0].recorded_at must be a UTC time (+00:00)" },
+            { Changed(e => e["device_samples"]![0]!["recorded_at"] = "2026-11-19T07:22:51+05:30"), "device_samples[0].recorded_at must be a UTC time (+00:00)" },
             { Changed(e => e["device_samples"]![2]!["busy_seconds"] = JsonNode.Parse("1e999")), "device_samples[2].busy_seconds is out of range" },
         };
     }

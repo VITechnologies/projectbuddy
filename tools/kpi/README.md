@@ -153,8 +153,8 @@ accepted at that merge time.
 | Rework | The AIU a marked work item spent after its first review. |
 | Spec-gap rate | Recorded spec gaps per accepted change. |
 | Exploration share | The share of AIU spent on `explore` calls. Exploration done through `bash` counts as `run`. |
-| Farm utilization per device | A local farm instance's busy seconds (an item in flight) over the busy spans of the runs that sampled it. The peer has no device samples, since no device telemetry leaves it. |
-| Farm jobs per second | Completed jobs (cache hits plus answers) over the busy spans of the farm runs, each run's span counted once; per workload and in total. |
+| Farm utilization per device | A local farm instance's busy seconds (an item in flight) over the busy spans of the runs that sampled it. The peer has no device samples, since no device telemetry leaves it. It covers only the runs that sampled the device: an instance that sat idle for a whole run has no sample for it, so that run's span is not in its denominator. |
+| Farm jobs per second | Completed jobs (cache hits plus answers) over the busy spans of the farm runs, each run's span counted once; per workload and in total. A fully cached run has a 0 s span: its completed jobs count in the numerator and add no seconds, so it raises the rate, and a workload that only ever ran cached has no rate. |
 | Farm cache hit rate | Cache hits over jobs, per workload and in total. |
 | AIU avoided (estimate) | Completed jobs times the workload's reference cost (see the cost model). It is an estimate and is never added to the measured AIU. |
 
@@ -188,7 +188,9 @@ They write synthetic event logs and cover:
     tool;
 - idempotent re-ingest and re-listing, and completing an open tool call;
 - a synthetic farm export: idempotent ingest, a changed row, malformed
-  files, the database's range checks, and the farm KPIs with exact values;
+  files (including a non-UTC `recorded_at`), the database's range checks, the
+  farm KPIs with exact values, and a fully cached run's effect on jobs per
+  second;
 - overlapping sessions;
 - every KPI, with exact values.
 

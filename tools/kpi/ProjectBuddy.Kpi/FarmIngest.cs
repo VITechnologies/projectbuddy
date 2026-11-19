@@ -94,10 +94,13 @@ internal static class FarmIngest
     private static decimal Seconds(JsonElement row, string name, string where) =>
         Field(row, name, JsonValueKind.Number, where).TryGetDecimal(out var value) ? value : throw Refused($"{where}.{name} is out of range");
 
-    private static DateTimeOffset Time(JsonElement row, string where) =>
-        DateTimeOffset.TryParseExact(Text(row, "recorded_at", where), "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value)
-            ? value
-            : throw Refused($"{where}.recorded_at must be an ISO 8601 time with an offset");
+    private static DateTimeOffset Time(JsonElement row, string where)
+    {
+        if (!DateTimeOffset.TryParseExact(Text(row, "recorded_at", where), "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
+            throw Refused($"{where}.recorded_at must be an ISO 8601 time with an offset");
+        // Npgsql writes a timestamptz only from a UTC offset.
+        return value.Offset == TimeSpan.Zero ? value : throw Refused($"{where}.recorded_at must be a UTC time (+00:00)");
+    }
 
     private static KpiException Refused(string message) => new(ExitCodes.Refused, message);
 }

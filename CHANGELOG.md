@@ -101,8 +101,9 @@ release's notes for the exact pinned commit.
   gates `PASS`.
 - `projectbuddy-kpi` ingests the local AI farm's telemetry (ALW#10).
   - Migration `0004_farm_telemetry.sql` adds `kpi_v1.farm_jobs` and
-    `kpi_v1.farm_device_samples`, and views for utilization per device, jobs
-    per second, and the cache hit rate.
+    `kpi_v1.farm_device_samples`, and the views `farm_device_utilization` and
+    `farm_workloads`. The jobs per second and the cache hit rate are computed
+    in `farm_report()`.
   - `ingest-farm --export <file>` reads the counts-and-timings export that
     assurance-learning-workbench's `export-farm-telemetry` writes. Rows are
     keyed by the farm run record's sha256, so ingesting again changes
