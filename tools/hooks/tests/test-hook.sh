@@ -49,13 +49,15 @@ big="$(head -c 300000 /dev/zero | tr '\0' 'x')"
 expect "a 300 KB prompt still goes through" "$(hook userPromptSubmitted "{\"sessionId\":\"$S2\",\"prompt\":\"$big\"}")" "0 0"
 expect "the 300 KB prompt left the session running" "$(q "select status from hooks.sessions where session_id='$S2'")" "running"
 
-turn() { # session, content, [messageId]: a finished turn after a prompt, as Copilot writes it
+iso() { date -u -d "@$(( $1 / 1000 )).$(printf %03d $(( $1 % 1000 )))" +%Y-%m-%dT%H:%M:%S.%3NZ; }
+turn() { # session, content, [messageId], [turn_end time in ms]: a finished turn after a prompt, as Copilot writes it
   mkdir -p "$HOME/.copilot/session-state/$1"
+  local end_iso; end_iso="$(iso "${4:-$(( $(date +%s%3N) + 100 ))}")"
   node_json() { python3 -c 'import json,sys;print(json.dumps({"type":"assistant.message","data":{"messageId":sys.argv[2],"content":sys.argv[1]}}, separators=(",",":")))' "$1" "$2"; }
   { echo '{"type":"user.message","data":{"content":"go"}}'
     echo '{"type":"assistant.turn_start","data":{"turnId":"0"}}'
     node_json "$2" "${3:-m-$RANDOM}"
-    echo '{"type":"assistant.turn_end","data":{"turnId":"0"}}'
+    echo "{\"type\":\"assistant.turn_end\",\"data\":{\"turnId\":\"0\"},\"id\":\"e\",\"timestamp\":\"$end_iso\"}"
     echo '{"type":"hook.start","data":{}}'; } > "$HOME/.copilot/session-state/$1/events.jsonl"
 }
 stop_payload() { echo "{\"sessionId\":\"$1\",\"timestamp\":$(( $(date +%s) * 1000 )),\"cwd\":\"/work/x\",\"transcriptPath\":\"$HOME/.copilot/session-state/$1/events.jsonl\",\"stopReason\":\"end_turn\"}"; }
@@ -85,9 +87,17 @@ mkdir -p "$HOME/.copilot/session-state/$S2"
 printf '%s\n' '{"type":"user.message","data":{"content":"go"}}' '{"type":"assistant.turn_start","data":{}}' '{"type":"assistant.message","data":{"messageId":"m-9","content":"DECISION NEEDED: unfinished turn"}}' > "$HOME/.copilot/session-state/$S2/events.jsonl"
 expect "settle gives up when the turn has not ended" "$(settle $S2 "$(now_ms)" 2)" "0"
 expect "and opens nothing for an unfinished turn" "$(q "select count(*) from hooks.decisions where session_id='$S2'")" "0"
-printf '%s\n' '{"type":"assistant.turn_start","data":{}}' '{"type":"assistant.message","data":{"messageId":"m-8","content":"DECISION NEEDED: previous turn"}}' '{"type":"assistant.turn_end","data":{}}' '{"type":"user.message","data":{"content":"next"}}' > "$HOME/.copilot/session-state/$S2/events.jsonl"
+printf '%s\n' '{"type":"assistant.turn_start","data":{}}' '{"type":"assistant.message","data":{"messageId":"m-8","content":"DECISION NEEDED: previous turn"}}' "{\"type\":\"assistant.turn_end\",\"data\":{},\"timestamp\":\"$(iso "$(now_ms)")\"}" '{"type":"user.message","data":{"content":"next"}}' > "$HOME/.copilot/session-state/$S2/events.jsonl"
 settle $S2 "$(now_ms)" 2 > /dev/null
 expect "a turn from before the latest prompt is not taken for this one" "$(q "select count(*) from hooks.decisions where session_id='$S2'")" "0"
+
+turn $S2 "DECISION NEEDED: the previous turn, not flushed yet" msg-7 "$(( $(now_ms) - 60000 ))"
+expect "a turn that ended before the stop is not taken for it" "$(settle $S2 "$(now_ms)" 2)" "0"
+expect "so no decision is opened from it" "$(q "select count(*) from hooks.decisions where session_id='$S2'")" "0"
+turn $S2 "DECISION NEEDED: this turn" msg-6 "$(( $(now_ms) - 300 ))"
+settle $S2 "$(now_ms)" 2 > /dev/null
+expect "a turn that ended just before the stop is" "$(q "select count(*) from hooks.decisions where session_id='$S2'")" "1"
+psql -X -q -d "$DB" -c "delete from hooks.decisions where session_id='$S2'"
 
 mkdir -p "$T/elsewhere"; printf '%s\n' '{"type":"assistant.message","data":{"content":"DECISION NEEDED: from outside"}}' > "$T/elsewhere/events.jsonl"
 settle_outside() { PB_SETTLE_TRIES=1 "$BIN/pb-stop-settle" "$S2" "$1" "$(now_ms)" > /dev/null 2>&1; }

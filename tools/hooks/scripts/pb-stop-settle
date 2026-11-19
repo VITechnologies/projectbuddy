@@ -18,18 +18,25 @@ case "$transcript" in "$HOME_DIR"/.copilot/session-state/*/events.jsonl) ;; *) l
 
 tmp="$(mktemp -d "$STATE_DIR/settle.XXXXXX")" || exit 0
 trap 'rm -rf "$tmp"' EXIT
-# The last turn after the latest prompt, if it has ended: its final assistant.message line.
+# The last turn after the latest prompt, if it has ended: its final assistant.message line, then its turn_end line. The turn must
+# have ended no earlier than the stop that started this step (minus 0.5 s of clock slack), so a previous turn that is still the
+# newest thing in a not yet flushed transcript is never taken for this one.
 find_message() {
   tail -c 524288 "$transcript" 2> /dev/null | awk '
     /^\{"type":"user.message"/ { started = 0; ended = 0; msg = "" }
     /^\{"type":"assistant.turn_start"/ { started = 1; ended = 0; msg = "" }
     /^\{"type":"assistant.message"/ { if (started) msg = $0 }
-    /^\{"type":"assistant.turn_end"/ { if (started) ended = 1 }
-    END { if (ended) { print msg; exit 0 } exit 1 }'
+    /^\{"type":"assistant.turn_end"/ { if (started) { ended = 1; end_line = $0 } }
+    END { if (ended) { print msg; print end_line; exit 0 } exit 1 }' > "$tmp/found" || return 1
+  local end_ts end_ms
+  end_ts="$(sed -n '2s/.*"timestamp":"\([^"]*\)".*/\1/p' "$tmp/found")"
+  end_ms="$(date -u -d "$end_ts" +%s%3N 2> /dev/null)" || return 1
+  [ "$end_ms" -ge $((stamp - 500)) ] || return 1
+  sed -n '1p' "$tmp/found" > "$tmp/line"
 }
 found=0
 for _ in $(seq 1 "${PB_SETTLE_TRIES:-60}"); do
-  if find_message > "$tmp/line"; then found=1; break; fi
+  if find_message; then found=1; break; fi
   sleep 0.5
 done
 [ "$found" = 1 ] || { log "the turn did not end in the transcript within 30 s"; exit 0; }

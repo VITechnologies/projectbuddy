@@ -32,6 +32,10 @@ expect "install is idempotent" "$(inst install "${common[@]}" > /dev/null; echo 
 expect "and keeps the password" "$(sha256sum "$HOME/.config/projectbuddy-hooks/password")" "$before"
 expect "the installed role can log in with that password" "$(PGPASSWORD="$(cat "$HOME/.config/projectbuddy-hooks/password")" psql -X -At -U "$ROLE" -d "$DB" -c "select hooks.work_ref_of('abcdefgh1')" | wc -l | tr -d ' ')" "1"
 
+rm "$HOME/.config/projectbuddy-hooks/password"
+expect "re-install after losing the password file re-keys the existing role" "$(inst install "${common[@]}" > /dev/null 2>&1; echo $?)" "0"
+expect "the new password works" "$(PGPASSWORD="$(cat "$HOME/.config/projectbuddy-hooks/password")" psql -X -At -U "$ROLE" -d "$DB" -c "select 1")" "1"
+expect "and the role is still only in hooks_writer" "$(psql -X -At -U postgres -d postgres -c "select string_agg(g.rolname, ',') from pg_auth_members m join pg_roles g on g.oid=m.roleid join pg_roles r on r.oid=m.member where r.rolname='$ROLE'")" "hooks_writer"
 expect "activate succeeds" "$(inst activate > /dev/null; echo $?)" "0"
 expect "activate writes one hooks file" "$(ls "$T/hooks")" "projectbuddy.json"
 expect "it lists exactly the three events, each with a 2 s timeout" "$(python3 -c "import json;c=json.load(open('$T/hooks/projectbuddy.json'));print(sorted(c['hooks']), {e[0]['timeoutSec'] for e in c['hooks'].values()}, c['hooks']['agentStop'][0]['exec'])")" "['agentStop', 'sessionStart', 'userPromptSubmitted'] {2} $T/prefix/pb-hook"

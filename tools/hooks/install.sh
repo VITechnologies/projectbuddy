@@ -44,11 +44,14 @@ case "$step" in
     [ "$(admin -c "select count(*) from pg_namespace where nspname = 'hooks'")" = 1 ] \
       || { echo "schema hooks is missing: run 'projectbuddy-kpi migrate' (0006_hooks.sql) on $database first" >&2; exit 1; }
     if [ ! -s "$config_dir/password" ]; then
-      head -c 24 /dev/urandom | base64 | tr -d '+/=\n' > "$config_dir/password"
-      [ "$(admin -c "select count(*) from pg_roles where rolname = '$role'")" = 1 ] && verb=alter || verb=create
-      # The password goes in on stdin, so it is never in a process listing.
-      { printf "%s role %s login in role hooks_writer password '" "$verb" "$role"; cat "$config_dir/password"; printf "';\n"; } | admin > /dev/null
-      [ "$verb" = create ] || admin -c "grant hooks_writer to \"$role\"" > /dev/null
+      new_pw="$(head -c 24 /dev/urandom | base64 | tr -d '+/=\n')"
+      # The password goes in on stdin, so it is never in a process listing; the file is written only once the role has it.
+      if [ "$(admin -c "select count(*) from pg_roles where rolname = '$role'")" = 1 ]; then
+        printf "alter role \"%s\" login password '%s'; grant hooks_writer to \"%s\";\n" "$role" "$new_pw" "$role" | admin > /dev/null
+      else
+        printf "create role \"%s\" login in role hooks_writer password '%s';\n" "$role" "$new_pw" | admin > /dev/null
+      fi
+      printf '%s' "$new_pw" > "$config_dir/password"
     fi
     {
       echo "export PB_HOOKS_PASSWORD_FILE=\"$config_dir/password\" PGHOST=\"$host\" PGPORT=\"$port\" PGDATABASE=\"$database\" PGUSER=\"$role\""
