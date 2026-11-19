@@ -29,7 +29,8 @@ public sealed record Options(string Command, string Host, int Port, string User,
 public static partial class Program
 {
     public const string Usage =
-        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | track --repository <owner/repo|group/project> --forge <github|gitlab>"
+        "usage: projectbuddy-kpi migrate [--create-database] | ingest [--sessions <dir>] | ingest-farm --export <file>"
+        + " | farm-reference --workload <id> --aiu-per-job <n> | track --repository <owner/repo|group/project> --forge <github|gitlab>"
         + " | resolve [--gh <path>] [--glab <path>] | report"
         + " | mark --session <id> --item <ref> | gap --session <id> --item <ref> --kind <code-read|operator-question|failed-run> --fact <text> --belongs-in <document>"
         + " | review --session <id> --item <ref> --round <n> --findings <n> | requirements --item <ref> --count <n>"
@@ -40,6 +41,8 @@ public static partial class Program
     {
         ["migrate"] = ([], ["--create-database"]),
         ["ingest"] = ([], ["--sessions"]),
+        ["ingest-farm"] = (["--export"], []),
+        ["farm-reference"] = (["--workload", "--aiu-per-job"], []),
         ["track"] = (["--repository", "--forge"], []),
         ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
@@ -70,6 +73,7 @@ public static partial class Program
             {
                 "migrate" => database.Migrate(options.Values.ContainsKey("--create-database")),
                 "ingest" => Ingest.Run(database, options.Get("--sessions")!),
+                "ingest-farm" => FarmIngest.Run(database, options.Get("--export")!),
                 "resolve" => Forge.Resolve(database, options.Get("--gh") ?? "gh", options.Get("--glab") ?? "glab"),
                 "report" => database.Report(),
                 _ => database.Record(options),
@@ -145,6 +149,11 @@ public static partial class Program
         if (!values.TryGetValue("--password-file", out var password) || !Path.IsPathFullyQualified(password))
         {
             throw UsageError("--password-file needs a fully qualified path");
+        }
+
+        if (args[0] == "ingest-farm")
+        {
+            values["--export"] = Path.GetFullPath(values["--export"]);
         }
 
         if (args[0] == "ingest")
