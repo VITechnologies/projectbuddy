@@ -122,6 +122,20 @@ internal sealed class Log
             },
         });
 
+    // A model call's success event, which carries the premium-interactions quota snapshot.
+    public Log Quota(double minutes, decimal overage, string reset = "2026-12-01T00:00:00Z") =>
+        Event("model.model_call_success", minutes, new JsonObject
+        {
+            ["model"] = "claude-opus-5.5",
+            ["quotaSnapshots"] = new JsonObject
+            {
+                ["premium_interactions"] = new JsonObject
+                {
+                    ["entitlementRequests"] = 200, ["usedRequests"] = 200, ["overage"] = overage, ["resetDate"] = reset, ["remainingPercentage"] = 0,
+                },
+            },
+        });
+
     public Log Tool(string id, string tool, double minutes, string? command = null) =>
         Event("tool.execution_start", minutes, new JsonObject
         {

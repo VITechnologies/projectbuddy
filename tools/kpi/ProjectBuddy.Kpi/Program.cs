@@ -11,6 +11,7 @@ public static class ExitCodes
     public const int Ok = 0;
     public const int Usage = 2;
     public const int Refused = 3;
+    public const int Alarm = 4;
     public const int Database = 5;
 }
 
@@ -43,6 +44,8 @@ public static partial class Program
         ["ingest"] = ([], ["--sessions"]),
         ["ingest-farm"] = (["--export"], []),
         ["farm-reference"] = (["--workload", "--aiu-per-job"], []),
+        ["budget"] = (["--usd"], ["--reserve-usd"]),
+        ["quota"] = ([], ["--window-hours", "--items"]),
         ["track"] = (["--repository", "--forge"], []),
         ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
@@ -69,6 +72,7 @@ public static partial class Program
                 database.EnsureMigrated();
             }
 
+            var exit = ExitCodes.Ok;
             JsonNode result = options.Command switch
             {
                 "migrate" => database.Migrate(options.Values.ContainsKey("--create-database")),
@@ -76,10 +80,11 @@ public static partial class Program
                 "ingest-farm" => FarmIngest.Run(database, options.Get("--export")!),
                 "resolve" => Forge.Resolve(database, options.Get("--gh") ?? "gh", options.Get("--glab") ?? "glab"),
                 "report" => database.Report(),
+                "quota" => Quota.Run(database, options, out exit),
                 _ => database.Record(options),
             };
             stdout.WriteLine(result.ToJsonString());
-            return ExitCodes.Ok;
+            return exit;
         }
         catch (KpiException error)
         {
@@ -162,7 +167,18 @@ public static partial class Program
                 ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot", "session-state"));
         }
 
-        return new Options(args[0], values.GetValueOrDefault("--host", "127.0.0.1"), number, user, password, database, values);
+        var parsed = new Options(args[0], values.GetValueOrDefault("--host", "127.0.0.1"), number, user, password, database, values);
+        foreach (var name in new[] { "--usd", "--reserve-usd", "--window-hours" }.Where(values.ContainsKey))
+        {
+            Number(parsed, name);
+        }
+
+        if (parsed.Get("--items") is { } items)
+        {
+            Quota.Items(items);
+        }
+
+        return parsed;
     }
 
     internal static int Integer(Options options, string name) =>
