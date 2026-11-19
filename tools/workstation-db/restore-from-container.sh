@@ -101,7 +101,7 @@ done
 
 if tgt -d postgres -c "select 1 from pg_roles where rolname='farm'" | grep -q 1; then echo "ok   role farm present"; else echo "FAIL role farm missing"; fail=1; fi
 pub="$(tgt -d postgres -c "select string_agg(datname, ',') from pg_database where has_database_privilege('public', oid, 'CONNECT') and datname = any(array['kpi_local','registry_local','farm_local'])")"
-[ -z "$pub" ] && echo "ok   PUBLIC cannot CONNECT to kpi_local, registry_local or farm_local on target" || { echo "FAIL PUBLIC can connect: $pub"; fail=1; }
+if [ -z "$pub" ]; then echo "ok   PUBLIC cannot CONNECT to kpi_local, registry_local or farm_local on target"; else echo "FAIL PUBLIC can connect: $pub"; fail=1; fi
 
 if [ "$fail" != 0 ]; then echo "CHECKS FAILED"; exit 1; fi
 echo "ALL CHECKS PASSED"

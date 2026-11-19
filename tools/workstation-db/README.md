@@ -34,3 +34,8 @@ temporary directory on tmpfs and are deleted on exit.
 `sudo tools/workstation-db/cutover.sh rollback` puts the native cluster back on 55433 and starts the container (restart policy
 restored) with its untouched volume. Writes made on the native service after the cutover are not in the container; re-dump them
 first if they matter. Keep the container and its volume for at least 7 days after the cutover.
+
+## Status
+Cut over on 2026-11-19: the native cluster is production on 127.0.0.1:55432 (stage port 55433 is no longer used). Container
+`rsr-registry-local-postgres` is stopped with `restart=no`; it and its volume are kept for rollback until at least 2026-11-26.
+Removing them is a separate decision for the operator.
