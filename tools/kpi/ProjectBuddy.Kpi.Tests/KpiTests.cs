@@ -94,9 +94,9 @@ public sealed class DatabaseTests : IDisposable
         var connection = server.NewDatabase();
         Assert.Contains("does not exist", Cli.Run(["migrate", .. connection]).Error);
         var first = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
+        Assert.Equal((true, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\",\"0006_hooks.sql\"]"), ((bool)first["created"]!, first["applied"]!.ToJsonString()));
         var again = Cli.Json(["migrate", "--create-database", .. connection]);
-        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
+        Assert.Equal((false, "[\"0001_kpi_v1.sql\",\"0002_ai_units.sql\",\"0003_billed_credit_price.sql\",\"0004_farm_telemetry.sql\",\"0005_quota.sql\",\"0006_hooks.sql\"]"), ((bool)again["created"]!, again["present"]!.ToJsonString()));
         server.Execute(connection, "UPDATE public.kpi_schema_migrations SET sha256 = repeat('0', 64)");
         Assert.Contains("migration 0001_kpi_v1.sql changed after it was applied", Cli.Run(["migrate", .. connection]).Error);
     }
@@ -106,10 +106,10 @@ public sealed class DatabaseTests : IDisposable
     {
         var connection = server.NewDatabase();
         server.Execute([.. connection[..^1], "postgres"], $"CREATE DATABASE \"{connection[^1]}\"");
-        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 5 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
+        Assert.Equal((ExitCodes.Refused, "projectbuddy-kpi: the database has 0 of 6 migrations; run migrate"), (Cli.Run(["report", .. connection]).Exit, Cli.Run(["report", .. connection]).Error.Trim()));
         var behind = server.Migrated();
         server.Execute(behind, "DELETE FROM public.kpi_schema_migrations");
-        Assert.Contains("has 0 of 5 migrations", Cli.Run(["report", .. behind]).Error);
+        Assert.Contains("has 0 of 6 migrations", Cli.Run(["report", .. behind]).Error);
     }
 
     [Fact]

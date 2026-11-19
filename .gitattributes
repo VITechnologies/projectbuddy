@@ -23,3 +23,4 @@ Run-Pipeline.sh text=auto eol=lf
 # Byte-provenance files keep their exact bytes, whatever the rules above say.
 vm/windows-labview/unattended-template.xml -text
 # End of the repo-standards-review consumer-kit rules.
+tools/hooks/scripts/** text=auto eol=lf

@@ -350,6 +350,78 @@ jobs:
               raise SystemExit("projectbuddy-kpi coverage must be 100% line and branch")
           PY
 
+  hooks-tool:
+    # tools/hooks (#381): the workstation hooks and the projectbuddy-hooks CLI. The .NET tests and the hook shell tests run against the
+    # same PostgreSQL image, with a 100% line and branch gate on the CLI.
+    name: Hooks Tool Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The password of a throwaway service container that only this job can reach; it protects nothing.
+      PBK_CI_PASSWORD: hooks-ci-ephemeral
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+        env:
+          POSTGRES_PASSWORD: hooks-ci-ephemeral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: tools/hooks/global.json
+
+      - name: Test With Coverage
+        shell: bash
+        working-directory: tools/hooks
+        run: |
+          umask 077
+          printf '%s\n' "$PBK_CI_PASSWORD" > "$RUNNER_TEMP/pbk-password"
+          export PBK_TEST_HOST=127.0.0.1 PBK_TEST_PORT=5432 PBK_TEST_USER=postgres PBK_TEST_PASSWORD_FILE="$RUNNER_TEMP/pbk-password"
+          dotnet restore ProjectBuddy.Hooks.Tests --locked-mode --nologo
+          dotnet test ProjectBuddy.Hooks.Tests --no-restore --nologo --settings coverage.runsettings \
+            --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/hooks-coverage"
+
+      - name: Hook And Installer Shell Tests
+        shell: bash
+        working-directory: tools/hooks
+        run: |
+          export PBK_TEST_HOST=127.0.0.1 PBK_TEST_PORT=5432 PBK_TEST_USER=postgres PBK_TEST_PASSWORD_FILE="$RUNNER_TEMP/pbk-password"
+          tests/test-hook.sh
+          tests/test-install.sh
+
+      - name: Enforce 100% Line And Branch Coverage
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/hooks-coverage" <<'PY'
+          import pathlib
+          import sys
+          from xml.etree import ElementTree
+
+          report = next(pathlib.Path(sys.argv[1]).rglob("coverage.cobertura.xml"), None)
+          if report is None:
+              raise SystemExit("no projectbuddy-hooks coverage report was produced")
+          root = ElementTree.parse(report).getroot()
+          packages = [package.attrib["name"] for package in root.iter("package")]
+          if packages != ["projectbuddy-hooks"]:
+              raise SystemExit(f"hooks coverage must measure exactly projectbuddy-hooks, got {packages}")
+          line, branch = float(root.attrib["line-rate"]), float(root.attrib["branch-rate"])
+          print(f"projectbuddy-hooks coverage: line {line:.1%}, branch {branch:.1%}")
+          if line < 1.0 or branch < 1.0:
+              raise SystemExit("projectbuddy-hooks coverage must be 100% line and branch")
+          PY
+
   source-config:
     name: Source Configuration Tests (${{ matrix.os }})
     strategy:

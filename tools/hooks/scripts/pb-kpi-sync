@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Detached KPI step of the hooks (#381): ingest the session logs, mark the session against the work_ref the orchestrator set in
+# the registry (no work_ref, no mark), and resolve merged work. One run at a time; ingest and resolve at most once a minute.
+set +e
+umask 077
+sid="${1:?session id}"
+HOME_DIR="${HOME:-/nonexistent}"
+CONFIG_DIR="$HOME_DIR/.config/projectbuddy-hooks"
+STATE_DIR="${XDG_STATE_HOME:-$HOME_DIR/.local/state}/projectbuddy-hooks"
+LOG="$STATE_DIR/hooks.log"
+log() { printf '%s kpi-sync %s %s\n' "$(date -u +%FT%TZ)" "$sid" "$*" >> "$LOG"; }
+# shellcheck source=/dev/null
+[ -r "${PB_HOOKS_ENV:-$CONFIG_DIR/env}" ] && . "${PB_HOOKS_ENV:-$CONFIG_DIR/env}"
+[[ "$sid" =~ ^[A-Za-z0-9._-]{8,80}$ ]] || exit 0
+[ -x "${PB_KPI_BIN:-}" ] && [ -r "${PB_KPI_PASSWORD_FILE:-}" ] || { log "PB_KPI_BIN or PB_KPI_PASSWORD_FILE is not usable"; exit 0; }
+
+exec 9> "$STATE_DIR/kpi-sync.lock"
+flock -n 9 || exit 0
+
+kpi() {
+  "$PB_KPI_BIN" "$@" --password-file "$PB_KPI_PASSWORD_FILE" --host "${PGHOST:-127.0.0.1}" --port "${PGPORT:-55432}" \
+    --user "${PB_KPI_USER:-postgres}" --database "${PGDATABASE:-kpi_local}" > /dev/null || log "kpi $1 failed (exit $?)"
+}
+stamp="$STATE_DIR/kpi-sync.stamp"
+due=0
+[ -z "$(find "$stamp" -mmin -1 2> /dev/null)" ] && due=1
+
+[ "$due" = 1 ] && kpi ingest
+work_ref="$(PGCONNECT_TIMEOUT=2 PGPASSWORD="$(tr -d '\r\n' < "${PB_HOOKS_PASSWORD_FILE:-/dev/null}")" PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-55432}" \
+  PGDATABASE="${PGDATABASE:-kpi_local}" PGUSER="${PGUSER:-pb_hooks}" psql -X -At -w -v ON_ERROR_STOP=1 -v sid="$sid" <<< "SELECT hooks.work_ref_of(:'sid')")"
+[ -n "$work_ref" ] && kpi mark --session "$sid" --item "$work_ref"
+[ "$due" = 1 ] && { kpi resolve; : > "$stamp"; }
+exit 0
