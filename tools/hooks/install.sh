@@ -6,7 +6,7 @@
 #   install.sh activate [--prefix <dir>] [--hooks-dir <dir>]      # writes ~/.copilot/hooks/projectbuddy.json: every session now fires them
 #   install.sh deactivate [--hooks-dir <dir>]                     # removes it again (the kill switch for one machine)
 #
-# `install` needs the hooks migration (0006_hooks.sql, applied by `projectbuddy-kpi migrate`) and a PostgreSQL superuser password
+# `install` needs the hooks migration (0006_hooks.sql and 0007_hooks_owner_role.sql, applied by `projectbuddy-kpi migrate`) and a PostgreSQL superuser password
 # file. It creates the login role (default pb_hooks, member of hooks_writer, no other rights) with a random password in a 0600 file,
 # and is idempotent: an existing role and password file are kept.
 set -euo pipefail
@@ -41,8 +41,8 @@ case "$step" in
     mkdir -p "$prefix" "$config_dir"
     install -m 0755 "$here/scripts/pb-hook" "$here/scripts/pb-kpi-sync" "$here/scripts/pb-stop-settle" "$prefix/"
     admin() { PGPASSWORD="$(tr -d '\r\n' < "$admin_pw")" PGCONNECT_TIMEOUT=5 psql -X -At -w -h "$host" -p "$port" -U postgres -d "$database" -v ON_ERROR_STOP=1 "$@"; }
-    [ "$(admin -c "select count(*) from pg_namespace where nspname = 'hooks'")" = 1 ] \
-      || { echo "schema hooks is missing: run 'projectbuddy-kpi migrate' (0006_hooks.sql) on $database first" >&2; exit 1; }
+    [ "$(admin -c "select count(*) from pg_namespace where nspname = 'hooks' and nspowner = 'hooks_owner'::regrole")" = 1 ] \
+      || { echo "schema hooks (owned by hooks_owner) is missing: run 'projectbuddy-kpi migrate' (0006_hooks.sql, 0007_hooks_owner_role.sql) on $database first" >&2; exit 1; }
     if [ ! -s "$config_dir/password" ]; then
       new_pw="$(head -c 24 /dev/urandom | base64 | tr -d '+/=\n')"
       # The password goes in on stdin, so it is never in a process listing; the file is written only once the role has it.

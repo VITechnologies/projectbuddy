@@ -15,7 +15,7 @@ fails=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (expected '$3', got '$2')"; fails=1; fi; }
 
 psql -X -q -U postgres -d postgres -c "create database \"$DB\"" || exit 1
-psql -X -q -U postgres -v ON_ERROR_STOP=1 -d "$DB" -f "$HERE/../../kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql" || exit 1
+psql -X -q -U postgres -v ON_ERROR_STOP=1 -d "$DB" -f "$HERE/../../kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql" -f "$HERE/../../kpi/ProjectBuddy.Kpi/Sql/0007_hooks_owner_role.sql" || exit 1
 export HOME="$T/home"; mkdir -p "$HOME"
 inst() { "$HERE/../install.sh" "$@" --prefix "$T/prefix" --hooks-dir "$T/hooks"; }
 common=(--admin-password-file "$PBK_TEST_PASSWORD_FILE" --host "$PGHOST" --port "$PGPORT" --database "$DB" --role "$ROLE")
@@ -25,6 +25,7 @@ expect "install succeeds" "$(inst install "${common[@]}" > /dev/null; echo $?)" 
 expect "install does not activate" "$(ls "$T/hooks" 2> /dev/null | wc -l | tr -d ' ')" "0"
 expect "the password file is 0600" "$(stat -c %a "$HOME/.config/projectbuddy-hooks/password")" "600"
 expect "the env file is 0600" "$(stat -c %a "$HOME/.config/projectbuddy-hooks/env")" "600"
+expect "the hooks objects are owned by hooks_owner, a NOLOGIN non-superuser" "$(psql -X -At -U postgres -d "$DB" -c "select (select nspowner::regrole from pg_namespace where nspname='hooks') || ' ' || (select rolcanlogin::text || rolsuper::text from pg_roles where rolname='hooks_owner')")" "hooks_owner falsefalse"
 expect "the scripts are installed" "$(ls "$T/prefix" | tr '\n' ' ')" "pb-hook pb-kpi-sync pb-stop-settle "
 expect "the role is a member of hooks_writer only" "$(psql -X -At -U postgres -d postgres -c "select string_agg(g.rolname, ',') from pg_auth_members m join pg_roles g on g.oid=m.roleid join pg_roles r on r.oid=m.member where r.rolname='$ROLE'")" "hooks_writer"
 before="$(sha256sum "$HOME/.config/projectbuddy-hooks/password")"
@@ -44,5 +45,7 @@ expect "deactivate removes it" "$(inst deactivate > /dev/null; ls "$T/hooks" | w
 
 psql -X -q -U postgres -d postgres -c "drop owned by \"$ROLE\"" > /dev/null
 rm -rf "$HOME/.config/projectbuddy-hooks"; psql -X -q -U postgres -d "$DB" -c "drop schema hooks cascade" > /dev/null
+expect "the unowned-by-hooks_owner check refuses a schema owned by someone else" "$(psql -X -q -U postgres -d "$DB" -c "create schema hooks" > /dev/null; inst install "${common[@]}" > /dev/null 2>&1; echo $?)" "1"
+psql -X -q -U postgres -d "$DB" -c "drop schema hooks cascade" > /dev/null
 expect "install without the migration is refused" "$(inst install "${common[@]}" > /dev/null 2>&1; echo $?)" "1"
 [ "$fails" = 0 ] && echo "ALL TESTS PASSED" || { echo "TESTS FAILED"; exit 1; }

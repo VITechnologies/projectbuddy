@@ -214,6 +214,48 @@ public sealed class RegistryAndQueueTests : IDisposable
     }
 }
 
+public sealed class OwnerRoleTests : IDisposable
+{
+    private readonly Server server = new();
+
+    public void Dispose() => server.Dispose();
+
+    [Fact]
+    public void The_hooks_objects_belong_to_a_nologin_non_superuser_role_with_a_fixed_search_path()
+    {
+        var connection = server.Migrated();
+        Assert.Equal("f|f|f|f|f|f", server.Scalar(connection, "SELECT concat_ws('|', rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls) FROM pg_roles WHERE rolname = 'hooks_owner'"));
+        Assert.Equal(0L, server.Scalar(connection, "SELECT (SELECT count(*) FROM pg_namespace WHERE nspname = 'hooks' AND nspowner <> 'hooks_owner'::regrole) + (SELECT count(*) FROM pg_class WHERE relnamespace = 'hooks'::regnamespace AND relowner <> 'hooks_owner'::regrole) + (SELECT count(*) FROM pg_proc WHERE pronamespace = 'hooks'::regnamespace AND proowner <> 'hooks_owner'::regrole)"));
+        Assert.Equal(0L, server.Scalar(connection, "SELECT count(*) FROM pg_proc WHERE pronamespace = 'hooks'::regnamespace AND NOT coalesce(proconfig @> ARRAY['search_path=pg_catalog, hooks, pg_temp'], false)"));
+        Assert.Equal(0L, server.Scalar(connection, "SELECT count(*) FROM pg_auth_members WHERE member = 'hooks_owner'::regrole"));
+    }
+
+    [Fact]
+    public void The_functions_reach_only_the_hooks_schema()
+    {
+        var connection = server.Migrated();
+        server.Execute(connection, "CREATE TABLE public.secret (v int); INSERT INTO public.secret VALUES (1); CREATE ROLE hooks_probe LOGIN IN ROLE hooks_writer");
+        try
+        {
+            using var probe = server.OpenTo(connection);
+            using (var call = new Npgsql.NpgsqlCommand("SET ROLE hooks_probe; SELECT hooks.on_start('{\"sessionId\":\"44444444-aaaa\"}')", probe))
+            {
+                call.ExecuteNonQuery();
+            }
+
+            using var owner = new Npgsql.NpgsqlCommand("SELECT count(*) FROM public.secret", probe);
+            Assert.Contains("permission denied", Assert.Throws<Npgsql.PostgresException>(() => owner.ExecuteNonQuery()).Message);
+        }
+        finally
+        {
+            server.Execute(connection, "DROP OWNED BY hooks_probe; DROP ROLE hooks_probe");
+        }
+
+        server.Execute(connection, "SET ROLE hooks_owner");
+        Assert.Equal(1L, server.Scalar(connection, "SELECT count(*) FROM hooks.sessions"));
+    }
+}
+
 public sealed class HandoffTests : IDisposable
 {
     private readonly Server server = new();
