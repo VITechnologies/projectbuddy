@@ -13,16 +13,22 @@ compliance posture was assessed against.
 | Standard | `svelderrainruiz/repo-standards-review` |
 | Version (tag) | `v0.12.0` |
 | Version (commit SHA) | `49dfa312040b338a61b95ad9022f1ddddd318ab1` |
-| Assessed | 2026-11-18 |
+| Assessed | 2026-11-19 |
 | Profile | `release-gate` |
 
 `v0.12.0` adds `rsr/ecosystem-wiki-standard@8` (#384, #387). A link from a
 requirement's `TestID` section asserts no coverage: a test page declares its
 linked requirements `not verified here`, and `check` reports
 `observation-overclaim` for a `Together they cover` sentence that no coverage
-map names. The 30 test pages of this wiki were rewritten accordingly. This
-bump did not re-run the gate scan: the gate status below is still the one
-recorded at `v0.11.0`.
+map names. The 30 test pages of this wiki were rewritten accordingly.
+Re-certification against `v0.12.0` on 2026-11-19 ran
+`.github/workflows/standards-assurance-scan.yml` on the fork's
+`standards-review-local` runner, from fork `main` at `1a3bcad`, against the
+pinned commit and wiki head `a1e6f4c`
+(`svelderrainruiz/projectbuddy` run 44566707445). It found no regression: the
+5 required gates `PASS` at High confidence (99-100%), and DoD stays the
+optional `FAIL`. The wiki registry export was re-run for `a1e6f4c` the same
+day (#390).
 
 `v0.11.0` adds `rsr/ecosystem-wiki-standard@7` (#369). A test-case item may
 instead be a file item, `` `file` ``, which requires every test case of that
