@@ -23,9 +23,10 @@ BLOCKED = {"TEST-127", "TEST-128"}
 SEED = 379
 PAGES_PER_BLOCK = 6
 MARGIN = 0.20
+ITEM_CAP = 12  # A4-r2 section 4
 ALPHA = 0.025
 KIT = {
-    "control": "v0.11.0",
+    "control": "v0.9.0",  # A4-r2: the @5-era standard, which has no observation check
     "treatment": "v0.12.0",
 }
 
@@ -75,6 +76,19 @@ def brief(wiki_git: Path, page: str):
     m = re.search(r"## Stimulus\n\n(.*?)\n\n## ", t, re.S)
     return m.group(1).strip()
 
+
+CONTROL_GATE = """#!/bin/sh
+# Standard @5 has no observation check: this checks only the page's shape.
+cd "$(dirname "$0")" || exit 2
+rc=0
+for id in "$@"; do
+  f=wiki/tests/$id.md
+  grep -q '^## Stimulus' "$f" && grep -q '^## Required observation' "$f" && grep -q '^1\\. ' "$f" && ! grep -q '(to be written)' "$f" \\
+    && grep -q '{commit_short}' "$f" || {{ echo "FINDING: $f: needs numbered Stimulus steps, a Required observation, and the member commit"; rc=1; }}
+done
+[ $rc -eq 0 ] && echo "PASS: shape only (standard @5 has no observation check)"
+exit $rc
+"""
 
 GATE = """#!/bin/sh
 cd "$(dirname "$0")" || exit 2
@@ -145,13 +159,17 @@ def cmd_workspace(a):
     (out / "kit").mkdir()
     kit_dir = Path(a.rsr) / "docs/architecture"
     tag = KIT[arm]
-    obs = sh("git", "-C", a.rsr, "show", f"v0.11.0:templates/consumer/{{{{cookiecutter.__kit_dir}}}}/.repo-standards-review/observations.py") if arm == "control" else (repo / ".repo-standards-review/observations.py").read_text()
-    (out / "kit/observations.py").write_text(obs)
-    std = sh("git", "-C", a.rsr, "show", "v0.11.0:docs/architecture/ecosystem-wiki-standard.md") if arm == "control" else (kit_dir / "ecosystem-wiki-standard.md").read_text()
+    kit_py = repo / ".repo-standards-review/observations.py"
+    if arm == "treatment":
+        (out / "kit/observations.py").write_text(kit_py.read_text())
+    std = sh("git", "-C", a.rsr, "show", "v0.9.0:docs/architecture/ecosystem-wiki-standard.md") if arm == "control" else (kit_dir / "ecosystem-wiki-standard.md").read_text()
     (out / "standard.md").write_text(std)
-    sh("python3", "kit/observations.py", "evidence", "--format", "pytest-junit", "--report", a.junit, "--platform", "linux-x64", "--root", str(repo), "--output", "evidence.json", cwd=out)
+    sh("python3", str(kit_py), "evidence", "--format", "pytest-junit", "--report", a.junit, "--platform", "linux-x64", "--root", str(repo), "--output", "evidence.json", cwd=out)
     extra = " --anchored --member-root member" if arm == "treatment" else ""
-    (out / "gate.sh").write_text(GATE.format(commit=MEMBER_COMMIT, extra=extra))
+    if arm == "control":
+        (out / "gate.sh").write_text(CONTROL_GATE.format(commit_short=MEMBER_COMMIT[:7]))
+    else:
+        (out / "gate.sh").write_text(GATE.format(commit=MEMBER_COMMIT, extra=extra))
     (out / "gate.sh").chmod(0o755)
     (out / "PAGES.md").write_text("\n".join(f"- {p}" for p in pages) + "\n")
     task = TASK.format(commit=MEMBER_COMMIT, first=pages[0])
@@ -177,6 +195,11 @@ def cmd_packets(a):
         pid = f"P{i + 1:03d}"
         key[pid] = {k: it[k] for k in ("page", "arm", "block")}
         (out / f"{pid}.md").write_text(it["text"])
+        obs = it["text"].split("## Required observation", 1)[-1]
+        items = [l for l in obs.split("\n") if re.match(r"- `[^`]+`( ›|$)", l)]
+        srng = random.Random(f"{SEED}-{pid}")
+        picked = items if len(items) <= ITEM_CAP else [items[i] for i in sorted(srng.sample(range(len(items)), ITEM_CAP))]
+        (out / f"{pid}.sample.json").write_text(json.dumps({"items_total": len(items), "sampled_items": picked}, indent=1))
     (out / "KEY.json").write_text(json.dumps(key, indent=1, sort_keys=True))
     print(f"{len(items)} packets in {out}")
 
@@ -204,6 +227,7 @@ def cmd_analyse(a):
     key = json.loads(Path(a.key).read_text())
     e1 = json.loads(Path(a.e1).read_text())  # {packet: [{"final": "supported"|"unsupported"}]}
     e2 = json.loads(Path(a.e2).read_text())  # {packet: [{"ref": id, "final": "retained"|"partial"|"absent"}]}
+    samples = {pid: json.loads((Path(a.packets) / f"{pid}.sample.json").read_text()) for pid in key}
     page = {}
     for pid, k in key.items():
         page.setdefault(k["page"], {})[k["arm"]] = pid
@@ -214,8 +238,11 @@ def cmd_analyse(a):
         row = {"page": p}
         for arm, pid in arms.items():
             c = e1.get(pid, [])
-            n = len(c)
-            u = sum(1 for x in c if x["final"] == "unsupported")
+            audited_items = sum(1 for x in c if x.get("stratum") == "item")
+            w_item = samples[pid]["items_total"] / audited_items if audited_items else 0.0
+            wt = lambda x: w_item if x.get("stratum") == "item" else 1.0
+            n = sum(wt(x) for x in c)
+            u = sum(wt(x) for x in c if x["final"] == "unsupported")
             r = e2.get(pid, [])
             m = len(r)
             kept = sum(1 for x in r if x["final"] == "retained")
@@ -269,6 +296,7 @@ def main():
     x.add_argument("--key", required=True)
     x.add_argument("--e1", required=True)
     x.add_argument("--e2", required=True)
+    x.add_argument("--packets", required=True)
     x.set_defaults(f=cmd_analyse)
     a = p.parse_args()
     a.f(a)

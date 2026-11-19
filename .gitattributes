@@ -24,3 +24,4 @@ Run-Pipeline.sh text=auto eol=lf
 vm/windows-labview/unattended-template.xml -text
 # End of the repo-standards-review consumer-kit rules.
 tools/hooks/scripts/** text=auto eol=lf
+tools/north-star-a4/** text=auto eol=lf

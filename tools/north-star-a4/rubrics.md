@@ -14,11 +14,11 @@ Given a builder's list, read each named test case's body. Keep an entry only whe
 
 ## Claim extraction and E1 labels
 
-Read the packet page. Split its Required observation (the items and any sentence that makes an assertion, but not a lead-in that only names requirements) into atomic claims, one assertion each. A test-case item is one claim: the behaviour that the test case's name states. Then label each claim:
+Read the packet page. Split its Required observation (the items and any sentence that makes an assertion, but not a lead-in that only names requirements) into atomic claims, one assertion each. A test-case or file item is one claim (stratum `item`): the behaviour that the test case's name states; label only the items listed in the packet's `.sample.json` (`sampled_items`), and no other item. Every other assertion is a claim of stratum `other`; extract and label all of them. Then label each claim:
 - `supported`: the stimulus as the page states it, or the test code at the member commit, shows the claim. For a test-case item, the test body must assert the behaviour in the name.
 - `unsupported`: neither shows it. Read the named test bodies, not only their names. A claim about more than the tests check, a guarantee, a cause, or a property that is not asserted is unsupported.
 
-Output JSON `{packet: [{"id","claim","label","reason"}]}` with one short reason per claim. The second reviewer receives the first reviewer's claim list, without its labels, and labels the same list without adding, removing or merging claims. A third reviewer reads only the disagreements.
+Output JSON `{packet: [{"id","stratum","claim","label","reason"}]}` with one short reason per claim. The second reviewer receives the first reviewer's claim list, without its labels, and labels the same list without adding, removing or merging claims. A third reviewer reads only the disagreements.
 
 ## E2 judgement
 
