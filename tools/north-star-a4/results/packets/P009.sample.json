@@ -1,0 +1,17 @@
+{
+ "items_total": 21,
+ "sampled_items": [
+  "- `scripts/tests/test_lane_placement.py` \u203a test_a_missing_empty_or_nul_secret_is_named_and_its_value_is_not[environ0-VSCE_PAT is missing or empty]",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_a_missing_empty_or_nul_secret_is_named_and_its_value_is_not[environ1-VSCE_PAT is missing or empty]",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_the_secrets_payload_is_each_declared_name_and_value_in_order",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_place_secrets_sends_the_payload_on_standard_input_only",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_place_secrets_places_an_empty_file_when_no_secret_is_declared",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes0-placing the secrets failed]",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes1-is not root's own file with mode 0600]",
+  "- `scripts/tests/test_lane_placement.py` \u203a test_place_secrets_refuses_a_file_that_is_not_what_it_sent[changes2-the sent size]",
+  "- `scripts/tests/test_lane_supervisor.py` \u203a test_the_fetch_steps_get_no_secret",
+  "- `it has the network and no secrets`",
+  "- `a declared secret is unset or empty in the plan's environment`",
+  "- `writes the run's evidence record`"
+ ]
+}

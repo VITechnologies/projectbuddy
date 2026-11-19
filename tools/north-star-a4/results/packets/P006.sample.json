@@ -1,0 +1,17 @@
+{
+ "items_total": 16,
+ "sampled_items": [
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_online_failures_name_each_problem",
+  "- `scripts/tests/test_approval_gate_checks.py` \u203a test_a_valid_approval_verifies_and_the_noop_executor_runs_exactly_once",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_a_requester_that_can_push_makes_the_class_advisory_unless_a_ruleset_blocks_it",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_wildcard_and_writable_targets_are_advisory_findings",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_can_write_treats_unknown_access_as_writable",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_missing_environment_and_unknown_requester_are_not_ready",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_missing_settings_make_the_class_not_ready[setup3-requester-is-admin]",
+  "- `**Self-hosted runners do not isolate secrets.** Any process on the`",
+  "- `secret. Preflight runs outside the environment, and its`",
+  "- `# Visible here only if it is wrongly also a repository or organization secret.`",
+  "- `runs-on: ubuntu-latest`",
+  "- `EXECUTORS: \"dict[str, Executor]\" = {\"noop\": noop}`"
+ ]
+}

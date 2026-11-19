@@ -1,0 +1,17 @@
+{
+ "items_total": 16,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_seeded_ui_states_and_event_ids_are_repeatable",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_independent_oracle_scores_seeded_task[99-approve]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_independent_oracle_scores_seeded_task[100-hold]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_independent_oracle_scores_seeded_task[101-approve]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_wrong_action_is_recorded_without_leaking_success_or_expected_target",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_oracle_scores_model_state_claim_separately_from_task_success",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_invalid_or_duplicate_action_does_not_allow_a_retry",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_scenario_seed_is_strictly_bounded[-1]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_scenario_seed_is_strictly_bounded[4294967296]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_http_ui_exposes_public_state_and_has_no_action_write_route",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_stdio_mcp_server_exposes_only_exact_ui_action_and_returns_no_oracle_data",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_mcp_handlers_reject_wrong_task_malformed_action_and_duplicate_submission"
+ ]
+}

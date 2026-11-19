@@ -1,0 +1,149 @@
+{
+ "P025": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "states unknown class refused, nothing dispatched, tests named"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "abbreviated SHA/missing content and 64-char SHA-256 cases named"
+  },
+  {
+   "ref": "R3",
+   "label": "partial",
+   "reason": "only 'precondition is required' case; malformed not conveyed"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "target pattern conditions and tests listed"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "states recompute, mismatch, digest-mismatch before execution"
+  }
+ ],
+ "P026": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "states zero tag calls, no payload on pre-cancel"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "states stop after slow preflight"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "states identical approved payload and bounded retry"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "states cancel after response: no postflight, no result"
+  }
+ ],
+ "P027": [
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "terminal group, second selection refused, only selected candidate dispatched"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "substituted server identity/contract changes refused before client invoked"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "candidate altered in re-hashed grant refused"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "choice group rejected under legacy single-server contract"
+  }
+ ],
+ "P028": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "repeatable UI state and event ids stated"
+  },
+  {
+   "ref": "R2",
+   "label": "partial",
+   "reason": "oracle terminal-state scoring stated; refusal before any action not conveyed"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "grounding scored separately from task success"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "only exact UI action, no oracle data in MCP results"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "wrong task, malformed action, duplicate rejected; no oracle in errors"
+  }
+ ],
+ "P029": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "withdraw when requester could approve"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "refuse unprotected or self-reviewable"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "fully protected read-only requester enforcing"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "push makes advisory"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "missing environment/unknown requester not ready"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "admin bypass/requester reviewer not ready"
+  }
+ ],
+ "P030": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "missing disclosure approval rejected, no payload"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "expired, text-retention, unknown mode, bad box refuse, no payload"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "crop/redaction strips pixels, metadata, canary prose"
+  }
+ ]
+}

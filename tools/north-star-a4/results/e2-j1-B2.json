@@ -1,0 +1,174 @@
+{
+ "P007": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Items 3-4 state host-key-only enrollment, boot ID before/after, two systemctl queries and sudo find scan; cleanup of session files not stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Item 2 states exit 2, empty stdout, no mutation, both modes, for non-single-loopback rules"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Item 5 states runner unit/config files, scan failures and boot ID change refused with exit 2"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Item 6 states exit 1, no box, ACPI power button for guest ignoring poweroff, snapshot mismatch"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Item 8 lists @1, missing/malformed runnerScan, found runner, extra skipped roots, invalid boot ID/scan time"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Item 7 states verifier accepts scannedAt written with Z"
+  }
+ ],
+ "P008": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": ".runner and .credentials guests FAIL readiness stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Unit guest FAILs readiness stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "package --run exits 2 with no output file for runner-unit receipt"
+  },
+  {
+   "ref": "R4",
+   "label": "partial",
+   "reason": "Runner unit stops the run stated; a failed runner-unit query stopping the run is not stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Plan, teardown, verify-teardown as real processes with no stub/HTTP request stated"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Mutant requesting both token endpoints is caught stated"
+  }
+ ],
+ "P009": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Test named ...carry_secret_names_only plus prose on names only"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Test name states payload is each declared name and value in order"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Test name and cases state missing/empty/NUL named, value not, before VM mutation"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "stdin-only test named; mode 0600 root-owned and no secret in unit argv items listed"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Test name states empty file placed when no secret declared"
+  }
+ ],
+ "P010": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Planted runner files fail scan stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Planted unit fails scan stated"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Packager refuses readiness receipt reporting a runner, no box receipt"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Clone check fails on runner unit, SSH unit check stops run on unit or failed query"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Plan/teardown/verifier run as real processes making no request stated"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "Mutant lane requesting both tokens is caught stated"
+  }
+ ],
+ "P011": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Plan has one probe-<tool> step per tool with declared argument vector"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Probe steps ordered before candidate transfer / workload"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Probe runs exact vector as workload account and compares captured version with declared"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "Different version, non-matching output, non-zero exit stop the run"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Plan refuses contract differing from receipt; contract-version/missing/extra cases listed"
+  }
+ ],
+ "P012": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "Seven verdicts map to the four decisions stated"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "Cancelled-after-expiry gives expired; failed execute after rejecting review gives rejected; runs without verdict still decided"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "Rejection comment round-trips through record comment stated"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "Lookup returns only gate's own comment, ignoring mallory and other bot comments, filtered by run/attempt"
+  }
+ ]
+}

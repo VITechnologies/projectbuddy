@@ -1,0 +1,17 @@
+{
+ "items_total": 59,
+ "sampled_items": [
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[plan-<lambda>-changes65-runner scan failed: cannot read the guest boot ID]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[plan-<lambda>-changes66-runner scan failed: guest boot ID is not a UUID]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[plan-<lambda>-changes69-runner scan failed: systemctl list-units listed no units]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[plan-<lambda>-changes71-runner scan failed: runner configuration scan failed with exit code 124]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[run-<lambda>-changes50-source VM must be running for the runner scan]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[run-<lambda>-changes64-runner scan failed: guest SSH identity did not become ready]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[run-<lambda>-changes69-runner scan failed: systemctl list-units listed no units]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[run-<lambda>-changes71-runner scan failed: runner configuration scan failed with exit code 124]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_packager_refuses[run-<lambda>-changes75-REQ-105: the source VM carries an Actions runner: actions.runner.org-repo.lane.service]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_box_verifier_refuses_a_receipt_without_a_clean_runner_scan[<lambda>-runner scan is missing or malformed0]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_box_verifier_refuses_a_receipt_without_a_clean_runner_scan[<lambda>-runner scan is missing or malformed2]",
+  "- `scripts/tests/test_package_vagrant_box.py` \u203a test_the_box_verifier_refuses_a_receipt_without_a_clean_runner_scan[<lambda>-runner scan found an Actions runner0]"
+ ]
+}

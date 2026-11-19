@@ -1,0 +1,15 @@
+{
+ "items_total": 10,
+ "sampled_items": [
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_summarizes_each_mode_separately_and_never_qualifies",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_mixed_seeds_and_inconsistent_configuration",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_malformed_records[missing-field]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_malformed_records[mode]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_malformed_records[digest]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_malformed_records[timestamp]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_rejects_malformed_records[boolean]",
+  "- `scripts/tests/test_assisted_benchmark_synthetic_ui.py` \u203a test_calibration_single_sample_reports_unestimated_uncertainty",
+  "- `Validate and summarize non-qualifying live-assistance calibration records.`",
+  "- `\"qualification\": \"not-qualified\",`"
+ ]
+}

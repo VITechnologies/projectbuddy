@@ -1,0 +1,17 @@
+{
+ "items_total": 16,
+ "sampled_items": [
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_verdicts_map_to_the_four_decisions[verdict2-expected2]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_rejection_with_reason_round_trips_through_the_comment",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_completed_status_reads_the_decision_record[comments1-expected1]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_runs_without_a_verdict_are_still_decided",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_verdicts_map_to_the_four_decisions[verdict3-expected3]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_completed_status_reads_the_decision_record[comments2-expected2]",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_records_without_request_or_reviews_and_executed_records",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_find_records_trusts_only_the_actions_bot_and_filters_by_run",
+  "- `scripts/tests/test_approval_gate_record.py` \u203a test_upsert_edits_this_attempts_record_or_posts_a_new_one",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_record_without_a_verdict[extra0-not-run:preflight]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_record_without_a_verdict[extra1-not-run:withdrawn]",
+  "- `scripts/tests/test_approval_gate_cli.py` \u203a test_record_without_a_verdict[extra2-not-run:failure]"
+ ]
+}

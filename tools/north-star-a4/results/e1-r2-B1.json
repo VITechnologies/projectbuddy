@@ -1,0 +1,994 @@
+{
+ "P001": [
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C19",
+   "label": "unsupported",
+   "reason": "build-1 listing is not asserted; the test checks only place-secrets and build-2."
+  },
+  {
+   "id": "C20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C44",
+   "label": "supported",
+   "reason": ""
+  }
+ ],
+ "P002": [
+  {
+   "id": "I01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C14",
+   "label": "supported",
+   "reason": ""
+  }
+ ],
+ "P003": [
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C31",
+   "label": "supported",
+   "reason": ""
+  }
+ ],
+ "P004": [
+  {
+   "id": "I01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  }
+ ],
+ "P005": [
+  {
+   "id": "I01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C22",
+   "label": "unsupported",
+   "reason": "No test attempts a call beyond the grant order."
+  },
+  {
+   "id": "C23",
+   "label": "unsupported",
+   "reason": "No test asserts a cross-run call refusal; the wrong-VM case is a different check."
+  },
+  {
+   "id": "C24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C31",
+   "label": "supported",
+   "reason": ""
+  }
+ ],
+ "P006": [
+  {
+   "id": "I01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "I12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "C15",
+   "label": "supported",
+   "reason": ""
+  }
+ ]
+}

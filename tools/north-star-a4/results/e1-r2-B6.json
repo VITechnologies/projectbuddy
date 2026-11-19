@@ -1,0 +1,564 @@
+{
+ "packet": [
+  {
+   "id": "P031-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P031-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-07",
+   "label": "unsupported",
+   "reason": "Body checks budget and no images/messages in the checkpoint but never asserts canaries."
+  },
+  {
+   "id": "P032-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P032-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P033-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P034-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P035-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-06",
+   "label": "unsupported",
+   "reason": "The preflight job also receives APPROVAL_GATE_PROBE; no test shows only the executor reads it."
+  },
+  {
+   "id": "P036-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P036-25",
+   "label": "supported",
+   "reason": ""
+  }
+ ]
+}

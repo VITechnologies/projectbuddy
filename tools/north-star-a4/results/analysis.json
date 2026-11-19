@@ -1,0 +1,414 @@
+{
+ "pages": 18,
+ "pooled_unsupported": {
+  "control": 0.02759526938239159,
+  "treatment": 0.032541029994340685
+ },
+ "pooled_retention": {
+  "control": 0.9230769230769231,
+  "treatment": 0.8791208791208791
+ },
+ "E1": {
+  "mean_diff": -0.007103196455376625,
+  "p": 0.67633056640625,
+  "ci95": [
+   -0.03531634665457142,
+   0.021614747675794188
+  ],
+  "pass": false
+ },
+ "E2": {
+  "mean_diff": -0.045370370370370366,
+  "p_noninferior": 0.001251220703125,
+  "ci95": [
+   -0.1259259259259259,
+   0.03055555555555555
+  ],
+  "pass": true
+ },
+ "E2_partial_counted": {
+  "mean_diff": 0.0,
+  "p_noninferior": 3.814697265625e-06
+ },
+ "decision": "reopen-wording",
+ "rows": [
+  {
+   "page": "TEST-093",
+   "treatment": {
+    "claims": 40.0,
+    "unsupported": 1.0,
+    "u": 0.025,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 16.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-095",
+   "control": {
+    "claims": 44.0,
+    "unsupported": 1.0,
+    "u": 0.022727272727272728,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 39.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-096",
+   "control": {
+    "claims": 31.0,
+    "unsupported": 1.0,
+    "u": 0.03225806451612903,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 16.0,
+    "unsupported": 1.0,
+    "u": 0.0625,
+    "ref": 5,
+    "retained": 4,
+    "r": 0.8,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-097",
+   "control": {
+    "claims": 43.0,
+    "unsupported": 6.0,
+    "u": 0.13953488372093023,
+    "ref": 5,
+    "retained": 2,
+    "r": 0.4,
+    "r_partial": 0.8
+   },
+   "treatment": {
+    "claims": 22.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 5,
+    "retained": 3,
+    "r": 0.6,
+    "r_partial": 0.8
+   }
+  },
+  {
+   "page": "TEST-098",
+   "treatment": {
+    "claims": 21.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 32.0,
+    "unsupported": 1.0,
+    "u": 0.03125,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-100",
+   "treatment": {
+    "claims": 31.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 4,
+    "retained": 2,
+    "r": 0.5,
+    "r_partial": 0.75
+   },
+   "control": {
+    "claims": 25.0,
+    "unsupported": 2.0,
+    "u": 0.08,
+    "ref": 4,
+    "retained": 1,
+    "r": 0.25,
+    "r_partial": 0.75
+   }
+  },
+  {
+   "page": "TEST-101",
+   "treatment": {
+    "claims": 29.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 4,
+    "retained": 2,
+    "r": 0.5,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 43.0,
+    "unsupported": 2.0,
+    "u": 0.046511627906976744,
+    "ref": 4,
+    "retained": 4,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-102",
+   "control": {
+    "claims": 43.0,
+    "unsupported": 2.0,
+    "u": 0.046511627906976744,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 37.0,
+    "unsupported": 4.833333333333333,
+    "u": 0.13063063063063063,
+    "ref": 5,
+    "retained": 4,
+    "r": 0.8,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-104",
+   "treatment": {
+    "claims": 37.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 44.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-105",
+   "control": {
+    "claims": 36.0,
+    "unsupported": 1.0,
+    "u": 0.027777777777777776,
+    "ref": 6,
+    "retained": 5,
+    "r": 0.8333333333333334,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 41.0,
+    "unsupported": 1.0,
+    "u": 0.024390243902439025,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-107",
+   "control": {
+    "claims": 48.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 63.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 5,
+    "r": 0.8333333333333334,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-115",
+   "control": {
+    "claims": 40.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 3,
+    "retained": 3,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 22.0,
+    "unsupported": 3.5,
+    "u": 0.1590909090909091,
+    "ref": 3,
+    "retained": 3,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-116",
+   "control": {
+    "claims": 44.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 4,
+    "retained": 4,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 39.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 4,
+    "retained": 4,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-122",
+   "treatment": {
+    "claims": 53.0,
+    "unsupported": 3.833333333333333,
+    "u": 0.07232704402515723,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 69.0,
+    "unsupported": 2.0,
+    "u": 0.028985507246376812,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-123",
+   "treatment": {
+    "claims": 32.0,
+    "unsupported": 2.0,
+    "u": 0.0625,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 68.0,
+    "unsupported": 3.0,
+    "u": 0.04411764705882353,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-124",
+   "control": {
+    "claims": 45.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 5,
+    "retained": 5,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 22.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 5,
+    "retained": 4,
+    "r": 0.8,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-125",
+   "control": {
+    "claims": 61.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 4,
+    "retained": 4,
+    "r": 1.0,
+    "r_partial": 1.0
+   },
+   "treatment": {
+    "claims": 26.0,
+    "unsupported": 1.0,
+    "u": 0.038461538461538464,
+    "ref": 4,
+    "retained": 4,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  },
+  {
+   "page": "TEST-126",
+   "treatment": {
+    "claims": 19.0,
+    "unsupported": 1.0,
+    "u": 0.05263157894736842,
+    "ref": 6,
+    "retained": 5,
+    "r": 0.8333333333333334,
+    "r_partial": 1.0
+   },
+   "control": {
+    "claims": 29.0,
+    "unsupported": 0,
+    "u": 0.0,
+    "ref": 6,
+    "retained": 6,
+    "r": 1.0,
+    "r_partial": 1.0
+   }
+  }
+ ]
+}

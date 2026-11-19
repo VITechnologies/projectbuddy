@@ -1,0 +1,149 @@
+{
+ "P031": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "probe-node argv [node,--version], runs guest"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "probe steps listed before transfer-candidate"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "runuser as pb-workload; returns expected/observed"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "mismatch, unmatched output, nonzero exit raise LaneBoxError"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "contract-version/missing/extra refuse under toolchain-contract"
+  }
+ ],
+ "P032": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "rejected without disclosure approval before image submitted"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "expired, text-retention, unknown mode, invalid box refused before submission"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "test name and text: strips unapproved pixels, metadata, model prose; canary"
+  }
+ ],
+ "P033": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "cancelled review never starts a request; cancellation stops new work"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "monotonic deadline includes preflight; test named"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "retry reuses identical approved request; bounded"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "cancellation after response prevents postflight and success"
+  }
+ ],
+ "P034": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "leaks in any published field block the request"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "leaking staged content withholds whole summary"
+  },
+  {
+   "ref": "R3",
+   "label": "absent",
+   "reason": "no summary rows/inspection links per shape"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "refuses unknown class, expired, policy-breaking requests"
+  },
+  {
+   "ref": "R5",
+   "label": "partial",
+   "reason": "preflight ok false/non-zero on failed check, but online failures naming not stated"
+  }
+ ],
+ "P035": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "withdraws and posts cancel when requester can approve"
+  },
+  {
+   "ref": "R2",
+   "label": "retained",
+   "reason": "refuses not protected / eligible reviewer"
+  },
+  {
+   "ref": "R3",
+   "label": "retained",
+   "reason": "enforcing for protected read-only non-reviewer"
+  },
+  {
+   "ref": "R4",
+   "label": "retained",
+   "reason": "push true advisory unless ruleset blocks"
+  },
+  {
+   "ref": "R5",
+   "label": "retained",
+   "reason": "environment-missing, requester-unknown not-ready"
+  },
+  {
+   "ref": "R6",
+   "label": "retained",
+   "reason": "admin bypass / requester reviewer not-ready"
+  }
+ ],
+ "P036": [
+  {
+   "ref": "R1",
+   "label": "retained",
+   "reason": "noop executor called exactly once, writes 0, probe present"
+  },
+  {
+   "ref": "R2",
+   "label": "partial",
+   "reason": "only no-approval refusal covered"
+  },
+  {
+   "ref": "R3",
+   "label": "partial",
+   "reason": "KeyError without noop stated; noop approval-noop env only via classes.example"
+  },
+  {
+   "ref": "R4",
+   "label": "absent",
+   "reason": "missing environment/unknown requester not covered by required observation"
+  }
+ ]
+}

@@ -1,0 +1,1119 @@
+{
+ "packet": [
+  {
+   "id": "P007-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-43",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-44",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-45",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-46",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-47",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P007-48",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-33",
+   "label": "unsupported",
+   "reason": "The packager is also offered a hash-tampered and an other-profile receipt, and the no-runner-list receipt goes to check_readiness_receipt, not the packager."
+  },
+  {
+   "id": "P008-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P008-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P009-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P010-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-10",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-17",
+   "label": "unsupported",
+   "reason": "The plan test asserts the argument vector only for probe-node, not each probe step."
+  },
+  {
+   "id": "P011-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P011-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-01",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-02",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-03",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-04",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-05",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-06",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-07",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-08",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-09",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-10",
+   "label": "unsupported",
+   "reason": "No assertion shows the three backticks cannot close the fence; only a four-backtick opener and the text are checked."
+  },
+  {
+   "id": "P012-11",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-12",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-13",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-14",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-15",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-16",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-17",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-18",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-19",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-20",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-21",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-22",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-23",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-24",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-25",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-26",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-27",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-28",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-29",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-30",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-31",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-32",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-33",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-34",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-35",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-36",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-37",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-38",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-39",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-40",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-41",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-42",
+   "label": "supported",
+   "reason": ""
+  },
+  {
+   "id": "P012-43",
+   "label": "supported",
+   "reason": ""
+  }
+ ]
+}
