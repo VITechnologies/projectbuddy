@@ -83,6 +83,33 @@ public sealed class RegistryAndQueueTests : IDisposable
     }
 
     [Fact]
+    public void A_long_single_turn_is_attributed_to_the_item_from_the_session_start()
+    {
+        var connection = server.Migrated();
+        const string item = "VITechnologies/projectbuddy#387";
+        server.Execute(connection, $"SELECT hooks.on_start('{{\"sessionId\":\"{Worker}\"}}')");
+        server.Execute(connection, "UPDATE hooks.sessions SET started_at = now() - interval '3 hours'");
+        server.Execute(connection, $"INSERT INTO kpi_v1.sessions VALUES ('{Worker}', now() - interval '3 hours', now(), 3)");
+        for (var n = 0; n < 3; n++)
+        {
+            server.Execute(connection, $"INSERT INTO kpi_v1.model_calls VALUES (gen_random_uuid(), '{Worker}', now() - interval '{150 - n * 60} minutes', 'user', 'm', 0, 1, 1, 1, 'run')");
+        }
+
+        // The ref arrives after the calls, and the turn has not stopped yet.
+        Assert.True((bool)Cli.Json(["sessions-set", "--session", Worker, "--work-ref", item, .. connection])["marked"]!);
+        Assert.Equal(3L, server.Scalar(connection, $"SELECT count(*) FROM kpi_v1.call_items WHERE item = '{item}'"));
+        Assert.Equal(1L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.work_markers"));
+
+        // The same ref again, as at agentStop, marks nothing; a changed ref marks from now on.
+        Assert.False((bool)Cli.Json(["sessions-set", "--session", Worker, "--work-ref", item, .. connection])["marked"]!);
+        Assert.False((bool)Cli.Json(["sessions-set", "--session", Worker, "--title", "t", .. connection])["marked"]!);
+        Assert.Equal(1L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.work_markers"));
+        Assert.True((bool)Cli.Json(["sessions-set", "--session", Worker, "--work-ref", "VITechnologies/projectbuddy#388", .. connection])["marked"]!);
+        Assert.Equal(2L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.work_markers"));
+        Assert.Equal(3L, server.Scalar(connection, $"SELECT count(*) FROM kpi_v1.call_items WHERE item = '{item}'"));
+    }
+
+    [Fact]
     public void A_session_without_a_work_ref_has_none_to_mark()
     {
         var connection = server.Migrated();
