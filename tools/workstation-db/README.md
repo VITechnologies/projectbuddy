@@ -30,6 +30,28 @@ temporary directory on tmpfs and are deleted on exit.
 `restore-from-container.sh --verify-only` re-runs the comparison without copying anything. Tests: `tools/workstation-db/tests/test-cutover.sh`
 (stubbed tools; covers failure rollback, the counter guard, the stale state file, re-run and rollback).
 
+## Backup recipe (matching binaries)
+Two PostgreSQL client versions are installed: `/usr/lib/postgresql/16/bin` (matches the server) and `/usr/lib/postgresql/18/bin`.
+`/usr/bin/pg_dump` and `pg_restore` are `pg_wrapper` symlinks that pick a version per invocation, so a bare `pg_dump` is not a
+reliable pin. A custom-format archive is readable only by a `pg_restore` at least as new as the `pg_dump` that wrote it:
+16.x writes archive format 1.15, 18.x writes 1.16 (since 17). A 1.16 archive was rejected by the 16 `pg_restore`
+("unsupported version (1.16) in file header") yet listed by the 18 one, so an 18 `pg_dump` wrote it (#396, seen in #393).
+Find the writer with `pg_restore --list FILE | head` (the header shows `Dumped from database version` and `Dumped by pg_dump version`).
+
+Always call the full path and use the same directory for both tools. The scripts here already pin `BIN=/usr/lib/postgresql/16/bin`.
+
+```bash
+BIN=/usr/lib/postgresql/16/bin   # server major; never mix with 18
+"$BIN/pg_dump" --version
+"$BIN/pg_dump" -h 127.0.0.1 -p 55432 -Fc --create -f "$DUMP" "$DB"
+# Mandatory: a backup is not accepted until its table of contents lists cleanly.
+"$BIN/pg_restore" --list "$DUMP" > /dev/null && echo "list OK"
+```
+
+If `pg_restore --list` fails with `unsupported version`, the archive came from a newer `pg_dump`: list/restore it with that
+binary's matching `pg_restore` (e.g. `/usr/lib/postgresql/18/bin`) and re-take the backup with the 16 binaries before relying on it.
+Restoring into the 16 server from an 18 archive may work but is unsupported; prefer re-dumping.
+
 ## Rollback
 `sudo tools/workstation-db/cutover.sh rollback` puts the native cluster back on 55433 and starts the container (restart policy
 restored) with its untouched volume. Writes made on the native service after the cutover are not in the container; re-dump them
