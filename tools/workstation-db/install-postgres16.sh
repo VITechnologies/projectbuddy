@@ -78,7 +78,13 @@ else
   log "cluster $VERSION/$CLUSTER already exists"
 fi
 
-pg_conftool "$VERSION" "$CLUSTER" set listen_addresses 127.0.0.1
+# Not pg_conftool: its quote_conf_value treats 127.0.0.1 as a float and writes it unquoted (a syntax error).
+CONF="/etc/postgresql/$VERSION/$CLUSTER/postgresql.conf"
+if grep -qE '^[#[:space:]]*listen_addresses[[:space:]]*=' "$CONF"; then
+  sed -i -E "s|^[#[:space:]]*listen_addresses[[:space:]]*=.*|listen_addresses = '127.0.0.1'|" "$CONF"
+else
+  printf "listen_addresses = '127.0.0.1'\n" >> "$CONF"
+fi
 pg_conftool "$VERSION" "$CLUSTER" set password_encryption scram-sha-256
 
 UNIT="postgresql@$VERSION-$CLUSTER.service"
@@ -88,7 +94,11 @@ printf '[Unit]\nRequiresMountsFor=%s\n' "$MOUNT" > "$DROPIN.tmp"
 if ! cmp -s "$DROPIN.tmp" "$DROPIN" 2>/dev/null; then mv "$DROPIN.tmp" "$DROPIN"; else rm -f "$DROPIN.tmp"; fi
 systemctl daemon-reload
 systemctl enable "$UNIT" >/dev/null 2>&1 || true
-systemctl start "$UNIT"
+systemctl start "$UNIT" || {
+  echo "starting $UNIT failed; last server log lines:" >&2
+  tail -n 5 "/var/log/postgresql/postgresql-$VERSION-$CLUSTER.log" >&2 || true
+  exit 1
+}
 
 for _ in $(seq 1 30); do pg_isready -q -h 127.0.0.1 -p "$STAGING_PORT" && break; sleep 1; done
 pg_isready -h 127.0.0.1 -p "$STAGING_PORT" >/dev/null || { echo "cluster did not become ready" >&2; exit 1; }
