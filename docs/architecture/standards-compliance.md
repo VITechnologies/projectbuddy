@@ -6,15 +6,23 @@ This repo is assessed against `svelderrainruiz/repo-standards-review`'s
 machine-checked record of which version of that standard the current
 compliance posture was assessed against.
 
-<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.11.0 sha=6fefbc255ae7b61a1a582beb2a36d49fb210f8b1 -->
+<!-- standards-compliance: repo=svelderrainruiz/repo-standards-review tag=v0.12.0 sha=49dfa312040b338a61b95ad9022f1ddddd318ab1 -->
 
 | Field | Value |
 |---|---|
 | Standard | `svelderrainruiz/repo-standards-review` |
-| Version (tag) | `v0.11.0` |
-| Version (commit SHA) | `6fefbc255ae7b61a1a582beb2a36d49fb210f8b1` |
+| Version (tag) | `v0.12.0` |
+| Version (commit SHA) | `49dfa312040b338a61b95ad9022f1ddddd318ab1` |
 | Assessed | 2026-11-18 |
 | Profile | `release-gate` |
+
+`v0.12.0` adds `rsr/ecosystem-wiki-standard@8` (#384, #387). A link from a
+requirement's `TestID` section asserts no coverage: a test page declares its
+linked requirements `not verified here`, and `check` reports
+`observation-overclaim` for a `Together they cover` sentence that no coverage
+map names. The 30 test pages of this wiki were rewritten accordingly. This
+bump did not re-run the gate scan: the gate status below is still the one
+recorded at `v0.11.0`.
 
 `v0.11.0` adds `rsr/ecosystem-wiki-standard@7` (#369). A test-case item may
 instead be a file item, `` `file` ``, which requires every test case of that

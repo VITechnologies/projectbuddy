@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and check the test-case items of a wiki's test pages (rsr/ecosystem-wiki-standard@7).
+"""Generate and check the test-case items of a wiki's test pages (rsr/ecosystem-wiki-standard@8).
 
 Managed by the repo-standards-review consumer kit (templates/consumer); update it
 with `cruft update`. It needs only Python 3.9+ and Git.
@@ -22,13 +22,28 @@ Commands:
   over the 16,384-byte page budget or the 16,384-character registry-text budget,
   it names whole files instead (`` `file` ``, a file item), largest first, until
   the page fits. A page without test-case items gets a new Required observation;
-  otherwise only its list of test-case items is replaced. The output depends
+  otherwise only its list of test-case items is replaced. A link from a requirement's
+  `TestID` section asserts no coverage: the new observation's lead-in declares the linked
+  requirements `not verified here`. Only with `--coverage-map <file.json>`, a person's
+  `{"<test page ID>": ["<requirement ID>", ...]}`, does a page say `Together they cover`
+  for the mapped requirements; one that the page does not link, a malformed file or an
+  unknown page ID is refused with exit 2. The output depends
   only on the pages and the evidence, so a second run changes nothing.
 - `check` reads the test pages of one wiki commit and reports each test-case item
   that names no test case the evidence lists for its file
   (`observation-test-missing`), that adds words to one (`observation-not-verbatim`),
   or whose test case, or for a file item any test case of its file, the evidence
-  does not show passing (`observation-not-passing`).
+  does not show passing (`observation-not-passing`). It also reports a page whose Required
+  observation says `Together they cover` for a requirement that no coverage map names
+  (`observation-overclaim`): without `--coverage-map <file.json>`, the same file that `generate`
+  reads, no page may say it. With `--anchored` (off by default, so a
+  wiki is judged against the `@8` anchoring rule only when it opts in) it also reports every
+  other claim of a Required observation (`observation-unanchored`): a list item or a paragraph
+  that is not a test-case item and does not directly precede a list. Only a quote item is anchored: its whole
+  text is one inline code span whose content is a verbatim substring of a tracked file that the
+  stimulus names, read at the member commit from `--member-root`, a checkout at the evidence
+  commit; `--member-root` needs `--anchored`. Without `--member-root` no quote can be verified. Exit codes and output lines cannot
+  be verified until the evidence records step output.
 
 Exit 0 on success, 1 with findings or refused pages, 2 when the command cannot run.
 """
@@ -74,6 +89,7 @@ PLATFORM = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 HEADING = re.compile(r"\n\n## ([^\n]*)\n\n")
 ITEM = re.compile(r"(?:[-*+]|[0-9]{1,9}[.)])[ \t]+(.*)")
 ITEM_FILE = re.compile(r"`([^`\n]+)`")
+QUOTE = re.compile(r"\s*`([^`\n]+)`\s*")
 LINK = re.compile(r"\[\[([^\]|#\n]+)")
 TOKEN = re.compile(r"[^\s`'\"()\[\]{},;]+")
 CODE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]+`", re.S)
@@ -386,8 +402,53 @@ def item_lines(files: list[str], evidence: Evidence, whole: set) -> list[str]:
                                                 [f"- `{file}`{SEPARATOR}{name}" for name in evidence.order[file]])]
 
 
+def lead_in_for(linked: list[str], verified: list[str]) -> str:
+    """The lead-in: coverage only for requirements that a person mapped; every other linked one is declared unverified."""
+    sentences = [LEAD_IN]
+    verified = [identifier for identifier in linked if identifier in verified]
+    if verified:
+        sentences.append(f"Together they cover {join_ids(verified)}.")
+    rest = [identifier for identifier in linked if identifier not in verified]
+    if rest:
+        sentences.append(f"Linked requirements, not verified here: {join_ids(rest)}.")
+    return " ".join(sentences)
+
+
+COVER_SENTENCE = re.compile(r"Together\s+they\s+cover\s+([^.]*)\.")
+
+
+def overclaims(observation: str, mapped: list[str]) -> list[tuple[int, str]]:
+    """Each `Together they cover` sentence of an observation, with the IDs it claims that no map names."""
+    found = []
+    for match in COVER_SENTENCE.finditer(observation):
+        claimed = [word for word in re.split(r",?\s+and\s+|,\s*", match.group(1).strip()) if word]
+        unmapped = [identifier for identifier in claimed if identifier not in mapped]
+        if unmapped:
+            found.append((observation.count("\n", 0, match.start()), ", ".join(unmapped)))
+    return found
+
+
+def load_coverage_map(path: str, pages: list[Path], covered: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Test page ID -> the linked requirement IDs that a person says its items verify."""
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or not all(
+            isinstance(key, str) and isinstance(value, list) and value
+            and all(isinstance(item, str) for item in value) and len(set(value)) == len(value)
+            for key, value in document.items()):
+        raise Refused(f"{path}: not a JSON object of test page ID -> non-empty list of distinct requirement IDs")
+    known = {page.stem for page in pages}
+    unknown = sorted(set(document) - known)
+    if unknown:
+        raise Refused(f"{path}: no test page {', '.join(unknown)}")
+    for identifier, requirements in sorted(document.items()):
+        unlinked = [item for item in requirements if item not in covered.get(identifier, [])]
+        if unlinked:
+            raise Refused(f"{path}: {identifier} does not link {', '.join(unlinked)} through a TestID section")
+    return document
+
+
 def generated_body(body: str, items: list[str], requirements: list[str], evidence: Evidence,
-                   named: tuple = ()) -> str | None:
+                   named: tuple = (), verified: list[str] = ()) -> str | None:
     """The new required observation, or None when the body holds more than one list of test-case items."""
     lines = body.split("\n")
     blocks: list[list[int]] = []
@@ -403,7 +464,7 @@ def generated_body(body: str, items: list[str], requirements: list[str], evidenc
         first, last, indent = blocks[0]
         prefix = lines[first][:indent]
         return "\n".join(lines[:first] + [prefix + item for item in items] + lines[last + 1:])
-    lead_in = f"{LEAD_IN} Together they cover {join_ids(requirements)}." if requirements else LEAD_IN
+    lead_in = lead_in_for(requirements, list(verified))
     return f"{lead_in}\n\n" + "\n".join(items)
 
 
@@ -540,7 +601,9 @@ def command_generate(options: argparse.Namespace) -> int:
     scopes = load_profile(profile.read_bytes() if profile.is_file() else None)
     test = test_scope(scopes)
     covered = coverage(wiki, scopes, test)
-    pages = page_ids(sorted((wiki / test["directory"]).glob("*.md")), options.ids, lambda path: path.stem)
+    every = sorted((wiki / test["directory"]).glob("*.md"))
+    mapped = load_coverage_map(options.coverage_map, every, covered) if options.coverage_map else {}
+    pages = page_ids(every, options.ids, lambda path: path.stem)
     updates, refused, plain = {}, [], 0
     for path in pages:
         read = read_text(path)
@@ -556,19 +619,25 @@ def command_generate(options: argparse.Namespace) -> int:
         files = stimulus_files(text[stimulus_start:stimulus_end], evidence.order)
         if not files:
             plain += 1
+            if path.stem in mapped:
+                print(f"NOTE: {path}: mapped in --coverage-map, but its stimulus names no test file that the evidence ran, so nothing was written")
             continue
         # Largest files first, then stimulus order, so the choice depends only on the page and the evidence.
         largest = sorted(files, key=lambda file: (-len(evidence.order[file]), files.index(file)))
         whole: set = set()
         while True:
             body = generated_body(text[start:end], item_lines(files, evidence, whole), covered.get(path.stem, []),
-                                  evidence, tuple(stimulus_tokens(text[stimulus_start:stimulus_end])))
+                                  evidence, tuple(stimulus_tokens(text[stimulus_start:stimulus_end])),
+                                  mapped.get(path.stem, []))
             if body is None:
                 break
             updated = text[:start] + body + text[end:]
             if not over_budget(updated, path.stem, test["sections"]) or len(whole) == len(files):
                 break
             whole.add(largest[len(whole)])
+        if path.stem in mapped and test_case_items(text[start:end], evidence.order,
+                                                    tuple(stimulus_tokens(text[stimulus_start:stimulus_end]))):
+            print(f"NOTE: {path}: mapped in --coverage-map, but it already lists test cases, so its lead-in is kept")
         if body is None:
             refused.append(f"{path}: the required observation holds more than one list of test-case items")
             continue
@@ -746,6 +815,74 @@ def judge(evidence: Evidence, file: str, rest: str, runs: bool | None) -> tuple[
     return None
 
 
+def claims(body: str, cases: set[int]) -> list[tuple[int, str]]:
+    """Each claim of a required observation as (first line, text): a list item that is not a test-case item, and a
+    paragraph outside lists and fenced code that does not directly precede a list (a lead-in naming criteria)."""
+    lines = body.split("\n")
+    items = list_items(body)
+    found = [(first, text.strip()) for first, _, text, _ in items if first not in cases]
+    taken = {number for first, last, _, _ in items for number in range(first, last + 1)}
+    starts = {first for first, _, _, _ in items}
+    fence = None
+    block: list[int] = []
+    blocks: list[list[int]] = []
+    for index, line in enumerate(lines):
+        stripped = line.lstrip(" \t")
+        fenced = fence is not None
+        if fenced and stripped.startswith(fence):
+            fence = None
+        elif not fenced and stripped.startswith(("```", "~~~")):
+            fence, fenced = stripped[:3], True
+        if fenced or index in taken or not stripped:
+            if block:
+                blocks.append(block)
+            block = []
+            if fenced and index not in taken:
+                continue
+        else:
+            block.append(index)
+    if block:
+        blocks.append(block)
+    for block in blocks:
+        after = block[-1] + 1
+        while after < len(lines) and not lines[after].strip():
+            after += 1
+        if after not in starts:
+            found.append((block[0], " ".join(lines[index].strip() for index in block)))
+    return sorted(found)
+
+
+def quoted_span(claim: str) -> str | None:
+    """The content of a quote item: a claim that is exactly one inline code span, a final period allowed."""
+    match = QUOTE.fullmatch(claim.rstrip("."))
+    return match.group(1) if match else None
+
+
+def named_contents(member: Path, commit: str, tracked: set, stimulus: str, cache: dict) -> list[str]:
+    """The contents, at the member commit, of the tracked files that the stimulus names."""
+    contents = []
+    for token in stimulus_tokens(stimulus):
+        if token in tracked:
+            if token not in cache:
+                cache[token] = git(member, ["show", f"{commit}:{token}"]).decode("utf-8", "replace")
+            contents.append(cache[token])
+    return contents
+
+
+def unanchored(claim: str, contents: list[str] | None) -> str | None:
+    """Why a claim is not anchored, or None for a quote that a named file's content contains."""
+    shown = " ".join(claim.split())[:80]
+    span = quoted_span(claim)
+    if span is None:
+        return (f"not a test-case item or a single verbatim quote; exit codes and output lines cannot be verified "
+                f"until the evidence records step output: {shown!r}")
+    if contents is None:
+        return f"no --member-root, so the quote cannot be verified: {shown!r}"
+    if not any(span in content for content in contents):
+        return f"the quote is in no file that the stimulus names at the member commit: {shown!r}"
+    return None
+
+
 def command_check(options: argparse.Namespace) -> int:
     wiki = Path(options.wiki)
     evidence = load_evidence(options.evidence)
@@ -761,6 +898,23 @@ def command_check(options: argparse.Namespace) -> int:
     paths = sorted(path for path in tree
                    if path.endswith(".md") and PurePosixPath(path).parent.as_posix() == test["directory"])
     paths = page_ids(paths, options.ids, lambda path: PurePosixPath(path).stem)
+    if options.member_root is not None and not options.anchored:
+        raise Refused("--member-root is only meaningful with --anchored")
+    member_root, tracked, cache = None, set(), {}
+    if options.member_root is not None:
+        member_root = Path(options.member_root)
+        head = git(member_root, ["rev-parse", "--verify", "HEAD^{commit}"]).decode().strip()
+        if head != evidence.commit:
+            raise Refused(f"--member-root is at {head}, not the evidence commit {evidence.commit}")
+        tracked = set(committed_files(member_root, head))
+    coverage_map = {}
+    if options.coverage_map is not None:
+        document = json.loads(Path(options.coverage_map).read_text(encoding="utf-8"))
+        if not isinstance(document, dict) or not all(
+                isinstance(key, str) and isinstance(value, list) and all(isinstance(item, str) for item in value)
+                for key, value in document.items()):
+            raise Refused(f"{options.coverage_map}: not a JSON object of test page ID -> list of requirement IDs")
+        coverage_map = document
     findings, notes, items, pages = [], [], 0, 0
     for path, raw in zip(paths, read_blobs(wiki, [tree[path] for path in paths])):
         try:
@@ -776,20 +930,34 @@ def command_check(options: argparse.Namespace) -> int:
         (stimulus_start, stimulus_end), (start, end) = spans[0], spans[1]
         first_line = text.count("\n", 0, start) + 1
         named = tuple(stimulus_tokens(text[stimulus_start:stimulus_end]))
-        page_items = [(first_line + first, file, rest)
-                      for first, _, _, file, rest in test_case_items(text[start:end], evidence.order, named)]
-        if not page_items:
-            if stimulus_files(text[stimulus_start:stimulus_end], evidence.order):
-                notes.append(f"{path}: its stimulus names a test file that the evidence ran, "
-                             "and its required observation lists no test case")
+        cases = test_case_items(text[start:end], evidence.order, named)
+        page_items = [(first_line + first, file, rest) for first, _, _, file, rest in cases]
+        stimulus = text[stimulus_start:stimulus_end]
+        page_claims = claims(text[start:end], {case[0] for case in cases}) if options.anchored else []
+        if not page_items and stimulus_files(stimulus, evidence.order):
+            notes.append(f"{path}: its stimulus names a test file that the evidence ran, "
+                         "and its required observation lists no test case")
+        page_overclaims = overclaims(text[start:end], coverage_map.get(PurePosixPath(path).stem, []))
+        if not page_items and not page_claims and not page_overclaims:
             continue
         pages += 1
-        stimulus = text[stimulus_start:stimulus_end]
+        page_findings = []
         for line, file, rest in page_items:
             items += 1
             finding = judge(evidence, file, rest, stimulus_runs(stimulus, file, evidence.order))
             if finding is not None:
-                findings.append(f"{path}:{line}: {finding[0]}: {finding[1]}")
+                page_findings.append((line, f"{path}:{line}: {finding[0]}: {finding[1]}"))
+        contents = None if member_root is None else named_contents(member_root, head, tracked, stimulus, cache)
+        for first, claim in page_claims:
+            reason = unanchored(claim, contents)
+            if reason is not None:
+                line = first_line + first
+                page_findings.append((line, f"{path}:{line}: observation-unanchored: {reason}"))
+        for first, unmapped in page_overclaims:
+            line = first_line + first
+            page_findings.append((line, f"{path}:{line}: observation-overclaim: says Together they cover {unmapped}, "
+                                        "which no coverage map names; write Linked requirements, not verified here"))
+        findings.extend(finding for _, finding in sorted(page_findings, key=lambda found: found[0]))
     for note in notes:
         print(f"NOTE: {note}")
     for finding in findings:
@@ -820,6 +988,8 @@ def main(argv: list[str] | None = None) -> int:
     generate = commands.add_parser("generate", help="write the test-case items of the wiki's test pages")
     generate.add_argument("--wiki", required=True, help="wiki working tree")
     generate.add_argument("--evidence", action="append", required=True, help="evidence file; repeat once per platform")
+    generate.add_argument("--coverage-map", help="JSON object {test page ID: [requirement IDs its items verify]}, written by a person; "
+                          "each ID must be linked by the page's requirements. Without it no page claims coverage")
     generate.add_argument("--dry-run", action="store_true", help="write nothing; exit 1 when a page would change")
     generate.add_argument("ids", nargs="*", help="test page IDs (default: every test page)")
     stimulus = commands.add_parser("stimulus", help="write a repeatable stimulus from the requirements' test artifacts")
@@ -836,6 +1006,12 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--commit", default="HEAD", help="wiki commit to check (default: HEAD)")
     check.add_argument("--member-commit", required=True, help="the member commit that the wiki's test pages describe")
     check.add_argument("--evidence", action="append", required=True, help="evidence file; repeat once per platform")
+    check.add_argument("--coverage-map", help="the JSON object that generate read; a Together they cover sentence is "
+                                              "reported unless every ID it names is mapped for the page")
+    check.add_argument("--anchored", action="store_true",
+                       help="also report every claim of a required observation that is not anchored (off by default)")
+    check.add_argument("--member-root", help="with --anchored: checkout of the member at the evidence commit; without it no quote "
+                                             "can be verified, so every claim that is not a test-case item is unanchored")
     check.add_argument("ids", nargs="*", help="test page IDs (default: every test page)")
     options = parser.parse_args(argv)
     handlers = {"evidence": command_evidence, "generate": command_generate, "stimulus": command_stimulus,

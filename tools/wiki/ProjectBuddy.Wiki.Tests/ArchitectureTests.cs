@@ -68,7 +68,7 @@ public sealed class ArchitectureTests : IDisposable
         Assert.Equal(Standard.ProfileFindings, Findings("wiki_v1.snapshot_profile(uuid)"));
         Assert.Equal(Standard.WikiFindings, Findings("wiki_v1.wiki_pages(uuid)"));
 
-        Assert.Equal("""{"id":"rsr/ecosystem-wiki-standard@7","rsrRelease":"v0.11.0","rsrCommit":"6fefbc255ae7b61a1a582beb2a36d49fb210f8b1"}""",
+        Assert.Equal("""{"id":"rsr/ecosystem-wiki-standard@8","rsrRelease":"v0.12.0","rsrCommit":"49dfa312040b338a61b95ad9022f1ddddd318ab1"}""",
             report["standard"]!.ToJsonString());
     }
 
