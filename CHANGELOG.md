@@ -4,7 +4,36 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
-## Unreleased
+## v0.6.0
+
+Everything on `develop` since v0.5.0. The ecosystem is pinned to RSR `v0.12.0`, whose wiki standard is
+`rsr/ecosystem-wiki-standard@8`; `projectbuddy-wiki` and this repository's wiki follow it.
+
+- Wiki observation standard `@6` to `@8` (#354-#356, #363-#366, #369, #387, #389, #390). The entries below record each
+  pin and what it changed in the assembler. Under `@8`, a requirement's `TestID` link asserts no coverage: a test page
+  declares its linked requirements `not verified here`, and a `Together they cover` sentence must be backed by a coverage
+  map. `@8` is opt-in: the north-star A4 test below did not show it lowers the unsupported-claim rate.
+- North-star A4 harness, `tools/north-star-a4` (#379, #397, #398). It holds the frozen sample, the blind packets and key,
+  the reviewer rubrics, one automated authoring session script, the power simulation and the analysis, with the labels
+  and results of the registered run. The registered A4-r2 test compared the `@5` standard (control) with `@8`
+  (treatment) on 18 runnable pages, with two blind reviewers. **Its primary endpoint (E1, a lower unsupported-claim
+  rate under `@8`) failed**: unsupported claims were about 3% in both arms, and the page-mean difference was not
+  distinguishable from zero. The secondary endpoint (E2, retention of reference claims) passed as non-inferior. The
+  decision was to reopen the wording, so `@8` stays opt-in. The 26% unsupported rate of #362 did not reproduce on
+  runnable pages (#399 follows up).
+- Workstation database and hooks (#381, #382, #385, #386, #393). The workstation database is native PostgreSQL 16, with
+  `install-postgres16.sh`, `restore-from-container.sh` and `cutover.sh` in `tools/workstation-db`; the container it
+  replaced is kept only for a time-limited rollback. `projectbuddy-hooks` and the user-level Copilot hooks
+  (`tools/hooks`) register sessions, a decision queue and a handoff compare-and-set in the `hooks` schema, with
+  no AI calls for bookkeeping; migration `0007` gives that schema a dedicated non-superuser `NOLOGIN` owner role
+  (#393). The backup recipe pins `pg_dump` and `pg_restore` and checks each dump with a list check (#396, #401).
+- KPI tooling (#371-#373, #375, #377, ALW#10): AI credits are priced at the billed rate, `projectbuddy-kpi quota` and
+  quota snapshots with a budget, the per-workload reference costs for AIU avoided, and the local AI farm's telemetry.
+- Compliance re-certification (#390, #400). `docs/architecture/standards-compliance.md` is re-stamped at
+  `repo-standards-review` `v0.12.0`: the 5 required gates `PASS` and DoD stays the optional `FAIL`, with no regression.
+- Moved to the next release: #357 and #367 (judgement-authored stimuli for 63 prose pages and a compiled Actor
+  candidate, which depends on LBA's next release, #406). #358 stays the open epic: its local-judge layer stopped at
+  iteration 5, and execution and mutation evidence remain.
 
 - KPI meter fixes (#391, #392). `projectbuddy-hooks sessions-set --work-ref` writes a work marker when a session's ref
   is first set (backdated to the session's start) or changed, `kpi mark` skips an unchanged item, and the sync marks
