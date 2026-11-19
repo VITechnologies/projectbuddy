@@ -2,7 +2,7 @@
 # Copies roles and databases from the Docker container rsr-registry-local-postgres (source, read-only) into the native
 # cluster (target), then verifies them (#381). Runs as the normal user; the container is never modified.
 #
-#   tools/workstation-db/restore-from-container.sh [--target-port 55433] [--wipe-target]
+#   tools/workstation-db/restore-from-container.sh [--target-port 55433] [--wipe-target] [--verify-only]
 #
 # Re-runnable: with --wipe-target it drops the restored (non-system) databases and non-superuser roles first. Dumps live in a
 # 0700 directory under /tmp (tmpfs) that is deleted on exit. Passwords come from the 0600 password file, never argv.
@@ -11,10 +11,13 @@ set -euo pipefail
 SRC_PORT=55432
 TARGET_PORT=55433
 WIPE=0
+VERIFY_ONLY=0
+STATE_FILE="${PB_RESTORE_STATE:-$HOME/.local/state/projectbuddy-workstation-db/restore-state}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --target-port) TARGET_PORT="${2:?port}"; shift 2 ;;
     --wipe-target) WIPE=1; shift ;;
+    --verify-only) VERIFY_ONLY=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -34,27 +37,29 @@ tgt() { "$BIN/psql" -X -Atq -p "$TARGET_PORT" "$@"; }
 mapfile -t DBS < <(src -d postgres -c "select datname from pg_database where not datistemplate and datname <> 'postgres' order by 1")
 echo "databases: ${DBS[*]}"
 
-if [ "$WIPE" = 1 ]; then
+if [ "$VERIFY_ONLY" = 0 ] && [ "$WIPE" = 1 ]; then
   for d in "${DBS[@]}"; do tgt -d postgres -c "drop database if exists \"$d\" with (force)"; done
   mapfile -t OLD < <(tgt -d postgres -c "select rolname from pg_roles where not rolsuper and rolname !~ '^pg_'")
   for r in "${OLD[@]}"; do tgt -d postgres -c "drop owned by \"$r\"; drop role \"$r\"" || true; done
 fi
 
-"$BIN/pg_dumpall" -p "$SRC_PORT" --roles-only > "$WORK/roles.sql"
-# The target already has the postgres superuser; that one "already exists" error is expected and ignored.
-"$BIN/psql" -X -q -p "$TARGET_PORT" -d postgres -f "$WORK/roles.sql" > /dev/null 2> "$WORK/roles.err" || true
-if grep -v 'role "postgres" already exists' "$WORK/roles.err" | grep -q ERROR; then
-  grep ERROR "$WORK/roles.err" | grep -v 'role "postgres"' >&2; echo "unexpected role restore errors" >&2; exit 1
+if [ "$VERIFY_ONLY" = 0 ]; then
+  "$BIN/pg_dumpall" -p "$SRC_PORT" --roles-only > "$WORK/roles.sql"
+  # The target already has the postgres superuser; that one "already exists" error is expected and ignored.
+  "$BIN/psql" -X -q -p "$TARGET_PORT" -d postgres -f "$WORK/roles.sql" > /dev/null 2> "$WORK/roles.err" || true
+  if grep -v 'role "postgres" already exists' "$WORK/roles.err" | grep -q ERROR; then
+    grep ERROR "$WORK/roles.err" | grep -v 'role "postgres"' >&2; echo "unexpected role restore errors" >&2; exit 1
+  fi
+
+  for d in "${DBS[@]}"; do
+    "$BIN/pg_dump" -p "$SRC_PORT" -Fc --create -f "$WORK/$d.dump" "$d"
+    "$BIN/pg_restore" -p "$TARGET_PORT" -d postgres --create --exit-on-error "$WORK/$d.dump"
+  done
+
+  # Maintenance databases are not dumped; apply the same PUBLIC CONNECT/TEMPORARY revoke as the source's hardening (#15).
+  tgt -d postgres -c "revoke connect, temporary on database postgres, template1 from public" 2>/dev/null \
+    || { tgt -d postgres -c 'revoke connect, temporary on database postgres from public'; tgt -d postgres -c 'revoke connect, temporary on database template1 from public'; }
 fi
-
-for d in "${DBS[@]}"; do
-  "$BIN/pg_dump" -p "$SRC_PORT" -Fc --create -f "$WORK/$d.dump" "$d"
-  "$BIN/pg_restore" -p "$TARGET_PORT" -d postgres --create --exit-on-error "$WORK/$d.dump"
-done
-
-# Maintenance databases are not dumped; apply the same PUBLIC CONNECT/TEMPORARY revoke as the source's hardening (#15).
-tgt -d postgres -c "revoke connect, temporary on database postgres, template1 from public" 2>/dev/null \
-  || { tgt -d postgres -c 'revoke connect, temporary on database postgres from public'; tgt -d postgres -c 'revoke connect, temporary on database template1 from public'; }
 
 fail=0
 # Both sides are captured by plain assignments, so a failed query aborts the run instead of comparing two empty results.
@@ -92,4 +97,17 @@ if tgt -d postgres -c "select 1 from pg_roles where rolname='farm'" | grep -q 1;
 pub="$(tgt -d postgres -c "select string_agg(datname, ',') from pg_database where has_database_privilege('public', oid, 'CONNECT') and datname = any(array['kpi_local','registry_local','farm_local'])")"
 [ -z "$pub" ] && echo "ok   PUBLIC cannot CONNECT to kpi_local, registry_local or farm_local on target" || { echo "FAIL PUBLIC can connect: $pub"; fail=1; }
 
-[ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || { echo "CHECKS FAILED"; exit 1; }
+if [ "$fail" != 0 ]; then echo "CHECKS FAILED"; exit 1; fi
+echo "ALL CHECKS PASSED"
+
+# cutover.sh refuses unless the source's write counters still match these (no writes since this verified copy).
+if [ "$VERIFY_ONLY" = 0 ]; then
+  sleep 2   # let the statistics collector flush
+  mkdir -p "$(dirname "$STATE_FILE")"
+  {
+    echo "epoch=$(date +%s)"
+    src -d postgres -c "select datname||'|'||(tup_inserted+tup_updated+tup_deleted) from pg_stat_database where datname = any(string_to_array('$(IFS=,; echo "${DBS[*]}")', ',')) order by datname"
+  } > "$STATE_FILE.tmp"
+  mv "$STATE_FILE.tmp" "$STATE_FILE"
+  echo "recorded source write counters in $STATE_FILE"
+fi

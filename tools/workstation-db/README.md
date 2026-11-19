@@ -17,10 +17,18 @@ exact row counts per table. It exits non-zero on any difference. It is re-runnab
 temporary directory on tmpfs and are deleted on exit.
 
 ## Cutover window
-1. The orchestrator quiesces writers (`kpi_local`, `farm_local`, registry tools).
-2. `restore-from-container.sh --wipe-target` must end with `ALL CHECKS PASSED` (this takes the final, consistent copy).
-3. `sudo tools/workstation-db/cutover.sh cutover`: disables the container's restart policy, stops it, moves the native cluster to 55432.
-4. Smoke test the clients (`projectbuddy-kpi quota`, farm, registry), then release the writers.
+1. `restore-from-container.sh --wipe-target` must end with `ALL CHECKS PASSED`. It then records each database's write counters
+   (`tup_inserted + tup_updated + tup_deleted` from the container's `pg_stat_database`) in
+   `~/.local/state/projectbuddy-workstation-db/restore-state` (no secrets).
+2. Within 15 minutes, `sudo tools/workstation-db/cutover.sh cutover`. Before it touches anything it re-reads those counters from
+   the container and refuses if any differ (a client wrote after the verified copy) or the state file is missing or older than
+   15 minutes. Then re-run step 1 and step 2; quiescing writers first makes that succeed.
+3. On success it disables the container's restart policy, stops the container, and moves the native cluster to 55432. Any failure
+   after the stop restores the container and the staging port. Re-running after success is a no-op.
+4. Smoke test the clients (`projectbuddy-kpi quota`, farm, registry).
+
+`restore-from-container.sh --verify-only` re-runs the comparison without copying anything. Tests: `tools/workstation-db/tests/test-cutover.sh`
+(stubbed tools; covers failure rollback, the counter guard, the stale state file, re-run and rollback).
 
 ## Rollback
 `sudo tools/workstation-db/cutover.sh rollback` puts the native cluster back on 55433 and starts the container (restart policy
