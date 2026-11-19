@@ -37,6 +37,11 @@ tgt() { "$BIN/psql" -X -Atq -p "$TARGET_PORT" "$@"; }
 mapfile -t DBS < <(src -d postgres -c "select datname from pg_database where not datistemplate and datname <> 'postgres' order by 1")
 echo "databases: ${DBS[*]}"
 
+counters() { src -d postgres -c "select datname||'|'||(tup_inserted+tup_updated+tup_deleted) from pg_stat_database where datname = any(string_to_array('$(IFS=,; echo "${DBS[*]}")', ',')) order by datname"; }
+# Taken before the first dump: a write after this point (even during the verification) makes cutover.sh refuse.
+sleep 2   # let the statistics collector flush writes that just happened
+PRE_COUNTERS="$(counters)"
+
 if [ "$VERIFY_ONLY" = 0 ] && [ "$WIPE" = 1 ]; then
   for d in "${DBS[@]}"; do tgt -d postgres -c "drop database if exists \"$d\" with (force)"; done
   mapfile -t OLD < <(tgt -d postgres -c "select rolname from pg_roles where not rolsuper and rolname !~ '^pg_'")
@@ -102,11 +107,10 @@ echo "ALL CHECKS PASSED"
 
 # cutover.sh refuses unless the source's write counters still match these (no writes since this verified copy).
 if [ "$VERIFY_ONLY" = 0 ]; then
-  sleep 2   # let the statistics collector flush
   mkdir -p "$(dirname "$STATE_FILE")"
   {
     echo "epoch=$(date +%s)"
-    src -d postgres -c "select datname||'|'||(tup_inserted+tup_updated+tup_deleted) from pg_stat_database where datname = any(string_to_array('$(IFS=,; echo "${DBS[*]}")', ',')) order by datname"
+    echo "$PRE_COUNTERS"
   } > "$STATE_FILE.tmp"
   mv "$STATE_FILE.tmp" "$STATE_FILE"
   echo "recorded source write counters in $STATE_FILE"

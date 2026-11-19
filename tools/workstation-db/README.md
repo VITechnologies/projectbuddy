@@ -18,11 +18,11 @@ temporary directory on tmpfs and are deleted on exit.
 
 ## Cutover window
 1. `restore-from-container.sh --wipe-target` must end with `ALL CHECKS PASSED`. It then records each database's write counters
-   (`tup_inserted + tup_updated + tup_deleted` from the container's `pg_stat_database`) in
+   (`tup_inserted + tup_updated + tup_deleted` from the container's `pg_stat_database`, read before the first dump) in
    `~/.local/state/projectbuddy-workstation-db/restore-state` (no secrets).
 2. Within 15 minutes, `sudo tools/workstation-db/cutover.sh cutover`. Before it touches anything it re-reads those counters from
    the container and refuses if any differ (a client wrote after the verified copy) or the state file is missing or older than
-   15 minutes. Then re-run step 1 and step 2; quiescing writers first makes that succeed.
+   15 minutes. Then re-run step 1 and step 2 (`TRUNCATE` is not counted, so writers must still not truncate in the window); quiescing writers first makes that succeed.
 3. On success it disables the container's restart policy, stops the container, and moves the native cluster to 55432. Any failure
    after the stop restores the container and the staging port. Re-running after success is a no-op.
 4. Smoke test the clients (`projectbuddy-kpi quota`, farm, registry).
