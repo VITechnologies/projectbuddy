@@ -14,6 +14,7 @@ schema `hooks`, migration `tools/kpi/ProjectBuddy.Kpi/Sql/0006_hooks.sql`) so th
 `preToolUse`, `postToolUse` and `postToolUseFailure` are deliberately not hooked: no cost on the tool path.
 Copilot flushes the transcript after `agentStop` fires, which is why the message is read in a second step. `mark` uses only the
 `work_ref` in the session's registry row, which the orchestrator writes with `sessions-set`; with none, nothing is marked.
+`sessions-set --work-ref` itself writes a marker when a session's ref is first set (backdated to the session's `started_at`) or changed (now); an unchanged ref writes none, and `mark` skips an item that is already the session's latest.
 `pb-kpi-sync` ingests and resolves at most once a minute and one run at a time.
 
 Fail-open rules: every hook exits 0 and prints nothing; the database password is read from a 0600 file (never argv, never logged);

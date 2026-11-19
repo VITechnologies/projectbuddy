@@ -25,9 +25,11 @@ stamp="$STATE_DIR/kpi-sync.stamp"
 due=0
 [ -z "$(find "$stamp" -mmin -1 2> /dev/null)" ] && due=1
 
-[ "$due" = 1 ] && kpi ingest
 work_ref="$(PGCONNECT_TIMEOUT=2 PGPASSWORD="$(tr -d '\r\n' < "${PB_HOOKS_PASSWORD_FILE:-/dev/null}")" PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-55432}" \
   PGDATABASE="${PGDATABASE:-kpi_local}" PGUSER="${PGUSER:-pb_hooks}" psql -X -At -w -v ON_ERROR_STOP=1 -v sid="$sid" <<< "SELECT hooks.work_ref_of(:'sid')")"
+# The mark goes first and costs nothing when the item is unchanged (kpi mark is idempotent): at sessionStart it attributes the
+# session's calls from the start, before the slow ingest.
 [ -n "$work_ref" ] && kpi mark --session "$sid" --item "$work_ref"
+[ "$due" = 1 ] && kpi ingest
 [ "$due" = 1 ] && { kpi resolve; : > "$stamp"; }
 exit 0

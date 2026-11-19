@@ -173,6 +173,41 @@ public sealed class QuotaTests : IDisposable
     }
 
     [Fact]
+    public void AddsTheUnitsOfCallsAfterAStaleSnapshotToTheSpend()
+    {
+        var connection = Ingested(new Log().Event("session.start", 0, []).Quota(0, 1000));
+        Cli.Json(["budget", "--usd", "50", .. connection]);
+        server.Execute(connection, $"""
+            INSERT INTO kpi_v1.sessions VALUES ('{B}', '{Log.Start:O}'::timestamptz + interval '1 hour', '{Log.Start:O}'::timestamptz + interval '3 hours', 2);
+            INSERT INTO kpi_v1.model_calls (event_id, session_id, at, initiator, model, cost, input_tokens, output_tokens, cache_read_tokens, category, aiu) VALUES
+                (gen_random_uuid(), '{B}', '{Log.Start:O}'::timestamptz - interval '1 hour', 'user', 'm', 0, 1, 1, 1, 'run', 99),
+                (gen_random_uuid(), '{B}', '{Log.Start:O}'::timestamptz + interval '1 hour', 'user', 'm', 0, 1, 1, 1, 'run', 100.5),
+                (gen_random_uuid(), '{B}', '{Log.Start:O}'::timestamptz + interval '3 hours', 'user', 'm', 0, 1, 1, 1, 'run', 200)
+            """);
+        var (_, result) = Quota(connection);
+        Assert.Equal((300.5m, 2L, 10m + 3.005m), ((decimal)result["unitsSinceSnapshot"]!, (long)result["callsSinceSnapshot"]!, (decimal)result["spendUsd"]!));
+        Assert.Equal(36.995m, (decimal)result["headroomUsd"]!);
+        Assert.True((bool)result["snapshotStale"]!);
+        Assert.True((double)result["snapshotAgeHours"]! > 24);
+
+        var fresh = Quota(connection, "--stale-hours", "1000000").Result;
+        Assert.False((bool)fresh["snapshotStale"]!);
+        Assert.Equal(300.5m, (decimal)fresh["unitsSinceSnapshot"]!);
+    }
+
+    [Fact]
+    public void RefusesAMarkThatRepeatsTheLatestItem()
+    {
+        var connection = server.Migrated();
+        string[] Mark(string item) => ["mark", "--session", "aaaaaaaa-0000-4000-8000-000000000009", "--item", item, .. connection];
+        var first = Cli.Json(Mark("o/r#1"));
+        Assert.Equal((long)first["id"]!, (long)Cli.Json(Mark("o/r#1"))["id"]!);
+        Assert.NotEqual((long)first["id"]!, (long)Cli.Json(Mark("o/r#2"))["id"]!);
+        Assert.NotEqual((long)first["id"]!, (long)Cli.Json(Mark("o/r#1"))["id"]!);
+        Assert.Equal(3L, server.Scalar(connection, "SELECT count(*) FROM kpi_v1.work_markers"));
+    }
+
+    [Fact]
     public void BurnsOverTheWindowAndProjectsTheExhaustion()
     {
         var connection = Ingested(Steady());

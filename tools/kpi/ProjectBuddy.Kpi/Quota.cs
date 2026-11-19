@@ -10,6 +10,8 @@ internal static class Quota
     // Beyond this many hours (over a century) a projection is no projection.
     private const double MaxProjectionHours = 1_000_000;
 
+    private const double DefaultStaleHours = 6;
+
     public static JsonObject Run(Database database, Options options, out int exit)
     {
         var window = options.Get("--window-hours") is null ? (double)database.Setting("burn_window_hours") : (double)Program.Number(options, "--window-hours");
@@ -23,7 +25,12 @@ internal static class Quota
         var reserve = database.OptionalSetting("reserve_usd") ?? 0;
         var price = database.Setting("usd_per_unit");
         var newest = snapshots[^1];
-        var spend = newest.Overage * price;
+        var (units, calls, lastCallAt) = database.UnitsSince(newest.At);
+        // Calls the snapshot has not seen (agent-host sessions log no snapshots) are priced at their AIU on top of it.
+        var spend = (newest.Overage + units) * price;
+        var asOf = lastCallAt is { } last && last > newest.At ? last : newest.At;
+        var staleHours = options.Get("--stale-hours") is null ? DefaultStaleHours : (double)Program.Number(options, "--stale-hours");
+        var age = (DateTimeOffset.UtcNow - newest.At).TotalHours;
         var headroom = budget - spend;
         var allocable = Math.Max(0, headroom - reserve);
 
@@ -36,12 +43,12 @@ internal static class Quota
 
         var cycle = snapshots[from..];
         var hours = (newest.At - cycle[0].At).TotalHours;
-        decimal? burn = cycle.Count >= 2 && hours > 0 ? (spend - (cycle[0].Overage * price)) / (decimal)hours : null;
+        decimal? burn = cycle.Count >= 2 && hours > 0 ? (newest.Overage * price - (cycle[0].Overage * price)) / (decimal)hours : null;
 
         DateTimeOffset? exhaustion = null;
         if (burn is > 0 && (double)(Math.Max(0, headroom) / burn.Value) is var left and <= MaxProjectionHours)
         {
-            exhaustion = newest.At.AddHours(left);
+            exhaustion = asOf.AddHours(left);
         }
 
         var exhausts = exhaustion < newest.ResetDate;
@@ -51,6 +58,11 @@ internal static class Quota
             ["usedRequests"] = newest.UsedRequests,
             ["entitlementRequests"] = newest.EntitlementRequests,
             ["resetDate"] = newest.ResetDate,
+            ["snapshotAgeHours"] = Math.Max(0, age),
+            ["snapshotStale"] = age > staleHours,
+            ["staleAfterHours"] = staleHours,
+            ["unitsSinceSnapshot"] = units,
+            ["callsSinceSnapshot"] = calls,
             ["spendUsd"] = spend,
             ["budgetUsd"] = budget,
             ["headroomUsd"] = headroom,

@@ -45,7 +45,7 @@ public static partial class Program
         ["ingest-farm"] = (["--export"], []),
         ["farm-reference"] = (["--workload", "--aiu-per-job"], []),
         ["budget"] = (["--usd"], ["--reserve-usd"]),
-        ["quota"] = ([], ["--window-hours", "--items"]),
+        ["quota"] = ([], ["--window-hours", "--items", "--stale-hours"]),
         ["track"] = (["--repository", "--forge"], []),
         ["resolve"] = ([], ["--gh", "--glab"]),
         ["report"] = ([], []),
@@ -168,7 +168,7 @@ public static partial class Program
         }
 
         var parsed = new Options(args[0], values.GetValueOrDefault("--host", "127.0.0.1"), number, user, password, database, values);
-        foreach (var name in new[] { "--usd", "--reserve-usd", "--window-hours" }.Where(values.ContainsKey))
+        foreach (var name in new[] { "--usd", "--reserve-usd", "--window-hours", "--stale-hours" }.Where(values.ContainsKey))
         {
             Number(parsed, name);
         }

@@ -50,13 +50,28 @@ internal sealed class Database(Options options)
         return new JsonObject { ["sessions"] = rows };
     }
 
+    // A work_ref that is set or changed marks the session's calls from then on (#391). The first one is backdated to the
+    // session's start: a worker session is one item by design, and its calls before the orchestrator set the ref belong to it.
     public JsonNode SetSession(Options set)
     {
         using var connection = Open();
-        using var command = new NpgsqlCommand(
-            "INSERT INTO hooks.sessions AS s (session_id, title, work_ref, parent_session_id) VALUES ($1, $2, $3, $4) "
-            + "ON CONFLICT (session_id) DO UPDATE SET title = coalesce(EXCLUDED.title, s.title), work_ref = coalesce(EXCLUDED.work_ref, s.work_ref), "
-            + "parent_session_id = coalesce(EXCLUDED.parent_session_id, s.parent_session_id)", connection)
+        using var transaction = connection.BeginTransaction();
+        using var read = new NpgsqlCommand("SELECT work_ref FROM hooks.sessions WHERE session_id = $1 FOR UPDATE", connection, transaction)
+        { Parameters = { new() { Value = set.Get("--session")! } } };
+        var found = read.ExecuteScalar();
+        var previous = found as string;
+        using var command = new NpgsqlCommand("""
+            WITH upserted AS (
+                INSERT INTO hooks.sessions AS s (session_id, title, work_ref, parent_session_id) VALUES ($1, $2, $3, $4)
+                ON CONFLICT (session_id) DO UPDATE SET title = coalesce(EXCLUDED.title, s.title), work_ref = coalesce(EXCLUDED.work_ref, s.work_ref),
+                    parent_session_id = coalesce(EXCLUDED.parent_session_id, s.parent_session_id)
+                RETURNING s.work_ref, s.started_at)
+            INSERT INTO kpi_v1.work_markers (session_id, at, item)
+            SELECT $1, CASE WHEN $5 THEN clock_timestamp() ELSE u.started_at END, u.work_ref
+            FROM upserted AS u
+            WHERE u.work_ref IS NOT NULL AND u.work_ref IS DISTINCT FROM $6
+            RETURNING id
+            """, connection, transaction)
         {
             Parameters =
             {
@@ -64,10 +79,13 @@ internal sealed class Database(Options options)
                 new() { Value = (object?)set.Get("--title") ?? DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text },
                 new() { Value = (object?)set.Get("--work-ref") ?? DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text },
                 new() { Value = (object?)set.Get("--parent") ?? DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text },
+                new() { Value = previous is not null },
+                new() { Value = (object?)previous ?? DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text },
             },
         };
-        command.ExecuteNonQuery();
-        return new JsonObject { ["session_id"] = set.Get("--session"), ["set"] = true };
+        var marked = command.ExecuteScalar() is not null;
+        transaction.Commit();
+        return new JsonObject { ["session_id"] = set.Get("--session"), ["set"] = true, ["marked"] = marked };
     }
 
     public JsonNode Decisions(bool all)

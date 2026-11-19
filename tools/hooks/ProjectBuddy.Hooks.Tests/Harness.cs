@@ -29,10 +29,16 @@ internal sealed class Server : IDisposable
             create.ExecuteNonQuery();
         }
 
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("0006_hooks.sql")!;
+        // The hooks write KPI markers (#391), so the whole KPI schema is applied, in order.
+        var assembly = Assembly.GetExecutingAssembly();
         using var data = Open(name);
-        using var migrate = new NpgsqlCommand(new StreamReader(stream).ReadToEnd(), data);
-        migrate.ExecuteNonQuery();
+        foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.EndsWith(".sql", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
+        {
+            using var stream = assembly.GetManifestResourceStream(resource)!;
+            using var migrate = new NpgsqlCommand(new StreamReader(stream).ReadToEnd(), data);
+            migrate.ExecuteNonQuery();
+        }
+
         return ["--host", Host, "--port", Port, "--user", User, "--password-file", PasswordFile, "--database", name];
     }
 

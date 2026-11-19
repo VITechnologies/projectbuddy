@@ -6,6 +6,11 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- KPI meter fixes (#391, #392). `projectbuddy-hooks sessions-set --work-ref` writes a work marker when a session's ref
+  is first set (backdated to the session's start) or changed, `kpi mark` skips an unchanged item, and the sync marks
+  before it ingests, so a one-turn worker's calls attribute to its item. `projectbuddy-kpi quota` adds the AIU of
+  calls after the newest snapshot to `spendUsd` and reports `snapshotAgeHours`, `unitsSinceSnapshot` and `snapshotStale`.
+
 - Pins RSR `v0.12.0` and `rsr/ecosystem-wiki-standard@8` (#387): the consumer kit, `projectbuddy-wiki`'s
   standard pin, the standards scan checkout and the compliance stamp. The checker's logic is unchanged. The
   wiki's 30 test pages declare their linked requirements `not verified here` instead of claiming coverage.
