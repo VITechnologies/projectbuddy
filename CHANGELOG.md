@@ -6,6 +6,10 @@ release's notes for the exact pinned commit.
 
 ## Unreleased
 
+- Pins RSR `v0.12.0` and `rsr/ecosystem-wiki-standard@8` (#387): the consumer kit, `projectbuddy-wiki`'s
+  standard pin, the standards scan checkout and the compliance stamp. The checker's logic is unchanged. The
+  wiki's 30 test pages declare their linked requirements `not verified here` instead of claiming coverage.
+
 - `projectbuddy-ask` 0.4.0 adds the `infer` verb (#358), so the workstation
   can run batches of prompts on the peer's GPU over the existing forced
   command.
