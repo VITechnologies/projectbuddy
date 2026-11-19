@@ -17,6 +17,7 @@ out/projectbuddy-kpi migrate --create-database --port 55432 --password-file "$HO
 out/projectbuddy-kpi ingest --port 55432 --password-file ...
 out/projectbuddy-kpi track --repository owner/repo --forge github --port 55432 --password-file ...
 out/projectbuddy-kpi resolve --port 55432 --password-file ...   # needs gh, and glab for GitLab
+out/projectbuddy-kpi ingest-farm --export /path/to/farm-telemetry.json --port 55432 --password-file ...
 out/projectbuddy-kpi report --port 55432 --password-file ...
 ```
 
@@ -44,6 +45,15 @@ out/projectbuddy-kpi report --port 55432 --password-file ...
 | T3 | engineer running runbooks | 75 |
 | T4 | technician | 45 |
 
+- **Local AI farm (ALW#10):** the farm's work is measured in jobs and
+  seconds, not AIU. The **AIU avoided** is an estimate, reported under
+  `farm` apart from the measured AIU: each workload's completed jobs (cache
+  hits plus answers) times its reference cost,
+  `farm_reference_aiu_per_job:<workload>`. Set that reference with
+  `farm-reference` from a paid run of the same workload that `kpi_v1`
+  measured: its measured AIU divided by its jobs. A workload without a
+  reference has no estimate and is listed in `workloadsWithoutReference`.
+
 The settings and tiers are rows in `kpi_v1.settings` and `kpi_v1.tiers`.
 
 ## Commands
@@ -55,6 +65,8 @@ database that lacks the embedded migrations.
 | --- | --- |
 | `migrate [--create-database]` | Applies the embedded migrations. A migration that changed after it was applied is refused. |
 | `ingest [--sessions <dir>]` | Reads every `<uuid>/events.jsonl` under the sessions directory (default `~/.copilot/session-state`). Facts are keyed by event or tool-call ID, so ingesting again changes nothing. A tool call that has completed since the last ingest is updated, and active spans are derived again. A line that is not a readable event refuses the ingest. |
+| `ingest-farm --export <file>` | Reads the local AI farm's telemetry export, the file assurance-learning-workbench's `export-farm-telemetry` writes from `farm_v1` (`export_kind` `alw-farm-telemetry`, schema version `1.0.0`). Its `jobs` rows (one per farm run record, workload and instance) and `device_samples` rows (one per run record and local instance) hold counts and timings only; any other field refuses the file. Rows are keyed by the sha256 of the farm run record, so ingesting again changes nothing, and an export that changes an ingested row is refused as a whole. A device sample of a peer instance, or busy time outside its window, is a database error. |
+| `farm-reference --workload <id> --aiu-per-job <n>` | Sets a farm workload's reference cost, the AIU per job of a paid run of that workload, for the AIU-avoided estimate. Setting it again replaces it. |
 | `track --repository <path> --forge <github\|gitlab>` | Adds a repository whose merged requests are accepted changes: `owner/repo` on GitHub, `group[/subgroup…]/project` on GitLab. |
 | `resolve [--gh <path>] [--glab <path>]` | Lists every request each tracked repository merged since the first session, with `gh api repos/<repo>/pulls?state=closed` or `glab api projects/<path>/merge_requests?state=merged`, newest update first, until updates are older than the first session. Listing again changes nothing. A repository whose listing fails is reported in `unresolved` with its reason, and what was already listed is kept. A tool that needs other credentials for some repositories can run as a wrapper in a second pass, for example `GITLAB_TOKEN=… glab`. |
 | `mark --session <id> --item <ref>` | Attributes the session's calls from now until its next marker to a work item. |
@@ -141,10 +153,16 @@ accepted at that merge time.
 | Rework | The AIU a marked work item spent after its first review. |
 | Spec-gap rate | Recorded spec gaps per accepted change. |
 | Exploration share | The share of AIU spent on `explore` calls. Exploration done through `bash` counts as `run`. |
+| Farm utilization per device | A local farm instance's busy seconds (an item in flight) over the busy spans of the runs that sampled it. The peer has no device samples, since no device telemetry leaves it. It covers only the runs that sampled the device: an instance that sat idle for a whole run has no sample for it, so that run's span is not in its denominator. |
+| Farm jobs per second | Completed jobs (cache hits plus answers) over the busy spans of the farm runs, each run's span counted once; per workload and in total. A fully cached run has a 0 s span: its completed jobs count in the numerator and add no seconds, so it raises the rate, and a workload that only ever ran cached has no rate. |
+| Farm cache hit rate | Cache hits over jobs, per workload and in total. |
+| AIU avoided (estimate) | Completed jobs times the workload's reference cost (see the cost model). It is an estimate and is never added to the measured AIU. |
 
 The report also gives AIU by initiator, model and category, the nominal units, and the sessions' measured AIU. Under `merges`
 it gives the tracked repositories, the merges listed, and the merges outside
-sessions.
+sessions. Under `farm` it gives the farm runs, jobs, completed jobs and cache
+hits, the four farm KPIs above, `byWorkload`, and `devices`; every other
+figure is unchanged by the farm.
 
 ## Tests
 
@@ -169,6 +187,10 @@ They write synthetic event logs and cover:
   - closed unmerged requests, unreadable answers, and a failing or missing
     tool;
 - idempotent re-ingest and re-listing, and completing an open tool call;
+- a synthetic farm export: idempotent ingest, a changed row, malformed
+  files (including a non-UTC `recorded_at`), the database's range checks, the
+  farm KPIs with exact values, and a fully cached run's effect on jobs per
+  second;
 - overlapping sessions;
 - every KPI, with exact values.
 

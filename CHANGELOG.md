@@ -99,6 +99,21 @@ release's notes for the exact pinned commit.
   This repository's wiki passes the observation check for 30 test pages
   (#366). Re-certification at v0.11.0 found no regression: the 5 required
   gates `PASS`.
+- `projectbuddy-kpi` ingests the local AI farm's telemetry (ALW#10).
+  - Migration `0004_farm_telemetry.sql` adds `kpi_v1.farm_jobs` and
+    `kpi_v1.farm_device_samples`, and the views `farm_device_utilization` and
+    `farm_workloads`. The jobs per second and the cache hit rate are computed
+    in `farm_report()`.
+  - `ingest-farm --export <file>` reads the counts-and-timings export that
+    assurance-learning-workbench's `export-farm-telemetry` writes. Rows are
+    keyed by the farm run record's sha256, so ingesting again changes
+    nothing, and an export that changes an ingested row is refused.
+  - The AIU avoided is an estimate from each workload's reference cost,
+    `farm_reference_aiu_per_job:<workload>` in `kpi_v1.settings`, set with
+    `farm-reference` from measured paid runs. It is reported apart from the
+    measured AIU.
+  - `report` adds these figures under `farm` and leaves every other figure
+    unchanged. A peer instance has jobs but no device utilization.
 
 ## v0.5.0
 

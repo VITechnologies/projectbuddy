@@ -215,6 +215,60 @@ internal sealed class Database(Options options)
         command.ExecuteNonQuery();
     }
 
+    // Stores a farm export in one transaction. A row already ingested is counted as present; a row whose key was ingested
+    // with other values refuses the whole export, since its key is the content hash of the farm run record.
+    public JsonObject StoreFarm(IReadOnlyList<FarmIngest.Job> jobs, IReadOnlyList<FarmIngest.Sample> samples)
+    {
+        using var connection = Open(options.Database);
+        using var transaction = connection.BeginTransaction();
+        (long Added, long Present) Run(string table, int rows, string sql, params object[] values)
+        {
+            using var command = new NpgsqlCommand(sql, connection, transaction);
+            foreach (var value in values)
+            {
+                command.Parameters.Add(new() { Value = value });
+            }
+
+            var added = 0L;
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    added += reader.GetBoolean(0) ? 1 : throw new KpiException(ExitCodes.Refused, $"the export changes a {table} row already ingested");
+                }
+            }
+
+            return (added, rows - added);
+        }
+
+        var job = Run("farm_jobs", jobs.Count, """
+            INSERT INTO kpi_v1.farm_jobs AS t
+            SELECT * FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::text[], $5::text[], $6::bigint[], $7::bigint[], $8::bigint[], $9::bigint[], $10::bigint[], $11::numeric[])
+            ON CONFLICT (source_sha256, workload, instance_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at
+            WHERE (t.recorded_at, t.backend, t.jobs, t.cache_hits, t.answered, t.failed, t.eval_tokens, t.window_seconds)
+                IS DISTINCT FROM (EXCLUDED.recorded_at, EXCLUDED.backend, EXCLUDED.jobs, EXCLUDED.cache_hits, EXCLUDED.answered, EXCLUDED.failed, EXCLUDED.eval_tokens, EXCLUDED.window_seconds)
+            RETURNING t.xmax = 0
+            """, jobs.Select(j => j.Source).ToArray(), jobs.Select(j => j.RecordedAt).ToArray(), jobs.Select(j => j.Workload).ToArray(),
+            jobs.Select(j => j.Instance).ToArray(), jobs.Select(j => j.Backend).ToArray(), jobs.Select(j => j.Jobs).ToArray(),
+            jobs.Select(j => j.CacheHits).ToArray(), jobs.Select(j => j.Answered).ToArray(), jobs.Select(j => j.Failed).ToArray(),
+            jobs.Select(j => j.EvalTokens).ToArray(), jobs.Select(j => j.Window).ToArray());
+        var sample = Run("farm_device_samples", samples.Count, """
+            INSERT INTO kpi_v1.farm_device_samples AS t
+            SELECT * FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::text[], $5::numeric[], $6::numeric[])
+            ON CONFLICT (source_sha256, instance_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at
+            WHERE (t.recorded_at, t.backend, t.window_seconds, t.busy_seconds)
+                IS DISTINCT FROM (EXCLUDED.recorded_at, EXCLUDED.backend, EXCLUDED.window_seconds, EXCLUDED.busy_seconds)
+            RETURNING t.xmax = 0
+            """, samples.Select(s => s.Source).ToArray(), samples.Select(s => s.RecordedAt).ToArray(), samples.Select(s => s.Instance).ToArray(),
+            samples.Select(s => s.Backend).ToArray(), samples.Select(s => s.Window).ToArray(), samples.Select(s => s.Busy).ToArray());
+        transaction.Commit();
+        return new JsonObject
+        {
+            ["jobs"] = new JsonObject { ["new"] = job.Added, ["present"] = job.Present },
+            ["deviceSamples"] = new JsonObject { ["new"] = sample.Added, ["present"] = sample.Present },
+        };
+    }
+
     public JsonObject Record(Options record)
     {
         var item = (object?)record.Get("--item") ?? DBNull.Value;
@@ -229,6 +283,10 @@ internal sealed class Database(Options options)
                 INSERT INTO kpi_v1.repositories (repository, forge) VALUES ($1, $2)
                 ON CONFLICT (repository) DO UPDATE SET forge = EXCLUDED.forge RETURNING 0::bigint AS id, clock_timestamp() AS at
                 """, [record.Get("--repository")!, record.Get("--forge")!]),
+            "farm-reference" => ("""
+                INSERT INTO kpi_v1.settings (key, value) VALUES ('farm_reference_aiu_per_job:' || $1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value RETURNING 0::bigint AS id, clock_timestamp() AS at
+                """, [record.Get("--workload")!, Program.Number(record, "--aiu-per-job")]),
             "requirements" => ("""
                 INSERT INTO kpi_v1.requirement_counts (item, requirements) VALUES ($1, $2)
                 ON CONFLICT (item) DO UPDATE SET requirements = EXCLUDED.requirements RETURNING 0::bigint AS id, clock_timestamp() AS at
