@@ -9,6 +9,10 @@ release's notes for the exact pinned commit.
 - Prepare the upstream `develop` merge queue (#421): link and coverage
   checks now run on merge-group commits. The reviewed ruleset targets
   only `develop`; `main` and the fork keep their existing policies.
+- Activate the upstream `develop` merge queue (#421). Ruleset 27898842
+  is the committed JSON, with no bypass actors. `develop` now requires
+  0 approving reviews and the same two checks. This entry is the first
+  change merged through the queue.
 
 ## v0.6.0
 
