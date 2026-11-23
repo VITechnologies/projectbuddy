@@ -1,7 +1,7 @@
 # Configuration Management Plan
 
 - Status: Active
-- Last substantive update: 2026-11-07
+- Last substantive update: 2026-11-23
 - Owner: svelderrainruiz
 
 Satisfies `repo-standards-review`'s CM gate (`VITechnologies/projectbuddy#6`):
@@ -40,8 +40,8 @@ the GitFlow branch governance already adopted in `ADR-0001`.
 
 | Change Type | Approval | Timing |
 | --- | --- | --- |
-| Standard (new feature/fix) | Operator review of the PR before merge to `develop` -- on the solo-maintainer fork this is 0 required approvals (no second reviewer exists to approve); on upstream, branch protection requires 1 approval and passing CI, enforced via `gh pr merge --admin` for the routine, already-fully-vetted fork-sync and release/hotfix promotion PRs specifically (see `CONTRIBUTING.md`'s "Branch protection and the `--admin` merge pattern"), never as a general bypass | Any time, via `feature/*` branches (in practice, often a more specific topic-branch name serving the same role, e.g. `round6-semantic-audit-fixes`) |
-| Urgent (hotfix) | Same approval mechanism as Standard, applied to `hotfix/vX.Y.Z` -> `main` | As needed, via `hotfix/vX.Y.Z` branches cut from `main` |
+| Standard (new feature/fix) | The fork requires 0 approvals. On upstream `develop`, record an independent review of the exact PR head with no High or Medium findings, then use the [develop merge queue](../../CONTRIBUTING.md#branch-protection-and-the-develop-merge-queue). Both required checks must pass on the merge group. | Any time, via `feature/*` branches (in practice, often a more specific topic-branch name serving the same role, e.g. `round6-semantic-audit-fixes`) |
+| Urgent (hotfix) | The promotion to `main` retains its existing approval policy; its merge-back to `develop` follows the same review and queue as Standard. | As needed, via `hotfix/vX.Y.Z` branches cut from `main` |
 | Concession (known, accepted gap) | Operator decision, recorded as a comment or ADR | Documented at the time the gap is identified, not silently carried forward |
 
 ## Status Accounting

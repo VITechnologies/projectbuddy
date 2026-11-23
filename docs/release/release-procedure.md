@@ -1,7 +1,7 @@
 # Release Procedure
 
 - Status: Active
-- Last substantive update: 2026-11-07
+- Last substantive update: 2026-11-23
 - Owner: svelderrainruiz
 
 GitHub-adapted equivalent of `svelderrainruiz/repo-standards-review`'s own
@@ -34,6 +34,12 @@ is covered by (not independently re-stamped).
   from the fork target this repo's `develop` branch (not `main`).
 - `main` remains the single source of truth for what is actually released
   and tagged; `develop` is never released from directly.
+- For every upstream PR targeting `develop`, follow the
+  [develop merge queue procedure](../../CONTRIBUTING.md#branch-protection-and-the-develop-merge-queue):
+  record an independent review of the exact head with no High or Medium
+  findings, wait for the required PR checks, then queue it with
+  `gh pr merge <n> --merge`. Never use `--admin` for a sync or merge-back
+  to `develop`. Queuing is not merging: wait for the queue to merge it.
 
 ## Feature Flow
 
@@ -65,11 +71,11 @@ is covered by (not independently re-stamped).
    branch -- this is also why `develop` and `main` are usually already
    content-identical by step 4 below, not a coincidence.
 3. Open and merge a pull request `release/vX.Y.Z` -> `main`.
-4. Open and merge a pull request `release/vX.Y.Z` -> `develop` (the
+4. Open and queue a pull request `release/vX.Y.Z` -> `develop` (the
    merge-back), only after step 3's promotion to `main` is already merged
    -- **unless `develop` and `main` are already content-identical at this
-   point** (verify with `diff <(git show main:CHANGELOG.md) <(git show
-   develop:CHANGELOG.md)` or a full tree diff), in which case this step
+   point** (fetch upstream and verify with a full tree diff between its
+   `main` and `develop`), in which case this step
    is a legitimate no-op: skip opening the merge-back PR rather than
    opening one GitHub would report has no commits to merge.
 5. Delete `release/vX.Y.Z` once both merges are complete (or once step 3
@@ -102,7 +108,7 @@ flow.
 1. Create `hotfix/vX.Y.Z` from `main`.
 2. Land the hotfix on the hotfix branch only.
 3. Open and merge a pull request `hotfix/vX.Y.Z` -> `main`.
-4. Open and merge a pull request `hotfix/vX.Y.Z` -> `develop` (the
+4. Open and queue a pull request `hotfix/vX.Y.Z` -> `develop` (the
    merge-back), only after step 3 is already merged.
 5. If an active `release/*` branch exists, also open and merge the same
    hotfix into that release branch after step 3 is merged.
