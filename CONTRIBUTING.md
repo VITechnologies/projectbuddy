@@ -55,7 +55,10 @@ required before queueing:
    findings; if the head changes, review and record the new head.
 2. Wait for `Docs Link Check / lychee` and `PR Coverage Gate / coverage`
    to pass on the PR. Use `gh pr merge <n> --merge` to add it to the
-   queue. **Never use `--admin` on `develop`**: it would bypass the queue.
+   queue. **Never use `--admin` on `develop`.** The ruleset has no bypass
+   actors, so an administrator's role does not skip the queue and
+   `--admin` cannot override it. Never disable or edit the ruleset, or
+   grant a bypass, to merge around the queue.
 3. Both checks run again on the queue's merge-group commit. The queue
    merges only after both pass on that commit.
 
