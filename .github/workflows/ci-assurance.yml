@@ -2,6 +2,7 @@ name: ci-assurance
 
 on:
   pull_request:
+  merge_group:
   push:
     branches:
       - main
@@ -451,9 +452,9 @@ jobs:
     # Calls this repo's own reusable toolchain-smoke-test.yml against
     # itself (REQ-008): proves scripts/Test-ToolchainPresence.ps1's real
     # CI-dispatch path actually runs in this repo's own CI, not just in a
-    # hypothetical consumer's. `projectbuddy-ref: ${{ github.sha }}`
-    # resolves to the PR head (or pushed commit) in the repository under test,
-    # so the reusable workflow can check out fork-only commits too.
+    # hypothetical consumer's. A PR head may exist only in its fork. On
+    # merge_group and push there is no PR: use the event SHA in this repo
+    # (the queue's combined commit or the pushed commit, respectively).
     name: Toolchain Smoke Test (self-check)
     uses: ./.github/workflows/toolchain-smoke-test.yml
     with:

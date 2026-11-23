@@ -1,0 +1,26 @@
+{
+  "name": "develop merge queue",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/develop"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "merge_method": "MERGE",
+        "grouping_strategy": "ALLGREEN",
+        "max_entries_to_build": 5,
+        "max_entries_to_merge": 5,
+        "min_entries_to_merge": 1,
+        "min_entries_to_merge_wait_minutes": 0,
+        "check_response_timeout_minutes": 60
+      }
+    }
+  ]
+}

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Versions are
 published as immutable GitHub releases (tag + commit SHA); see each
 release's notes for the exact pinned commit.
 
+## Unreleased
+
+- Prepare the upstream `develop` merge queue (#421): link and coverage
+  checks now run on merge-group commits. The reviewed ruleset targets
+  only `develop`; `main` and the fork keep their existing policies.
+
 ## v0.6.0
 
 Everything on `develop` since v0.5.0. The ecosystem is pinned to RSR `v0.12.0`, whose wiki standard is
